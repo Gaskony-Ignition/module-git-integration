@@ -107,6 +107,17 @@ export default function Runner() {
             />
           ) : null}
 
+          {!data.hasSync ? (
+            <div className="gitcfg-token-once">
+              <strong>No Scheduled sync set up</strong>
+              <p className="gitcfg-auto-hint">
+                This project has no Scheduled sync set up. The runner uses its
+                branch and credential — set one up on the Scheduled sync tab
+                first (the timer can stay off).
+              </p>
+            </div>
+          ) : null}
+
           <h4 className="gitcfg-step">1 · Let the runner call this gateway</h4>
           <label className="gitcfg-check">
             <input
@@ -180,7 +191,14 @@ export default function Runner() {
             )}{" "}
             and expires in an hour.
           </p>
-          <Snippet label="On the runner machine" text={data.installScript} />
+          <Snippet
+            label="On a Linux runner machine"
+            text={data.installScript}
+          />
+          <Snippet
+            label="On a Windows runner machine (elevated PowerShell)"
+            text={data.installScriptWindows}
+          />
 
           <h4 className="gitcfg-step">4 · Add the workflow</h4>
           <p className="gitcfg-auto-hint">
@@ -188,8 +206,14 @@ export default function Runner() {
             commit the workflow itself. It refuses to overwrite a different
             workflow that is already there.
           </p>
+          {!data.hasSync ? (
+            <p className="gitcfg-auto-hint">
+              Committing the workflow is disabled until this project has a
+              Scheduled sync record — see the warning above.
+            </p>
+          ) : null}
           <Button
-            disabled={committing || !gatewayUrl}
+            disabled={committing || !gatewayUrl || !data.hasSync}
             onClick={async () => {
               try {
                 const r = await commitWorkflow({
@@ -224,7 +248,11 @@ export default function Runner() {
             From the runner machine, with the token in place of the placeholder.
             A success means the workflow will work.
           </p>
-          <Snippet label="Test from the runner" text={data.testCommand} />
+          <Snippet label="Test from a Linux runner" text={data.testCommand} />
+          <Snippet
+            label="Test from a Windows runner (PowerShell)"
+            text={data.testCommandWindows}
+          />
         </>
       )}
     </>

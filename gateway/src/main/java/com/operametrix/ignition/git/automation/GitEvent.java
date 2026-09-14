@@ -1,14 +1,10 @@
 package com.operametrix.ignition.git.automation;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * One git operation, as delivered to script handlers and outbound triggers.
+ * One git operation, as recorded in the Event log.
  *
  * <p>Built through {@link #of(String)} rather than the canonical constructor: eleven positional
  * arguments at a dozen call sites is unreadable, and most operations set four or five of them.
@@ -20,16 +16,8 @@ public record GitEvent(String type, String outcome, String scope, String project
     public static final String COMMIT = "commit";
     public static final String PUSH = "push";
     public static final String PULL = "pull";
-    public static final String FETCH = "fetch";
-    public static final String CHECKOUT = "checkout";
-    public static final String BRANCH = "branch";
-    public static final String REVERT = "revert";
     public static final String AUTOCOMMIT = "autocommit";
     public static final String SYNC = "sync";
-
-    /** Every type, in the order the Automation tab lists them. */
-    public static final List<String> TYPES =
-            List.of(COMMIT, PUSH, PULL, FETCH, CHECKOUT, BRANCH, REVERT, AUTOCOMMIT, SYNC);
 
     public static final String SUCCESS = "success";
     public static final String FAILURE = "failure";
@@ -47,31 +35,6 @@ public record GitEvent(String type, String outcome, String scope, String project
 
     public boolean failed() {
         return FAILURE.equals(outcome);
-    }
-
-    /**
-     * Flat map for the Jython payload, the JSON the Automation tab reads, and the {@code ${…}}
-     * substitutions in an outbound trigger body. Null strings become "" so a handler can index
-     * every key without a KeyError and a template never renders the word "null".
-     */
-    public Map<String, Object> toMap() {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("type", nz(type));
-        m.put("outcome", nz(outcome));
-        m.put("scope", nz(scope));
-        m.put("project", nz(project));
-        m.put("user", nz(user));
-        m.put("branch", nz(branch));
-        m.put("remote", nz(remote));
-        m.put("commit", nz(commit));
-        m.put("message", nz(message));
-        m.put("files", Collections.unmodifiableList(new ArrayList<>(files)));
-        m.put("timestamp", nz(timestamp));
-        return m;
-    }
-
-    private static String nz(String s) {
-        return s == null ? "" : s;
     }
 
     public static final class Builder {

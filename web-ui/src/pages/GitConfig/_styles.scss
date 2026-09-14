@@ -460,8 +460,8 @@
 }
 
 // ── Automation ──────────────────────────────────────────────────────────────
-// Sub-tabs rather than a fourth top-level tab: event delivery, outbound triggers
-// and scheduled sync are one subject, and the event log below serves all three.
+// Sub-tabs, not a fourth top-level tab: Scheduled sync and the Actions runner are
+// one subject (both pull changes in), and the event log below serves both.
 
 .gitcfg-subtabs {
   display: flex;
@@ -509,25 +509,6 @@
   }
 }
 
-.gitcfg-auto-types {
-  margin: 0.5rem 0;
-}
-
-.gitcfg-auto-typelist {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1rem;
-  margin-top: 0.35rem;
-}
-
-.gitcfg-auto-label {
-  display: block;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #667085;
-}
-
 .gitcfg-auto-hint {
   font-size: 11px;
   color: #667085;
@@ -548,20 +529,6 @@
     flex: 1 1 16rem;
     min-width: 0;
   }
-}
-
-.gitcfg-auto-presets {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.5rem;
-}
-
-.gitcfg-auto-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 0.75rem;
 }
 
 .gitcfg-auto-log {

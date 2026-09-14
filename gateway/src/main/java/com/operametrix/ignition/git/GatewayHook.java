@@ -5,17 +5,16 @@ import com.operametrix.ignition.git.automation.RunnerSetup;
 import com.operametrix.ignition.git.automation.RunnerTrigger;
 import com.operametrix.ignition.git.automation.GitEvents;
 import com.operametrix.ignition.git.automation.SyncScheduler;
-import com.operametrix.ignition.git.records.GitAutomationRecord;
 import com.operametrix.ignition.git.records.GitConfigRemoteRecord;
 import com.operametrix.ignition.git.records.GitProjectsConfigRecord;
 import com.operametrix.ignition.git.records.GitRunnerRecord;
 import com.operametrix.ignition.git.records.GitSyncRecord;
-import com.operametrix.ignition.git.records.GitTriggerRecord;
 import com.operametrix.ignition.git.records.GitRemoteCredentialsRecord;
 import com.operametrix.ignition.git.records.GitReposUsersRecord;
 import com.operametrix.ignition.git.records.GitUserHttpsCredentialRecord;
 import com.operametrix.ignition.git.records.GitUserSshKeyRecord;
 import com.operametrix.ignition.git.records.legacy.GitLegacyImporter;
+import com.operametrix.ignition.git.records.legacy.RetiredResourceCleanup;
 import com.operametrix.ignition.git.managers.ConfigAutoCommitter;
 import com.operametrix.ignition.git.managers.DataDirGitManager;
 import com.inductiveautomation.ignition.common.gson.Gson;
@@ -68,8 +67,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     private GitUserHttpsCredentialRecord.Handler httpsCredHandler;
     private GitRemoteCredentialsRecord.Handler remoteCredHandler;
     private GitConfigRemoteRecord.Handler configRemoteHandler;
-    private GitAutomationRecord.Handler automationHandler;
-    private GitTriggerRecord.Handler triggerHandler;
     private GitSyncRecord.Handler syncHandler;
     private GitRunnerRecord.Handler runnerHandler;
     private ConfigAutoCommitter autoCommitter;
@@ -91,10 +88,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         registry.register(GitUserHttpsCredentialRecord.META);
         registry.register(GitRemoteCredentialsRecord.META);
         registry.register(GitConfigRemoteRecord.META);
-        registry.register(GitAutomationRecord.META);
-        registry.register(GitTriggerRecord.META);
         registry.register(GitSyncRecord.META);
         registry.register(GitRunnerRecord.META);
+        // Metas for types this module no longer registers a live handler for, so the retired
+        // resources under them can be found and deleted once in startup() — see the class javadoc.
+        RetiredResourceCleanup.registerMetas(registry);
 
         // Create the resource handlers (DAOs) and publish them to the record façades.
         projectHandler = new GitProjectsConfigRecord.Handler(context);
@@ -103,8 +101,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         httpsCredHandler = new GitUserHttpsCredentialRecord.Handler(context);
         remoteCredHandler = new GitRemoteCredentialsRecord.Handler(context);
         configRemoteHandler = new GitConfigRemoteRecord.Handler(context);
-        automationHandler = new GitAutomationRecord.Handler(context);
-        triggerHandler = new GitTriggerRecord.Handler(context);
         syncHandler = new GitSyncRecord.Handler(context);
         runnerHandler = new GitRunnerRecord.Handler(context);
 
@@ -114,8 +110,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         GitUserHttpsCredentialRecord.setHandler(httpsCredHandler);
         GitRemoteCredentialsRecord.setHandler(remoteCredHandler);
         GitConfigRemoteRecord.setHandler(configRemoteHandler);
-        GitAutomationRecord.setHandler(automationHandler);
-        GitTriggerRecord.setHandler(triggerHandler);
         GitSyncRecord.setHandler(syncHandler);
         GitRunnerRecord.setHandler(runnerHandler);
 
@@ -147,14 +141,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         httpsCredHandler.startup();
         remoteCredHandler.startup();
         configRemoteHandler.startup();
-        automationHandler.startup();
-        triggerHandler.startup();
         syncHandler.startup();
         runnerHandler.startup();
 
-        // Event delivery and scheduled sync. Both are inert until configured, so starting them
-        // unconditionally costs one idle thread each and keeps the wiring in one place.
-        GitEvents.start();
+        // Scheduled sync. Inert until a project has a sync record configured, so starting it
+        // unconditionally costs one idle thread and keeps the wiring in one place.
         SyncScheduler.start();
 
         // One-time migration of any legacy SimpleORM rows from a pre-8.3 install.
@@ -163,6 +154,12 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         } catch (Exception e) {
             logger.error("Legacy git config migration failed; existing credentials may need to be re-entered.", e);
         }
+
+        // One-time removal of resources left behind by features retired in earlier versions
+        // (Event delivery/Outbound triggers in 3.0.0, the webhook receiver in 2.14.0). Runs after
+        // the live handlers have started and before ConfigAutoCommitter attaches, so the deletion
+        // lands inside the same startup window commitLeftovers() sweeps into one config commit.
+        RetiredResourceCleanup.deleteRetired(context);
 
         // Auto-commit gateway config changes (no-op until the data-dir repo is initialized).
         // Manager-level listener — see ConfigAutoCommitter's javadoc for why not getConfigCollection().
@@ -177,11 +174,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     @Override
     public void shutdown() {
         SyncScheduler.shutdown();
-        GitEvents.shutdown();
         if (runnerHandler != null) runnerHandler.shutdown();
         if (syncHandler != null) syncHandler.shutdown();
-        if (triggerHandler != null) triggerHandler.shutdown();
-        if (automationHandler != null) automationHandler.shutdown();
         if (autoCommitter != null) {
             context.getConfigurationManager().removeListener(autoCommitter);
             autoCommitter.shutdown();
@@ -308,34 +302,18 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 .handler(this::handleSnapshotImages).mount();
 
 
-        // Automation: settings, the outbound trigger rules, per-project sync, and the event log.
         routes.newRoute("/project-credential").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleProjectCredential).mount();
 
+        // Automation: scheduled sync, the runner, and the event log that reports them.
         routes.newRoute("/automation").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.READ).nocache()
                 .handler(this::handleGetAutomation).mount();
 
-        routes.newRoute("/automation").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
-                .requirePermission(PermissionType.WRITE)
-                .handler(this::handleSaveAutomation).mount();
-
-        routes.newRoute("/automation-test").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
-                .requirePermission(PermissionType.WRITE)
-                .handler(this::handleTestAutomation).mount();
-
         routes.newRoute("/automation-clear").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleClearAutomationLog).mount();
-
-        routes.newRoute("/trigger").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
-                .requirePermission(PermissionType.WRITE)
-                .handler(this::handleSaveTrigger).mount();
-
-        routes.newRoute("/trigger-remove").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
-                .requirePermission(PermissionType.WRITE)
-                .handler(this::handleRemoveTrigger).mount();
 
         routes.newRoute("/sync").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
@@ -1210,42 +1188,15 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
     // ── Automation ─────────────────────────────────────────────────────────────────────────────
 
-    /** Everything the Automation tab renders, in one call: settings, rules, sync, and the log. */
+    /**
+     * Everything the Automation page renders below the Scheduled sync / Actions runner forms:
+     * the sync records themselves, and the Event log with its stats. Both directions this page
+     * covers are inbound (a scheduled fetch, or a runner-triggered pull) — there is no more
+     * settings/trigger-rule config to return here since Event delivery and Outbound triggers
+     * were removed in 3.0.0.
+     */
     private Object handleGetAutomation(RequestContext req, HttpServletResponse resp) {
         try {
-            GitAutomationRecord cfg = GitAutomationRecord.get();
-            JsonObject settings = new JsonObject();
-            settings.addProperty("enabled", cfg.isEnabled());
-            settings.addProperty("handlerProject", cfg.getHandlerProject());
-            settings.addProperty("handlerScript", cfg.getHandlerScript());
-            settings.addProperty("messageProject", cfg.getMessageProject());
-            settings.addProperty("messageHandler", cfg.getMessageHandler());
-            JsonArray types = new JsonArray();
-            cfg.selectedTypes().forEach(types::add);
-            settings.add("eventTypes", types);
-
-            JsonArray allTypes = new JsonArray();
-            GitEvent.TYPES.forEach(allTypes::add);
-
-            JsonArray triggers = new JsonArray();
-            for (GitTriggerRecord t : GitTriggerRecord.listAll()) {
-                JsonObject to = new JsonObject();
-                to.addProperty("id", t.getId());
-                to.addProperty("name", t.getName());
-                to.addProperty("enabled", t.isEnabled());
-                to.addProperty("eventTypes", t.getEventTypes());
-                to.addProperty("outcomes", t.getOutcomes());
-                to.addProperty("projectFilter", t.getProjectFilter());
-                to.addProperty("branchFilter", t.getBranchFilter());
-                to.addProperty("url", t.getUrl());
-                to.addProperty("method", t.getMethod());
-                to.addProperty("headers", t.getHeaders());
-                to.addProperty("bodyTemplate", t.getBodyTemplate());
-                to.addProperty("credentialId", t.getCredentialId());
-                to.addProperty("credentialHeader", t.getCredentialHeader());
-                triggers.add(to);
-            }
-
             JsonArray syncs = new JsonArray();
             for (GitSyncRecord s : GitSyncRecord.listAll()) {
                 JsonObject so = new JsonObject();
@@ -1259,8 +1210,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
 
             JsonArray log = new JsonArray();
-            for (GitEvents.LogEntry entry : GitEvents.recent()) {
-                GitEvent e = entry.event();
+            for (GitEvent e : GitEvents.recent()) {
                 JsonObject eo = new JsonObject();
                 eo.addProperty("type", e.type());
                 eo.addProperty("outcome", e.outcome());
@@ -1268,26 +1218,20 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 eo.addProperty("project", e.project());
                 eo.addProperty("user", e.user());
                 eo.addProperty("branch", e.branch());
+                eo.addProperty("remote", e.remote());
                 eo.addProperty("commit", e.commit());
                 eo.addProperty("message", e.message());
                 eo.addProperty("fileCount", e.files().size());
                 eo.addProperty("timestamp", e.timestamp());
-                eo.addProperty("delivery", entry.delivery());
                 log.add(eo);
             }
 
             GitEvents.Stats stats = GitEvents.stats();
             JsonObject so = new JsonObject();
             so.addProperty("fired", stats.fired());
-            so.addProperty("dropped", stats.dropped());
             so.addProperty("failures", stats.failures());
-            so.addProperty("queued", stats.queued());
-            so.addProperty("running", stats.running());
 
             JsonObject o = new JsonObject();
-            o.add("settings", settings);
-            o.add("allTypes", allTypes);
-            o.add("triggers", triggers);
             o.add("syncs", syncs);
             o.add("log", log);
             o.add("stats", so);
@@ -1297,102 +1241,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         }
     }
 
-    private Object handleSaveAutomation(RequestContext req, HttpServletResponse resp) {
-        try {
-            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
-            GitAutomationRecord cfg = GitAutomationRecord.get();
-            cfg.setEnabled(optBool(body, "enabled"));
-            cfg.setHandlerProject(optString(body, "handlerProject"));
-            cfg.setHandlerScript(optString(body, "handlerScript"));
-            cfg.setMessageProject(optString(body, "messageProject"));
-            cfg.setMessageHandler(optString(body, "messageHandler"));
-            cfg.setSelectedTypes(stringList(body, "eventTypes"));
-            cfg.save();
-            JsonObject o = new JsonObject();
-            o.addProperty("ok", true);
-            return o.toString();
-        } catch (Exception e) {
-            return error(resp, e);
-        }
-    }
-
-    /**
-     * Fires a synthetic event through the real delivery path. The only way to tell a working
-     * handler from a typo'd script path is to run it, and doing that from the page beats asking
-     * someone to make a commit to find out.
-     */
-    private Object handleTestAutomation(RequestContext req, HttpServletResponse resp) {
-        try {
-            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
-            String project = optString(body, "project");
-            GitEvents.fire(GitEvent.of(GitEvent.COMMIT)
-                    .project(project == null || project.isBlank() ? "(test)" : project)
-                    .user(req.getActor())
-                    .branch("main")
-                    .commit("0000000000000000000000000000000000000000")
-                    .message("Test event from the Versioning page")
-                    .files(List.of("test/event.json"))
-                    .success());
-            JsonObject o = new JsonObject();
-            o.addProperty("ok", true);
-            return o.toString();
-        } catch (Exception e) {
-            return error(resp, e);
-        }
-    }
-
     private Object handleClearAutomationLog(RequestContext req, HttpServletResponse resp) {
         try {
             GitEvents.clearLog();
-            JsonObject o = new JsonObject();
-            o.addProperty("ok", true);
-            return o.toString();
-        } catch (Exception e) {
-            return error(resp, e);
-        }
-    }
-
-    private Object handleSaveTrigger(RequestContext req, HttpServletResponse resp) {
-        try {
-            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
-            String url = optString(body, "url");
-            if (url == null || url.isBlank()) {
-                throw new RuntimeException("A URL is required.");
-            }
-            long id = optLong(body, "id");
-            GitTriggerRecord rule = id > 0 ? GitTriggerRecord.findById(id) : new GitTriggerRecord();
-            if (rule == null) {
-                throw new RuntimeException("That trigger no longer exists.");
-            }
-            rule.setName(optString(body, "name"));
-            rule.setEnabled(optBool(body, "enabled"));
-            rule.setEventTypes(String.join(",", stringList(body, "eventTypes")));
-            rule.setOutcomes(String.join(",", stringList(body, "outcomes")));
-            rule.setProjectFilter(optString(body, "projectFilter"));
-            rule.setBranchFilter(optString(body, "branchFilter"));
-            rule.setUrl(url.trim());
-            rule.setMethod(optString(body, "method"));
-            rule.setHeaders(optString(body, "headers"));
-            rule.setBodyTemplate(optString(body, "bodyTemplate"));
-            rule.setCredentialId(optLong(body, "credentialId"));
-            rule.setCredentialHeader(optString(body, "credentialHeader"));
-            rule.save();
-            JsonObject o = new JsonObject();
-            o.addProperty("ok", true);
-            o.addProperty("id", rule.getId());
-            return o.toString();
-        } catch (Exception e) {
-            return error(resp, e);
-        }
-    }
-
-    private Object handleRemoveTrigger(RequestContext req, HttpServletResponse resp) {
-        try {
-            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
-            GitTriggerRecord rule = GitTriggerRecord.findById(optLong(body, "id"));
-            if (rule != null) {
-                rule.delete();
-            }
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             return o.toString();
@@ -1463,11 +1314,18 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
             o.add("projects", projects);
             o.addProperty("project", project == null ? "" : project);
+            // The runner uses the project's Scheduled sync branch/credential to pull — without a
+            // sync record set up first, a runner-triggered pull 404s with nothing to authenticate
+            // as. The Runner tab warns on this rather than letting Generate token look complete.
+            o.addProperty("hasSync", project != null && !project.isBlank()
+                    && GitSyncRecord.findByProject(project) != null);
             o.addProperty("repoUrl", RunnerSetup.repoUrl(remoteUrl));
             o.addProperty("installScript", RunnerSetup.installScript(remoteUrl, cfg));
+            o.addProperty("installScriptWindows", RunnerSetup.installScriptWindows(remoteUrl, cfg));
             o.addProperty("branch", branch == null ? "" : branch);
             o.addProperty("workflowYaml", RunnerSetup.workflowYaml(project, branch, cfg));
             o.addProperty("testCommand", RunnerSetup.testCommand(project, cfg));
+            o.addProperty("testCommandWindows", RunnerSetup.testCommandWindows(project, cfg));
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);

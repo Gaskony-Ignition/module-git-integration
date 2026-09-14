@@ -3,6 +3,57 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.0.0] - 2026-09-14
+
+Event delivery and Outbound triggers are removed. Scheduled sync and the Actions runner stay, and
+the Automation page now says which direction everything on it goes. Removing features is a
+breaking change, hence 3.0.0.
+
+### Removed
+- **Event delivery** — raising a git operation into a project-library function or a Gateway Event
+  message handler. Commits and pushes are made in the Designer, which already reports their
+  outcome, so this was a second channel for the same information.
+- **Outbound triggers** — HTTP rules, with GitHub `repository_dispatch` / `workflow_dispatch`
+  presets, fired on a matching git event. A GitHub remote already starts workflows on push, and
+  release delivery belongs to a deployment pipeline rather than to the gateway that was edited.
+- Routes `POST /automation`, `/automation-test`, `/trigger`, `/trigger-remove`.
+- `GET /automation` no longer returns `settings`, `allTypes`, `triggers`, `delivery` (per log
+  entry), or `dropped`/`queued`/`running` (in `stats`).
+- The four event types that were advertised but never raised: `fetch`, `checkout`, `branch`,
+  `revert`. Only `commit`, `push`, `pull`, `autocommit` and `sync` were ever fired — a runner pull
+  logs as `sync`.
+
+### Changed
+- The Automation page states plainly which direction everything goes: **"Automation: pulling
+  changes in"**. Everything left on it (Scheduled sync, Actions runner) brings a project's remote
+  down onto this gateway; pushing happens in the Designer, and gateway config is pushed from the
+  Remote Sync button above.
+- Event log's **Delivery** column is replaced by **Details**, which now also carries the remote
+  name — the diagnostic for delivery paths that no longer exist is gone, and the diagnostic for an
+  unattended sync's outcome is more specific. **Clear** now also resets the event and failure
+  counts shown beside it, which previously kept a lifetime total above an emptied table.
+- The Actions runner tab warns when the selected project has no Scheduled sync record — the
+  runner route 404s without one, since a runner pull borrows that record's branch and credential —
+  and disables *Commit the workflow to the repository* until one exists.
+- The runner tab gives Linux and Windows (PowerShell) versions of both the install block and the
+  reachability check. On Windows PowerShell 5.1 `curl` is an alias for `Invoke-WebRequest`, so the
+  old check failed there for reasons unrelated to the gateway. The runner version is now 2.337.0.
+- The generated workflow runs on Linux and Windows self-hosted runners: two steps gated on
+  `runner.os`, a bash/curl one and a pwsh/`Invoke-RestMethod` one. The previous single bash step
+  failed on a Windows runner, whose default shell is pwsh.
+
+### Upgrade
+- On first start, the gateway deletes the retired `git-automation` and `git-trigger` resources,
+  plus the `git-webhook` resource left over from the 2.14.0 removal, and the deletion lands as one
+  config-repository commit. A resource it cannot delete is logged at WARN and retried on the next
+  start. The config repository's history is **not** rewritten, so **rotate any
+  token that was ever typed into a trigger's headers** — it remains readable in that repository's
+  history.
+
+### Breaking
+- Any saved trigger or event-delivery handler stops working. There is no migration: both features
+  are gone, not disabled.
+
 ## [2.18.0] - 2026-09-10
 
 Both of these were found by running the loop for real — a GitHub repository, a registered

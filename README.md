@@ -19,10 +19,9 @@ gateway itself which projects are in git at all. The second one was not cosmetic
 — before it, a config repo on a working gateway grew to 827 MB of SQLite
 databases and log files while showing an empty change list.
 
-It also stops git being a thing you only do by hand. Commits, pushes and pulls
-raise events an Ignition script can act on, a push can call GitHub Actions, and
-a branch can come back down on a schedule — none of which needed a person in a
-Designer.
+It also stops git being a thing you only do by hand. A branch can come back
+down onto the gateway on a schedule, or the moment it moves on GitHub, without
+anyone opening a Designer.
 
 ## What it looks like
 
@@ -47,12 +46,12 @@ indistinguishable — and any of them can be initialised or given a remote here.
 
 ![The Projects tab listing every project and its git state](docs/images/versioning-projects.png)
 
-Git activity can drive Ignition. Every commit, push, pull and config auto-commit
-raises an event, successes and failures alike, delivered to a project library
-function or a Gateway Event message handler. The same events can call out to
-GitHub Actions or any other endpoint. The event log below shows what the gateway
-did with each one, which is where a handler that silently does nothing becomes
-visible.
+Automation pulls changes into this gateway — it never pushes. Scheduled sync
+fetches each project's remote on a timer and fast-forwards it when the tracked
+branch moves; the Actions runner does the same the moment a branch moves on
+GitHub, with nothing reaching in. Either way the event log below records
+every commit, push, pull, config auto-commit and sync, successes and failures
+alike — including an unattended sync that refused or failed, and why.
 
 ![The Automation tab, with its event log](docs/images/versioning-automation.png)
 
@@ -79,19 +78,19 @@ directly: ticking a tracked path also untracks it, and rules you wrote by hand
 are never rewritten. Project repositories, the credentials they authenticate
 with, and the automation below are all managed from the same page.
 
-**Automation** — git activity raises an event carrying the type, outcome,
-project, user, branch, commit, message and file list. Deliver it to a project
-library function, a Gateway Event message handler, or both. A matching event can
-also call a URL, with GitHub's `repository_dispatch` and `workflow_dispatch` as
-presets and `${owner}`/`${repo}` derived from the repository's own remote, so one
-rule serves every project. Inbound sync fetches on a timer and fast-forwards
-when the tracked branch moves, then requests a project scan — polling rather
-than a webhook, because GitHub cannot reach most gateways. A sync refuses when
-the working tree is dirty rather than discarding someone's unsaved work. For
+**Automation** — pulls changes into this gateway; it never pushes. **Scheduled
+sync** fetches each project's remote on a timer and fast-forwards it when the
+tracked branch moves, then requests a project scan — polling rather than a
+webhook, because GitHub cannot reach most gateways. A sync refuses when the
+working tree is dirty rather than discarding someone's unsaved work. For
 push-time sync instead of polling, the **Actions runner** tab generates the
 setup for a GitHub Actions self-hosted runner and opens one token-authenticated
 route for it to call; the module generates the configuration but never installs
-or runs the runner itself.
+or runs the runner itself. It warns when the selected project has no Scheduled
+sync record — a runner pull needs that record's branch and credential — and the
+install step covers both a Linux and a Windows runner machine. Either tab's
+activity, plus every commit, push and pull from the Designer and every config
+auto-commit, lands in the **Event log** below both.
 
 Changes over upstream 2.1.0:
 
@@ -99,8 +98,8 @@ Changes over upstream 2.1.0:
 - Change badges in the Designer's Project Browser.
 - Projects and Credentials tabs: see and set up project repositories, and create
   the credentials they need, without opening a Designer first.
-- Automation: git events into Jython, outbound triggers for CI, scheduled sync,
-  and generated setup for a GitHub Actions self-hosted runner.
+- Automation: scheduled sync and a GitHub Actions runner that pull changes in,
+  with an event log.
 - A project versions one named image folder rather than exporting the whole
   gateway image store into every repository.
 - Commits stage exactly what the change list shows. They previously staged the
@@ -125,11 +124,9 @@ tab beside the Project Browser.
 Gateway config versioning: **Platform → System → Versioning → Initialize
 versioning**. Adjust what is covered under **Excluded files**.
 
-Automation: **Platform → System → Versioning → Automation**. Tick *Deliver git
-events to a script*, pick a project and a function path such as
-`Git.Events.onGitEvent`, and press **Fire a test event** — the event log below
-says whether it arrived. Outbound triggers and scheduled sync are on the same
-tab.
+Automation: **Platform → System → Versioning → Automation**. On **Scheduled
+sync**, press *Set up* for a project, choose a branch and interval, then
+*Sync now* — the result appears in the Event log below.
 
 Push-time sync: **Automation → Actions runner**. Tick *Accept sync requests from
 a runner*, enter the address the runner will reach this gateway on, and generate

@@ -1,13 +1,18 @@
 # Automation — design note
 
-Status: **proposal, awaiting sign-off.** Nothing here is built.
+Status, 3.0.0 (14/09/2026): **built and current** — 3a Scheduled sync, 3c the Actions
+runner, and the Event log that serves both. **Removed**: 3b the webhook receiver
+(2.14.0) and features 1–2, Git events and Outbound triggers (3.0.0). What follows
+was the original design note for all three features; sections 1 and 2 are kept as a
+historical record — see "1 and 2: built in 2.12–2.13, removed in 3.0.0" below — and
+3a/3b/3c describe what is actually running today.
 
-Three features, in the order they should be built. Each is independently useful;
-each later one assumes the earlier ones exist.
+Three features, in the order they were built. Each was independently useful;
+each later one assumed the earlier ones existed.
 
-1. **Git events** — a git operation raises an event the gateway can act on.
-2. **Outbound triggers** — a successful push calls out to GitHub Actions, or anything else.
-3. **Inbound sync** — a merge on the remote lands on the gateway.
+1. **Git events** — a git operation raises an event the gateway can act on. *Removed 3.0.0.*
+2. **Outbound triggers** — a successful push calls out to GitHub Actions, or anything else. *Removed 3.0.0.*
+3. **Inbound sync** — a merge on the remote lands on the gateway. *Current.*
 
 ---
 
@@ -30,115 +35,30 @@ New settings follow it rather than inventing storage.
 
 ---
 
-## 1. Git events
+## 1 and 2: built in 2.12–2.13, removed in 3.0.0
 
-### Mechanism
+Both were built, both worked, and both are gone as of 3.0.0 (14/09/2026).
 
-A `GitEvents.fire(GitEvent)` call at the end of each successful mutating
-operation — commit, push, pull, checkout, branch create/delete, revert, and the
-config repository's auto-commit. Failures fire too, with the reason; "the
-nightly push has been failing for a week" is the thing you actually want to
-know about.
+**1. Git events** fired a flat dict — type, outcome, scope, project, user, branch, remote,
+commit, message, files, timestamp — for every commit, push, pull and config auto-commit
+(the design also listed fetch/checkout/branch/revert, but those were never actually wired
+to fire one), delivered to a configured project-library script function and/or a Gateway
+Event message handler, on a small bounded async queue so a slow handler could not stall a
+git operation.
 
-The event is a flat map, because it has to survive the trip into Jython:
+**2. Outbound triggers** posted a configurable JSON body to a URL on a matching event, with
+GitHub `repository_dispatch`/`workflow_dispatch` presets, `${…}` substitution and a
+credential-injected header.
 
-```
-type        commit | push | pull | checkout | branch | revert | autocommit
-outcome     success | failure
-scope       project | config
-project     "Mining_Demo"        (empty for the config repository)
-user        the Ignition user who caused it
-branch      "main"
-remote      "origin" / the URL, when the operation had one
-commit      full hash, when the operation produced or moved to one
-message     commit message, or the failure reason
-files       list of paths
-timestamp   ISO-8601
-```
+**Why removed.** A review of the Automation page (14/09/2026) found neither did anything
+nothing else already does. Commits and pushes are made in the Designer, which already
+reports their outcome, so event delivery was a second channel for the same information.
+Delivering a release to other gateways belongs to a deployment pipeline, not to the gateway
+that was edited, and a GitHub remote already starts a workflow on push, so an outbound
+trigger calling `repository_dispatch` reimplemented something the remote does itself.
 
-### Delivery
-
-The module runs the event through a configured **project script function** in
-gateway scope — `Git.Events.onGitEvent(event)` or whatever the site names it —
-using the gateway's script manager. One handler, one dict, and everything a
-site wants to do with it (tag write, alarm, database row, `system.net.httpPost`,
-notify a second gateway) is ordinary Jython in a project library where it can be
-edited without a module rebuild.
-
-Firing is asynchronous on a small bounded queue. A handler that blocks must not
-be able to stall a commit, and a slow handler must not silently drop events —
-so the queue is bounded and a full queue logs and counts rather than blocking.
-
-> Unverified: whether a module can also raise a **gateway message handler**
-> (`system.util.sendMessage`-style) cleanly from Java on 8.3. If it can, it is a
-> nicer fit than naming a script function and should be offered alongside. The
-> script-function path is certain to work, so it is the one specified here.
-
-### Config surface
-
-Versioning page, a new **Automation** tab: enable/disable, the project and
-script path of the handler, and the event types to fire. Plus a live tail of the
-last ~50 events, which doubles as the diagnostic when a handler does nothing.
-
-### Scope note
-
-This is a notification bus, not a policy engine. It does not veto a commit —
-that is a pre-commit hook, and running shell out of the data directory on a
-gateway is not something this module should do.
-
----
-
-## 2. Outbound triggers
-
-### Mechanism
-
-On a git event matching a configured rule, POST to a URL. Deliberately generic —
-GitHub Actions is one target, but the same mechanism covers GitLab, Jenkins,
-Teams, a Perspective session on another gateway, or the toolkit.
-
-A rule is:
-
-```
-when        event type + outcome + optional project/branch filter
-url         https://api.github.com/repos/OWNER/REPO/dispatches
-method      POST
-headers     Authorization / Accept / X-Custom-*  (values may reference a credential)
-body        JSON template, with ${project} ${branch} ${commit} ${user} substitution
-```
-
-Two presets ship, because getting GitHub's dispatch API right from the docs is
-a twenty-minute job nobody should repeat:
-
-- **`repository_dispatch`** — `POST /repos/{owner}/{repo}/dispatches`, body
-  `{"event_type": "ignition-push", "client_payload": {…}}`. The workflow keys on
-  `on: repository_dispatch`. Best for "the gateway pushed, go do something".
-- **`workflow_dispatch`** — `POST /repos/{owner}/{repo}/actions/workflows/{file}/dispatches`,
-  body `{"ref": "main", "inputs": {…}}`. Runs one named workflow. Best when you
-  want to pass inputs to a specific pipeline.
-
-Owner and repo are derived from the repository's own remote URL, so the common
-case needs a token and nothing else.
-
-### Credentials
-
-Reuse `GitUserHttpsCredentialRecord`. The PAT needs `repo` scope for a private
-repository (`public_repo` if not); classic tokens also need `workflow` scope for
-the workflow-dispatch form. The token is referenced by id from the rule, never
-stored in the rule, and never written to a log — the request logger records
-method, host, path and status only.
-
-### Safety
-
-Outbound only, so no new attack surface on the gateway. Connect and read
-timeouts, TLS verification on, redirects not followed across hosts, a retry
-budget of two with backoff, and a per-rule circuit breaker so a dead endpoint
-does not turn every commit into a 30-second stall.
-
-### What this buys you
-
-CI on Ignition project resources: a push from the Designer triggers a workflow
-that lints the exported JSON, diffs view structure, or deploys the project to a
-second gateway. It is the half of GitOps that works from behind a firewall.
+**Do not rebuild either without a concrete gateway that needs a git-activity reaction nothing
+else provides.**
 
 ---
 
@@ -208,7 +128,11 @@ it is third.
 
 ---
 
-## Build order and rough size
+## Build order and rough size — historical
+
+This was the pre-build plan. All four rows happened (2.12–2.16), in this order, and 1/2/3b have
+since been removed again (3b in 2.14.0, 1 and 2 in 3.0.0) — kept here only to show the reasoning
+did not skip a step.
 
 | | Feature | Depends on | Size |
 |---|---|---|---|
@@ -220,17 +144,14 @@ it is third.
 1 and 2 together are one release. 3a is the next. 3b only if a gateway that
 GitHub can reach is actually in scope.
 
-## Open questions for sign-off
+## Open questions for sign-off — historical, answered
 
-- **Handler shape.** One project script function for all events, or a script
-  path per event type? One function with a `type` field is simpler and is what
-  is specified; per-type is more discoverable in the Designer tree.
-- **Which gateway runs a scheduled sync in a redundant pair?** Master only,
-  presumably — but it needs stating before 3a is built.
-- **Config repository as well as projects?** The data-directory repository can
-  push already. Should it also poll and pull? Restoring gateway configuration
-  from a remote automatically is a much larger blast radius than a project, and
-  the current design says no.
+- **Handler shape.** Moot: event delivery (feature 1) is removed as of 3.0.0.
+- **Which gateway runs a scheduled sync in a redundant pair?** Still open. `SyncScheduler` has no
+  redundancy check, so it runs wherever the module starts; behaviour on a redundant pair has not
+  been tested.
+- **Config repository as well as projects?** Still no. The data-directory repository pushes
+  manually only; nothing polls or pulls it automatically.
 
 ---
 

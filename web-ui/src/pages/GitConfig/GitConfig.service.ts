@@ -150,30 +150,6 @@ export interface IgnoreEditReq {
   text?: string;
 }
 
-export interface AutomationSettings {
-  enabled: boolean;
-  eventTypes: string[];
-  handlerProject: string;
-  handlerScript: string;
-  messageProject: string;
-  messageHandler: string;
-}
-export interface TriggerRule {
-  id: number;
-  name: string;
-  enabled: boolean;
-  // Comma-separated on the wire: the gateway stores them as one string per rule.
-  eventTypes: string;
-  outcomes: string;
-  projectFilter: string;
-  branchFilter: string;
-  url: string;
-  method: string;
-  headers: string;
-  bodyTemplate: string;
-  credentialId: number;
-  credentialHeader: string;
-}
 export interface SyncSetting {
   project: string;
   enabled: boolean;
@@ -191,8 +167,15 @@ export interface RunnerConfig {
   project: string;
   repoUrl: string;
   installScript: string;
+  // PowerShell equivalent of installScript, for a Windows runner machine.
+  installScriptWindows: string;
   workflowYaml: string;
   testCommand: string;
+  // PowerShell form: Windows PowerShell 5.1 aliases curl to Invoke-WebRequest.
+  testCommandWindows: string;
+  // Whether the selected project has a Scheduled sync record — the runner route 404s without
+  // one, since a runner pull borrows that record's branch and credential.
+  hasSync: boolean;
 }
 export interface EventLogEntry {
   type: string;
@@ -201,25 +184,18 @@ export interface EventLogEntry {
   project: string;
   user: string;
   branch: string;
+  remote: string;
   commit: string;
   message: string;
   fileCount: number;
   timestamp: string;
-  // What the bus did with it — the diagnostic when a handler appears to do nothing.
-  delivery: string;
 }
 export interface AutomationResp {
-  settings: AutomationSettings;
-  allTypes: string[];
-  triggers: TriggerRule[];
   syncs: SyncSetting[];
   log: EventLogEntry[];
   stats: {
     fired: number;
-    dropped: number;
     failures: number;
-    queued: number;
-    running: boolean;
   };
 }
 
@@ -381,41 +357,11 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: () => `${BASE}/automation`,
       providesTags: ["automation"],
     }),
-    saveAutomation: builder.mutation<unknown, AutomationSettings>({
-      query: (body) => ({ url: `${BASE}/automation`, method: "POST", body }),
-      invalidatesTags: ["automation"],
-    }),
-    testAutomation: builder.mutation<unknown, { project?: string }>({
-      query: (body) => ({
-        url: `${BASE}/automation-test`,
-        method: "POST",
-        body,
-      }),
-      invalidatesTags: ["automation"],
-    }),
     clearAutomationLog: builder.mutation<unknown, void>({
       query: () => ({
         url: `${BASE}/automation-clear`,
         method: "POST",
         body: {},
-      }),
-      invalidatesTags: ["automation"],
-    }),
-    saveTrigger: builder.mutation<
-      { id: number },
-      Omit<TriggerRule, "eventTypes" | "outcomes"> & {
-        eventTypes: string[];
-        outcomes: string[];
-      }
-    >({
-      query: (body) => ({ url: `${BASE}/trigger`, method: "POST", body }),
-      invalidatesTags: ["automation"],
-    }),
-    removeTrigger: builder.mutation<unknown, { id: number }>({
-      query: (body) => ({
-        url: `${BASE}/trigger-remove`,
-        method: "POST",
-        body,
       }),
       invalidatesTags: ["automation"],
     }),
@@ -512,11 +458,7 @@ export const {
   useGetIgnoreQuery,
   useSaveIgnoreMutation,
   useGetAutomationQuery,
-  useSaveAutomationMutation,
-  useTestAutomationMutation,
   useClearAutomationLogMutation,
-  useSaveTriggerMutation,
-  useRemoveTriggerMutation,
   useSaveSyncMutation,
   useSyncNowMutation,
   useGetRunnerQuery,
