@@ -3,6 +3,13 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.0.1] - 2026-09-15
+
+### Fixed
+- The History tab's footer read "Showing 0 of 0 items" beside a full list of commits. The grid
+  counts from its pagination parameters rather than its rows, and they defaulted to zero; every
+  loaded commit is on one page, so the footer is now hidden.
+
 ## [3.0.0] - 2026-09-14
 
 Event delivery and Outbound triggers are removed. Scheduled sync and the Actions runner stay, and

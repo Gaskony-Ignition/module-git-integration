@@ -77,6 +77,16 @@ const HistoryList = () => {
     }));
   }, [data]);
 
+  const pagination = useMemo(
+    () => ({
+      matching: commits.length,
+      total: commits.length,
+      limit: Math.max(commits.length, 1),
+      offset: 0,
+    }),
+    [commits]
+  );
+
   // Stable identities so re-renders (restore dialog, real data changes) don't reset the grid.
   const showMore = useMemo(
     () => [
@@ -116,6 +126,11 @@ const HistoryList = () => {
         uniqueDataKey="hash"
         globalSearch
         denseRows
+        // The grid's footer counts from paginationParams, not from data, and defaults it to
+        // zero — so it read "0 of 0 items" beside a full list. One page holds every commit
+        // loaded, so the footer carries no information and stays hidden.
+        paginationParams={pagination}
+        showPagination={false}
         setTableQueryParams={setQuery}
         rowExpand={rowExpand}
         showMore={showMore}
