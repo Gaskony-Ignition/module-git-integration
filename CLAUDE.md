@@ -1,0 +1,138 @@
+# CLAUDE.md
+
+Guidance for working in this repository. `docs/INTERNALS.md` has the REST
+route table, the persisted resource types, the manager classes and the
+Designer popup list — this file is standing instructions and gotchas only.
+
+## Project overview
+
+A Java module for Ignition 8.3 that embeds a Git client into the Designer:
+commit, push, fetch, pull with merge-conflict resolution, revert, branch
+management, snapshotting gateway-side resources (tags/themes/images) into the
+project, and remote or local-only repository init — from the Designer's
+dockable panels and status bar. It also versions the gateway **data
+directory** (config-as-code) in a separate repo, surfaced through a gateway
+web page (Platform → System → "Versioning"): config changes auto-commit as
+they happen, and the page gives history/restore. Originally built by
+AXONE-IO, maintained by Operametrix; this fork is Gaskony's build on top.
+
+## Build commands
+
+```bash
+./gradlew build           # produces build/Git.modl (also builds the web-ui React bundle)
+./gradlew :web-ui:webpack # build only the gateway web page bundle
+```
+
+`:web-ui` downloads Node 18 and runs yarn/webpack (needs network access on
+first build). If the webpack build fails on Prettier violations, run
+`node_modules/.bin/prettier --write "src/**/*.{ts,tsx}"` from `web-ui/`.
+
+No automated tests. Testing is manual: install the `.modl` and exercise the
+Designer UI and the gateway Versioning page.
+
+## Architecture
+
+Gradle multi-module, following the Ignition Module SDK pattern:
+
+```text
+common    (scope: DG)   — RPC interface + abstract delegation base
+designer  (scope: D)    — Designer UI: dockable panels, popups, status bar
+gateway   (scope: G)    — all git operations + persistence + config-as-code REST routes
+web-ui    (no scope)    — React gateway page, bundled into the gateway jar
+```
+
+The Vision client scope is unused — there is no `system.git.*` script module
+on Vision clients.
+
+## Gotchas
+
+- **RPC implementation must implement `GitScriptInterface` directly.** 8.3's
+  `RpcDelegate` discovers `@RpcInterface` only on the concrete class's direct
+  interfaces, with no superclass walk.
+- **A custom `ProtoRpcSerializer` registers a `Dataset`/`BasicDataset`
+  Java-serialization adapter.** The default serializer has no `Dataset`
+  support, so without it every `Dataset`-returning RPC round-trips empty with
+  no error.
+- **After any gateway-side project mutation (pull, checkout, init,
+  snapshot), the Designer must call `GitBaseAction.pullProjectFromGateway()`.**
+  It discards stale local edits via `DesignableProject.discardChanges`, then
+  reflectively calls `IgnitionDesigner.updateProject()` — without it, gateway
+  changes won't show in the Designer.
+- **The config-as-code repo is rooted at the data directory**, with
+  `projects/` excluded from its `.gitignore` so the per-project repos are
+  never nested inside it.
+- **`ConfigAutoCommitter` (a `ResourceCollectionListener`) is the only live
+  config-change notification.** Per-resource listeners on the config
+  collection are never notified. Events within a 2s window coalesce into one
+  commit; `commitLeftovers()` sweeps changes made while the gateway was
+  offline.
+- **Restore resets the working tree to exactly the target commit and keeps
+  HEAD on the branch** (unlike the detaching checkout), then applies the
+  config via a settings rescan — no gateway restart.
+- **`GITIGNORE_LINES` must ignore the SQLite sidecars `*-wal`/`*-shm`.**
+  Without them, `initRepo`'s baseline `git add .` races the tag value store
+  and dies with `FileNotFoundException`, so init could never complete on a
+  running gateway.
+- **Excluded-files tree semantics**: excluding a tracked path also runs
+  `git rm --cached` (a `.gitignore` line has no effect on an already-tracked
+  file); re-including a path under a glob appends a negation rather than
+  editing the glob (deleting `**/logs` to recover one file starts versioning
+  a gigabyte of logs); nothing under an excluded directory can be
+  re-included in git, so that row goes read-only; a folder's tick reflects
+  its children's roll-up, not its own flag, since a rule can exclude a
+  directory's contents without excluding the directory itself.
+- **Change badges are drawn by a `DotBorder`, not the platform's `addBadge`
+  API.** The badge list belongs to the tree's cell-renderer delegate, which
+  stops painting added badges after the first commit of a Designer session;
+  a border sidesteps the delegate entirely. Don't simplify this back to
+  `addBadge`.
+- **`PerspectiveNavNode`/`VisionModuleNode` report no resource path**, so a
+  change under them badges from the first resource-backed folder downwards,
+  not on the module root.
+- **The platform's `TextInput`/`SelectInput`/`TextArea` render their `label`
+  prop into an invisible legend.** Import the wrapped versions from
+  `web-ui/src/pages/GitConfig/fields.tsx`, not from `../../webui`.
+- **`Radio` is a radio GROUP** — it takes a `radios` array and maps over it.
+  Passing `label`/`checked` as a single control reads `.map` on undefined and
+  blanks the page. `SelectInput` needs `values` (not `options`), and its
+  `onChange` hands back MUI's event, not the value — sweep every form in a
+  browser before releasing.
+- **Automation only pulls changes in; it never pushes.** Polling, not a
+  webhook, is the inbound mechanism, because GitHub cannot open a connection
+  into most gateways. See `docs/AUTOMATION.md` before rebuilding either an
+  event bus or a webhook receiver.
+- **A runner-requested sync needs a `GitSyncRecord` even with its schedule
+  off** — the runner route reads that record's branch and credential rather
+  than carrying its own.
+- **Image snapshot walks the store tree** (`getImages` lists one level and
+  returns folders as entries with no bytes) **and import merges, never
+  deletes** — the store is gateway-scoped, so clearing it first would make
+  one project's `images/` authoritative for every other project.
+
+## Key libraries
+
+- Eclipse JGit 6.10.1 — all git operations
+- Apache MINA sshd — SSH transport
+- Lombok — annotation processing (designer)
+- React 18 + RTK Query + `@inductiveautomation/ignition-web-ui` — the
+  `web-ui/` gateway page, bundled via `com.github.node-gradle.node` + webpack
+
+## Module packaging
+
+`io.ia.sdk.modl` plugin. Module ID `com.operametrix.ignition.git`; version is
+`2.0.0.<yyyyMMddHH>` (the build appends a timestamp). `compileSdkVersion` is
+deliberately decoupled from `requiredIgnitionVersion` so the `.modl` installs
+on any 8.3.x gateway. `:web-ui` has no module scope — its bundle is pulled
+into the gateway jar via `modlImplementation(project(":web-ui"))`.
+`skipModlSigning` is `false`; copy `gradle.template.properties` to
+`gradle.properties` (gitignored) and fill in signing credentials, or flip
+`skipModlSigning` to `true` locally for unsigned dev builds.
+
+## Java version
+
+Java 17 source/target, via the toolchain in each subproject's `build.gradle.kts`.
+
+## Dependency repositories
+
+Resolved from Inductive Automation's Nexus and Maven Central, configured in
+`settings.gradle`.
