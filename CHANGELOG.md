@@ -38,6 +38,9 @@ breaking change, hence 3.0.0.
 - The runner tab gives Linux and Windows (PowerShell) versions of both the install block and the
   reachability check. On Windows PowerShell 5.1 `curl` is an alias for `Invoke-WebRequest`, so the
   old check failed there for reasons unrelated to the gateway. The runner version is now 2.337.0.
+- Runner labels typed with spaces (`self-hosted, ignition`) are normalised before they reach
+  `config.sh`/`config.cmd`. Pasted raw, the space split them into two arguments and registration
+  failed.
 - The generated workflow runs on Linux and Windows self-hosted runners: two steps gated on
   `runner.os`, a bash/curl one and a pwsh/`Invoke-RestMethod` one. The previous single bash step
   failed on a Windows runner, whose default shell is pwsh.

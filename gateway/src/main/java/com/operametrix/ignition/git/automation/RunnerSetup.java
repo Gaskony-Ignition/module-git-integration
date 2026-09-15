@@ -56,10 +56,21 @@ public final class RunnerSetup {
         return u.replaceAll("/+$", "");
     }
 
+    /**
+     * The runner labels as {@code config.sh}/{@code config.cmd} need them: comma-separated with no
+     * spaces. The field is free text and people type {@code self-hosted, ignition}; pasted raw, the
+     * space splits it into two shell arguments and registration fails on a stray {@code ignition}.
+     */
+    static String labelsArg(GitRunnerRecord cfg) {
+        String raw = cfg.getLabels() == null ? "" : cfg.getLabels();
+        return String.join(",", java.util.Arrays.stream(raw.split(","))
+                .map(String::trim).filter(l -> !l.isEmpty()).toList());
+    }
+
     /** The shell that downloads, registers and installs the runner as a service (Linux). */
     public static String installScript(String remoteUrl, GitRunnerRecord cfg) {
         String repo = repoUrl(remoteUrl);
-        String labels = cfg.getLabels();
+        String labels = labelsArg(cfg);
         return String.join("\n",
                 "# Run on the machine that will reach the gateway — NOT inside the gateway container.",
                 "# Get REG_TOKEN from " + (repo.isEmpty() ? "<repo>" : repo)
@@ -91,7 +102,7 @@ public final class RunnerSetup {
      */
     public static String installScriptWindows(String remoteUrl, GitRunnerRecord cfg) {
         String repo = repoUrl(remoteUrl);
-        String labels = cfg.getLabels();
+        String labels = labelsArg(cfg);
         return String.join("\n",
                 "# Run in an ELEVATED PowerShell (service install needs it), on the machine that",
                 "# will reach the gateway — NOT inside the gateway container.",
@@ -127,7 +138,7 @@ public final class RunnerSetup {
      * {@code Invoke-RestMethod} throws on an HTTP error status by default.
      */
     public static String workflowYaml(String project, String branch, GitRunnerRecord cfg) {
-        String labels = "[" + String.join(", ", cfg.getLabels().split("\\s*,\\s*")) + "]";
+        String labels = "[" + String.join(", ", labelsArg(cfg).split(",")) + "]";
         String base = cfg.getGatewayUrl().isEmpty() ? "<gateway url>" : cfg.getGatewayUrl();
         String onBranch = branch == null || branch.isBlank() ? "main" : branch.trim();
         String projectJson = project == null ? "" : project;
