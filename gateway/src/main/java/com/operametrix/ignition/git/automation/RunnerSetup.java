@@ -8,9 +8,12 @@ import java.util.Locale;
  * Generates the copy-and-paste setup for a GitHub Actions self-hosted runner.
  *
  * <p>None of this is clever — it is the standard runner setup with this gateway's values already
- * substituted in. The reason it exists is that the four values involved (repository URL, runner
- * labels, gateway address, trigger token) have to agree across two systems and three files, and
+ * substituted in. The reason it exists is that the values involved (repository URL, runner
+ * labels, gateway address, token, project) have to agree across two systems and three files, and
  * getting one of them subtly wrong produces a workflow that queues forever with no error.
+ *
+ * <p>Every generator takes a null or blank project or repository and emits a placeholder. The
+ * snippets are read as examples, so they must never carry a real project name nobody chose.
  *
  * <p>The gateway deliberately does not install or supervise the runner itself. A runner executes
  * whatever the workflow file says; hosting one from inside the module would put arbitrary
@@ -19,18 +22,24 @@ import java.util.Locale;
 public final class RunnerSetup {
 
     /**
-     * The runner release the generated commands download. GitHub's own runner page always shows
-     * the current version, and an older runner self-updates on first connection, so this going
-     * stale costs a minute rather than a failure.
+     * The runner release the generated commands download. An older runner self-updates on first
+     * connection, so this going stale costs a minute rather than a failure.
      */
     private static final String RUNNER_VERSION = "2.337.0";
 
     /**
-     * Where the workflow has to live. GitHub reads workflows only from the repository root, and
-     * for a project repository the root IS the project folder — so the file lands beside the
-     * project's own resources. The leading dot keeps it out of Ignition's resource scan.
+     * Where the repo-updates workflow lives. GitHub reads workflows only from the repository root,
+     * and for a project repository the root IS the project folder. The leading dot keeps it out of
+     * Ignition's resource scan.
      */
     public static final String WORKFLOW_PATH = ".github/workflows/ignition-sync.yml";
+
+    /** Where the release workflow lives, beside any deployment workflow the repository has. */
+    public static final String RELEASE_WORKFLOW_PATH = ".github/workflows/ignition-release.yml";
+
+    private static final String PROJECT_PLACEHOLDER = "<project>";
+    private static final String REPO_PLACEHOLDER = "<repository url>";
+    private static final String GATEWAY_PLACEHOLDER = "<gateway url>";
 
     private RunnerSetup() {
     }
@@ -67,47 +76,67 @@ public final class RunnerSetup {
                 .map(String::trim).filter(l -> !l.isEmpty()).toList());
     }
 
-    /** The shell that downloads, registers and installs the runner as a service (Linux). */
-    public static String installScript(String remoteUrl, GitRunnerRecord cfg) {
-        String repo = repoUrl(remoteUrl);
-        String labels = labelsArg(cfg);
+    private static String project(String project) {
+        return project == null || project.isBlank() ? PROJECT_PLACEHOLDER : project;
+    }
+
+    private static String repo(String remoteUrl) {
+        String r = repoUrl(remoteUrl);
+        return r.isEmpty() ? REPO_PLACEHOLDER : r;
+    }
+
+    private static String base(GitRunnerRecord cfg) {
+        return cfg.getGatewayUrl().isEmpty() ? GATEWAY_PLACEHOLDER : cfg.getGatewayUrl();
+    }
+
+    /** Linux and macOS share the tarball install and differ only in the build and the service. */
+    private static String unixInstall(String remoteUrl, GitRunnerRecord cfg, String platform,
+                                      String service) {
+        String repo = repo(remoteUrl);
         return String.join("\n",
-                "# Run on the machine that will reach the gateway — NOT inside the gateway container.",
-                "# Get REG_TOKEN from " + (repo.isEmpty() ? "<repo>" : repo)
-                        + "/settings/actions/runners/new (it expires in an hour).",
+                "# Run on the machine that will reach the gateway — the host, NOT inside a gateway",
+                "# container. A runner on a Docker host reaches its gateways on their published ports.",
+                "# Get REG_TOKEN from " + repo + "/settings/actions/runners/new (it expires in an hour),",
+                "# or from the organisation's runner settings to share one runner across repositories.",
                 "REG_TOKEN=<paste the registration token>",
                 "",
                 "mkdir -p ~/actions-runner && cd ~/actions-runner",
                 "curl -o runner.tar.gz -L https://github.com/actions/runner/releases/download/v"
-                        + RUNNER_VERSION + "/actions-runner-linux-x64-" + RUNNER_VERSION + ".tar.gz",
+                        + RUNNER_VERSION + "/actions-runner-" + platform + "-" + RUNNER_VERSION + ".tar.gz",
                 "tar xzf runner.tar.gz",
                 "",
                 "./config.sh --unattended \\",
-                "  --url " + (repo.isEmpty() ? "<repo>" : repo) + " \\",
+                "  --url " + repo + " \\",
                 "  --token \"$REG_TOKEN\" \\",
-                "  --labels " + labels + " \\",
+                "  --labels " + labelsArg(cfg) + " \\",
                 "  --name ignition-$(hostname -s)",
                 "",
-                "sudo ./svc.sh install && sudo ./svc.sh start");
+                service);
+    }
+
+    /** The shell that downloads, registers and installs the runner as a service (Linux). */
+    public static String installScript(String remoteUrl, GitRunnerRecord cfg) {
+        return unixInstall(remoteUrl, cfg, "linux-x64", "sudo ./svc.sh install && sudo ./svc.sh start");
+    }
+
+    /**
+     * The same for macOS. The runner ships a separate Apple-silicon build, and its {@code svc.sh}
+     * installs a launchd agent for the logged-in user, so it runs without sudo.
+     */
+    public static String installScriptMac(String remoteUrl, GitRunnerRecord cfg) {
+        return unixInstall(remoteUrl, cfg, "osx-arm64", "./svc.sh install && ./svc.sh start");
     }
 
     /**
      * The PowerShell that downloads, registers and installs the runner as a service (Windows).
-     *
-     * <p>Mirrors {@link #installScript}: run elevated on a machine that reaches the gateway, NOT
-     * inside the container, using a registration token from the repository's runner settings that
-     * expires in an hour. Installing as a service is fine here — the workflow this runner executes
-     * makes exactly one HTTP call to the gateway, nothing more — so there is no Docker Desktop
-     * session or interactive login for the service to depend on.
+     * Run elevated, on the host rather than inside a container.
      */
     public static String installScriptWindows(String remoteUrl, GitRunnerRecord cfg) {
-        String repo = repoUrl(remoteUrl);
-        String labels = labelsArg(cfg);
+        String repo = repo(remoteUrl);
         return String.join("\n",
                 "# Run in an ELEVATED PowerShell (service install needs it), on the machine that",
-                "# will reach the gateway — NOT inside the gateway container.",
-                "# Get $REG_TOKEN from " + (repo.isEmpty() ? "<repo>" : repo)
-                        + "/settings/actions/runners/new (it expires in an hour).",
+                "# will reach the gateway — the host, NOT inside a gateway container.",
+                "# Get $REG_TOKEN from " + repo + "/settings/actions/runners/new (it expires in an hour).",
                 "$REG_TOKEN = \"<paste the registration token>\"",
                 "",
                 "New-Item -ItemType Directory -Force C:\\actions-runner | Out-Null",
@@ -117,31 +146,27 @@ public final class RunnerSetup {
                         + ".zip -OutFile runner.zip",
                 "Expand-Archive runner.zip -DestinationPath . -Force",
                 "",
-                ".\\config.cmd --unattended --url " + (repo.isEmpty() ? "<repo>" : repo)
-                        + " --token $REG_TOKEN --labels " + labels
+                ".\\config.cmd --unattended --url " + repo
+                        + " --token $REG_TOKEN --labels " + labelsArg(cfg)
                         + " --name \"ignition-$env:COMPUTERNAME\" --runasservice");
     }
 
+    private static String runsOn(GitRunnerRecord cfg) {
+        return "[" + String.join(", ", labelsArg(cfg).split(",")) + "]";
+    }
+
     /**
-     * The workflow that runs on that runner and asks this gateway to sync.
+     * The repo-updates workflow: on a push to the project's branch, ask this gateway to pull.
      *
-     * <p>The trigger branch is the project's own, not a hardcoded {@code main}. The module's
-     * project-init creates {@code master}, so a workflow that assumed {@code main} would sit
-     * there and never fire — no error, just nothing happening, which is the exact failure this
-     * generator exists to prevent.
-     *
-     * <p>Two steps cover both runner platforms in one job: a bash/curl step for Linux and macOS,
-     * and a {@code pwsh}/Invoke-RestMethod step for Windows, each gated on {@code runner.os} so
-     * exactly one runs. A single bash step with line continuations (the pre-3.0.0 shape) failed
-     * outright on a Windows runner, whose default shell is {@code pwsh}, not bash. Both forms
-     * fail the step on a non-2xx response: {@code curl -f} exits non-zero, and
-     * {@code Invoke-RestMethod} throws on an HTTP error status by default.
+     * <p>The trigger branch is the project's own, not a hardcoded {@code main} — project-init
+     * creates {@code master}, and a workflow waiting on {@code main} never fires and never errors.
+     * Two steps gated on {@code runner.os} cover both shells, because a Windows runner's default
+     * shell is pwsh and a bash step fails there.
      */
     public static String workflowYaml(String project, String branch, GitRunnerRecord cfg) {
-        String labels = "[" + String.join(", ", labelsArg(cfg).split(",")) + "]";
-        String base = cfg.getGatewayUrl().isEmpty() ? "<gateway url>" : cfg.getGatewayUrl();
+        String base = base(cfg);
         String onBranch = branch == null || branch.isBlank() ? "main" : branch.trim();
-        String projectJson = project == null ? "" : project;
+        String p = project(project);
         return String.join("\n",
                 "# " + WORKFLOW_PATH,
                 "name: Sync to Ignition",
@@ -152,7 +177,7 @@ public final class RunnerSetup {
                 "",
                 "jobs:",
                 "  sync:",
-                "    runs-on: " + labels,
+                "    runs-on: " + runsOn(cfg),
                 "    steps:",
                 "      - name: Ask the gateway to pull (Linux/macOS)",
                 "        if: runner.os != 'Windows'",
@@ -160,7 +185,7 @@ public final class RunnerSetup {
                 "          curl -fsS -X POST \\",
                 "            -H \"Authorization: Bearer $IGNITION_TOKEN\" \\",
                 "            -H 'Content-Type: application/json' \\",
-                "            -d '{\"project\":\"" + projectJson + "\"}' \\",
+                "            -d '{\"project\":\"" + p + "\"}' \\",
                 "            " + base + "/data/git-config/runner-sync",
                 "        env:",
                 "          IGNITION_TOKEN: ${{ secrets.IGNITION_SYNC_TOKEN }}",
@@ -171,32 +196,109 @@ public final class RunnerSetup {
                 "          Invoke-RestMethod -Method Post -Uri \"" + base + "/data/git-config/runner-sync\" `",
                 "            -Headers @{ Authorization = \"Bearer $env:IGNITION_TOKEN\" } `",
                 "            -ContentType 'application/json' `",
-                "            -Body '{\"project\":\"" + projectJson + "\"}'",
+                "            -Body '{\"project\":\"" + p + "\"}'",
+                "        env:",
+                "          IGNITION_TOKEN: ${{ secrets.IGNITION_SYNC_TOKEN }}");
+    }
+
+    /**
+     * The release workflow: on a version tag, zip the project and upload it to this gateway.
+     *
+     * <p>The zip is the repository root minus git's own folders, which is a project export when the
+     * project sits at the root — the only layout the module supports. A repository that already
+     * builds its release (a packaging script, a deployment workflow) keeps its own build and only
+     * needs the upload step, with its zip in place of {@code dist/release.zip}.
+     */
+    public static String releaseWorkflowYaml(String project, GitRunnerRecord cfg) {
+        String base = base(cfg);
+        String url = base + "/data/git-config/runner-release?project=" + project(project);
+        return String.join("\n",
+                "# " + RELEASE_WORKFLOW_PATH,
+                "name: Release to Ignition",
+                "",
+                "on:",
+                "  push:",
+                "    tags: ['v*']",
+                "",
+                "jobs:",
+                "  release:",
+                "    runs-on: " + runsOn(cfg),
+                "    steps:",
+                "      - uses: actions/checkout@v4",
+                "",
+                "      # Build the project export. Replace these two steps with your own packaging if you",
+                "      # have one; the upload only needs a zip with project.json at its root.",
+                "      - name: Zip the project (Linux/macOS)",
+                "        if: runner.os != 'Windows'",
+                "        run: |",
+                "          mkdir -p dist",
+                "          zip -qr dist/release.zip . -x '.git/*' '.github/*' 'dist/*'",
+                "      - name: Zip the project (Windows)",
+                "        if: runner.os == 'Windows'",
+                "        shell: pwsh",
+                "        run: |",
+                "          New-Item -ItemType Directory -Force dist | Out-Null",
+                "          $items = Get-ChildItem -Force | Where-Object { $_.Name -notin '.git', '.github', 'dist' }",
+                "          Compress-Archive -Path $items.FullName -DestinationPath dist/release.zip -Force",
+                "",
+                "      # The gateway replaces the whole project with the zip, keeping its own git",
+                "      # repository and project properties, and applies it without a restart.",
+                "      - name: Upload the release (Linux/macOS)",
+                "        if: runner.os != 'Windows'",
+                "        run: |",
+                "          curl -fsS -X POST \\",
+                "            -H \"Authorization: Bearer $IGNITION_TOKEN\" \\",
+                "            -H 'Content-Type: application/zip' \\",
+                "            --data-binary @dist/release.zip \\",
+                "            \"" + url + "&version=$GITHUB_REF_NAME\"",
+                "        env:",
+                "          IGNITION_TOKEN: ${{ secrets.IGNITION_SYNC_TOKEN }}",
+                "      - name: Upload the release (Windows)",
+                "        if: runner.os == 'Windows'",
+                "        shell: pwsh",
+                "        run: |",
+                "          Invoke-RestMethod -Method Post `",
+                "            -Uri \"" + url + "&version=$env:GITHUB_REF_NAME\" `",
+                "            -Headers @{ Authorization = \"Bearer $env:IGNITION_TOKEN\" } `",
+                "            -ContentType 'application/zip' -InFile dist/release.zip",
                 "        env:",
                 "          IGNITION_TOKEN: ${{ secrets.IGNITION_SYNC_TOKEN }}");
     }
 
     /** The one-liner that proves the runner can reach the gateway before any workflow runs. */
     public static String testCommand(String project, GitRunnerRecord cfg) {
-        String base = cfg.getGatewayUrl().isEmpty() ? "<gateway url>" : cfg.getGatewayUrl();
         return "curl -fsS -X POST -H 'Authorization: Bearer <token>' "
                 + "-H 'Content-Type: application/json' "
-                + "-d '{\"project\":\"" + (project == null ? "" : project) + "\"}' "
-                + base + "/data/git-config/runner-sync";
+                + "-d '{\"project\":\"" + project(project) + "\"}' "
+                + base(cfg) + "/data/git-config/runner-sync";
     }
 
     /**
-     * The same check for a Windows runner machine.
-     *
-     * <p>The curl form above does not survive Windows PowerShell 5.1, where {@code curl} is an alias
-     * for {@code Invoke-WebRequest} and takes none of those flags — so the one reachability check
-     * would fail for a reason that has nothing to do with the gateway.
+     * The same check for a Windows runner machine. On Windows PowerShell 5.1 {@code curl} is an
+     * alias for {@code Invoke-WebRequest} and takes none of the curl flags.
      */
     public static String testCommandWindows(String project, GitRunnerRecord cfg) {
-        String base = cfg.getGatewayUrl().isEmpty() ? "<gateway url>" : cfg.getGatewayUrl();
-        return "Invoke-RestMethod -Method Post -Uri \"" + base + "/data/git-config/runner-sync\" "
+        return "Invoke-RestMethod -Method Post -Uri \"" + base(cfg) + "/data/git-config/runner-sync\" "
                 + "-Headers @{ Authorization = \"Bearer <token>\" } "
                 + "-ContentType 'application/json' "
-                + "-Body '{\"project\":\"" + (project == null ? "" : project) + "\"}'";
+                + "-Body '{\"project\":\"" + project(project) + "\"}'";
+    }
+
+    /**
+     * Release-mode check. It sends NO zip on purpose: a real one would replace the project. The
+     * gateway answers 400 "no release zip" once the address and token are right — 401 means the
+     * token is wrong, 404 that the runner is switched off here.
+     */
+    public static String releaseTestCommand(String project, GitRunnerRecord cfg) {
+        return "curl -sS -X POST -H 'Authorization: Bearer <token>' \""
+                + base(cfg) + "/data/git-config/runner-release?project=" + project(project)
+                + "\"   # expect 400 {\"error\":\"no release zip in the request body\"}";
+    }
+
+    public static String releaseTestCommandWindows(String project, GitRunnerRecord cfg) {
+        return "try { Invoke-RestMethod -Method Post -Uri \"" + base(cfg)
+                + "/data/git-config/runner-release?project=" + project(project) + "\" "
+                + "-Headers @{ Authorization = \"Bearer <token>\" } } "
+                + "catch { $_.Exception.Response.StatusCode.value__ }   # expect 400";
     }
 }

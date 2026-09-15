@@ -101,9 +101,12 @@ on Vision clients.
   webhook, is the inbound mechanism, because GitHub cannot open a connection
   into most gateways. See `docs/AUTOMATION.md` before rebuilding either an
   event bus or a webhook receiver.
-- **A runner-requested sync needs a `GitSyncRecord` even with its schedule
-  off** — the runner route reads that record's branch and credential rather
-  than carrying its own.
+- **A release replaces the project folder but carries `.git` and
+  `global-props/data.bin` across**, or it destroys the repository and the
+  gateway's project properties.
+- **Runner routes read the raw query string**, never `getParameter`: Jetty
+  would parse a large non-zip body as a form and 500.
+- **Snippets never carry an unchosen project's name.**
 - **Image snapshot walks the store tree** (`getImages` lists one level and
   returns folders as entries with no bytes) **and import merges, never
   deletes** — the store is gateway-scoped, so clearing it first would make

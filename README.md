@@ -45,21 +45,23 @@ indistinguishable — and any of them can be initialised or given a remote here.
 
 ![The Projects tab listing every project and its git state](docs/images/versioning-projects.png)
 
-Automation pulls changes into this gateway — it never pushes. Scheduled sync
+Automation brings changes onto this gateway — it never pushes. Scheduled sync
 fetches each project's remote on a timer and fast-forwards it when the tracked
-branch moves; the Actions runner does the same the moment a branch moves on
-GitHub, with nothing reaching in. Either way the event log below records
-every commit, push, pull, config auto-commit and sync, successes and failures
-alike — including an unattended sync that refused or failed, and why.
+branch moves; the Actions runner lets a GitHub workflow install a release or
+pull the branch, with nothing reaching in. The event log below records every
+commit, push, pull, config auto-commit, sync and release, successes and failures
+alike — including an unattended one that refused or failed, and why.
 
 ![The Automation tab, with its event log](docs/images/versioning-automation.png)
 
-A merge does not have to wait for the next poll. A GitHub Actions self-hosted
-runner connects out to GitHub from your own network and is handed workflow jobs
-over that same connection, so it can ask the gateway to pull the moment a branch
-moves — with nothing reaching in. The tab generates the whole setup with this
-gateway's own values already in it: the registration command, the workflow, the
-token, and a one-line check that the runner can reach the gateway.
+A release does not need a person at the gateway. A GitHub Actions self-hosted
+runner on the host connects out to GitHub and is handed workflow jobs over that
+same connection, so a workflow can hand this gateway a release — or ask it to
+pull a branch — with nothing reaching in. Each project picks **Release** (a zip
+replaces the whole project, applied without a restart) or **Repo updates** (pull
+the branch). The tab generates the setup with this gateway's values in it:
+runner install commands for Linux, macOS and Windows, the workflow, the token,
+and a check that the runner can reach the gateway.
 
 ![The Actions runner tab, with the generated setup](docs/images/versioning-runner.png)
 
@@ -82,12 +84,11 @@ sync** fetches each project's remote on a timer and fast-forwards it when the
 tracked branch moves, then requests a project scan — polling rather than a
 webhook, because GitHub cannot reach most gateways. A sync refuses when the
 working tree is dirty rather than discarding someone's unsaved work. For
-push-time sync instead of polling, the **Actions runner** tab generates the
-setup for a GitHub Actions self-hosted runner and opens one token-authenticated
-route for it to call; the module generates the configuration but never installs
-or runs the runner itself. It warns when the selected project has no Scheduled
-sync record — a runner pull needs that record's branch and credential — and the
-install step covers both a Linux and a Windows runner machine. Either tab's
+push-time delivery, the **Actions runner** tab generates the setup for a GitHub
+Actions self-hosted runner and opens two token-authenticated routes for it: one
+installs a release zip, replacing the project while keeping its git repository
+and project properties; the other pulls the branch. The module generates the
+configuration but never installs or runs the runner itself. Either tab's
 activity, plus every commit, push and pull from the Designer and every config
 auto-commit, lands in the **Event log** below both.
 
@@ -111,12 +112,18 @@ Automation: **Platform → System → Versioning → Automation**. On **Schedule
 sync**, press *Set up* for a project, choose a branch and interval, then
 *Sync now* — the result appears in the Event log below.
 
-Push-time sync: **Automation → Actions runner**. Tick *Accept sync requests from
-a runner*, enter the address the runner will reach this gateway on, and generate
-a token — save it in the repository as the secret `IGNITION_SYNC_TOKEN`. Press
-*Commit the workflow to the repository* and the gateway commits and pushes the
-workflow itself. The one block left to copy is the runner install command; run
-it on the runner machine, then run the test command before relying on it.
+Push-time delivery: **Automation → Actions runner**.
+
+1. Tick *Accept requests from a runner* and set the address the runner reaches
+   this gateway on — for a runner on the same Docker host, `http://localhost:`
+   and the published port.
+2. Generate a token and save it in GitHub as the secret `IGNITION_SYNC_TOKEN`.
+3. Choose the project and **Release** or **Repo updates**.
+4. Install the runner on the host with the command for its OS (once per machine).
+5. Add the workflow: for Release, add it (or just its upload step) to the
+   repository that builds the release; for Repo updates, press *Commit the
+   workflow to the repository*.
+6. Run the test command from the runner machine before relying on it.
 
 To build from source you need `gradle.properties` with the signing block —
 copy it from `gradle.template.properties` and fill in the keystore details:

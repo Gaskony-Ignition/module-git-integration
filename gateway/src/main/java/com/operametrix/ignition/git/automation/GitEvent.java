@@ -18,6 +18,7 @@ public record GitEvent(String type, String outcome, String scope, String project
     public static final String PULL = "pull";
     public static final String AUTOCOMMIT = "autocommit";
     public static final String SYNC = "sync";
+    public static final String RELEASE = "release";
 
     public static final String SUCCESS = "success";
     public static final String FAILURE = "failure";

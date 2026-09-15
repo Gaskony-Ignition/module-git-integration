@@ -104,6 +104,18 @@ public final class SyncScheduler {
         }
     }
 
+    /**
+     * Claims a project for a whole-project operation. A release replacing the folder while a sync
+     * is pulling into it would leave neither intact, so both go through the same set.
+     */
+    public static boolean acquire(String project) {
+        return inFlight.add(project);
+    }
+
+    public static void release(String project) {
+        inFlight.remove(project);
+    }
+
     /** Runs one repository's sync. Safe to call outside the timer (the Sync now button). */
     public static String syncNow(GitSyncRecord cfg) {
         String project = cfg.getProject();

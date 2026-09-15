@@ -138,6 +138,24 @@ public class GitRemoteCredentialsRecord {
                 .orElse(null);
     }
 
+    public String getIgnitionUser() {
+        return ignitionUser;
+    }
+
+    public String getRemoteName() {
+        return remoteName;
+    }
+
+    public static List<GitRemoteCredentialsRecord> listByProject(long projectId) {
+        List<GitRemoteCredentialsRecord> out = new ArrayList<>();
+        for (DecodedResource<Config> d : handler.getResources()) {
+            if (d.config().projectId() == projectId) {
+                out.add(new GitRemoteCredentialsRecord(d.config()));
+            }
+        }
+        return out;
+    }
+
     public static List<GitRemoteCredentialsRecord> listBySshKeyId(long sshKeyId) {
         List<GitRemoteCredentialsRecord> out = new ArrayList<>();
         for (DecodedResource<Config> d : handler.getResources()) {

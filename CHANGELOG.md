@@ -3,6 +3,29 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.1.0] - 2026-09-15
+
+The Actions runner can now install releases, not only pull a branch.
+
+### Added
+- **Release delivery.** A workflow uploads a project export zip to the new
+  `POST /runner-release?project=<name>&version=<v>` route, authenticated by the runner token. The
+  gateway replaces the whole project with it (files dropped from the release disappear), keeps the
+  project's git repository and its project properties, and applies it without a restart. The
+  project needs no repository on the gateway. Uploads are capped at 256 MB, and a zip with an entry
+  outside the project folder or without `project.json` at its root is refused.
+- A per-project delivery choice on the Actions runner tab: **Release** or **Repo updates**.
+- A generated release workflow (`.github/workflows/ignition-release.yml`, on a `v*` tag) with Linux,
+  macOS and Windows steps, and a release-mode reachability check that installs nothing.
+- A macOS runner install snippet (the Apple-silicon build).
+
+### Changed
+- **Repo updates no longer needs a Scheduled sync record.** Without one it pulls the project's
+  checked-out branch from its remote, with the credential that remote already uses.
+- **No project is pre-selected.** Until one is chosen every snippet shows placeholders, so an
+  example never carries a real project name or repository.
+- The gateway address starts as the address the page is open on.
+
 ## [3.0.1] - 2026-09-15
 
 ### Fixed

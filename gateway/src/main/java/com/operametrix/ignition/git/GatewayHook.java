@@ -1,6 +1,7 @@
 package com.operametrix.ignition.git;
 
 import com.operametrix.ignition.git.automation.GitEvent;
+import com.operametrix.ignition.git.automation.ReleaseReceiver;
 import com.operametrix.ignition.git.automation.RunnerSetup;
 import com.operametrix.ignition.git.automation.RunnerTrigger;
 import com.operametrix.ignition.git.automation.GitEvents;
@@ -358,6 +359,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         routes.newRoute("/runner-sync").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .accessControl(AccessControlStrategy.OPEN_ROUTE).nocache()
                 .handler(RunnerTrigger::handle).mount();
+
+        // Same gate as /runner-sync. The body is a project export zip, streamed to disk.
+        routes.newRoute("/runner-release").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .accessControl(AccessControlStrategy.OPEN_ROUTE).nocache()
+                .handler(ReleaseReceiver::handle).mount();
 
         // --- Excluded files (.gitignore management) ---
         routes.newRoute("/tree").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
@@ -1293,39 +1299,53 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             o.addProperty("gatewayUrl", cfg.getGatewayUrl());
             o.addProperty("labels", cfg.getLabels());
 
-            // The snippets are generated per project, because the runner registers against the
-            // project's own repository.
+            // Nothing is chosen for the caller. With no project named, every snippet carries
+            // placeholders: the snippets read as examples, and a real project name nobody picked
+            // would be copied into other people's workflows.
             String project = req.getParameter("project");
             String remoteUrl = null;
             String branch = null;
+            boolean known = false;
             JsonArray projects = new JsonArray();
             for (GitProjectManager.ProjectStatus ps : GitProjectManager.listProjectStatus()) {
-                if (ps.remoteUrl() == null || ps.remoteUrl().isBlank()) {
-                    continue;
-                }
-                projects.add(ps.name());
-                if (project == null || project.isBlank() || project.equals(ps.name())) {
-                    if (remoteUrl == null) {
-                        remoteUrl = ps.remoteUrl();
-                        branch = ps.branch();
-                        project = ps.name();
-                    }
+                boolean hasRemote = ps.remoteUrl() != null && !ps.remoteUrl().isBlank();
+                JsonObject p = new JsonObject();
+                p.addProperty("name", ps.name());
+                p.addProperty("hasRemote", hasRemote);
+                p.addProperty("mode", cfg.getMode(ps.name()));
+                projects.add(p);
+                if (ps.name().equals(project)) {
+                    known = true;
+                    remoteUrl = hasRemote ? ps.remoteUrl() : null;
+                    branch = ps.branch();
                 }
             }
+            if (!known) {
+                project = null;
+            }
+            String mode = project == null ? GitRunnerRecord.MODE_RELEASE : cfg.getMode(project);
+            boolean release = GitRunnerRecord.MODE_RELEASE.equals(mode);
+
             o.add("projects", projects);
             o.addProperty("project", project == null ? "" : project);
-            // The runner uses the project's Scheduled sync branch/credential to pull — without a
-            // sync record set up first, a runner-triggered pull 404s with nothing to authenticate
-            // as. The Runner tab warns on this rather than letting Generate token look complete.
-            o.addProperty("hasSync", project != null && !project.isBlank()
-                    && GitSyncRecord.findByProject(project) != null);
+            o.addProperty("mode", mode);
+            o.addProperty("hasRemote", remoteUrl != null);
             o.addProperty("repoUrl", RunnerSetup.repoUrl(remoteUrl));
             o.addProperty("installScript", RunnerSetup.installScript(remoteUrl, cfg));
+            o.addProperty("installScriptMac", RunnerSetup.installScriptMac(remoteUrl, cfg));
             o.addProperty("installScriptWindows", RunnerSetup.installScriptWindows(remoteUrl, cfg));
             o.addProperty("branch", branch == null ? "" : branch);
-            o.addProperty("workflowYaml", RunnerSetup.workflowYaml(project, branch, cfg));
-            o.addProperty("testCommand", RunnerSetup.testCommand(project, cfg));
-            o.addProperty("testCommandWindows", RunnerSetup.testCommandWindows(project, cfg));
+            o.addProperty("workflowPath",
+                    release ? RunnerSetup.RELEASE_WORKFLOW_PATH : RunnerSetup.WORKFLOW_PATH);
+            o.addProperty("workflowYaml", release
+                    ? RunnerSetup.releaseWorkflowYaml(project, cfg)
+                    : RunnerSetup.workflowYaml(project, branch, cfg));
+            o.addProperty("testCommand", release
+                    ? RunnerSetup.releaseTestCommand(project, cfg)
+                    : RunnerSetup.testCommand(project, cfg));
+            o.addProperty("testCommandWindows", release
+                    ? RunnerSetup.releaseTestCommandWindows(project, cfg)
+                    : RunnerSetup.testCommandWindows(project, cfg));
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);
@@ -1345,6 +1365,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             if (body.has("labels")) {
                 cfg.setLabels(optString(body, "labels"));
             }
+            if (body.has("project") && body.has("mode")) {
+                cfg.setMode(optString(body, "project"), optString(body, "mode"));
+            }
+            // Whoever configures the runner is the fallback credential owner for repo updates.
+            cfg.setIgnitionUser(req.getActor());
 
             String issued = null;
             if (body.has("generateToken") && body.get("generateToken").getAsBoolean()) {
@@ -1384,6 +1409,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 throw new RuntimeException("A project is required.");
             }
             GitRunnerRecord cfg = GitRunnerRecord.get();
+            if (GitRunnerRecord.MODE_RELEASE.equals(cfg.getMode(project))) {
+                throw new RuntimeException("Committing the workflow is for repo updates. A release"
+                        + " workflow belongs in the repository that builds the release.");
+            }
             if (cfg.getGatewayUrl().isBlank()) {
                 throw new RuntimeException(
                         "Set the gateway address first — the workflow has to carry a real URL.");

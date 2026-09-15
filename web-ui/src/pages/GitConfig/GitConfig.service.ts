@@ -157,24 +157,32 @@ export interface SyncSetting {
   intervalSeconds: number;
   ignitionUser: string;
 }
+export interface RunnerProject {
+  name: string;
+  hasRemote: boolean;
+  // "release": a release zip replaces the project. "repo": the gateway pulls the branch.
+  mode: "release" | "repo";
+}
 export interface RunnerConfig {
   enabled: boolean;
   hasToken: boolean;
   gatewayUrl: string;
   labels: string;
-  projects: string[];
+  projects: RunnerProject[];
+  // Empty until one is chosen; the snippets then carry placeholders.
   project: string;
+  mode: "release" | "repo";
+  hasRemote: boolean;
   repoUrl: string;
   installScript: string;
+  installScriptMac: string;
   // PowerShell equivalent of installScript, for a Windows runner machine.
   installScriptWindows: string;
+  workflowPath: string;
   workflowYaml: string;
   testCommand: string;
   // PowerShell form: Windows PowerShell 5.1 aliases curl to Invoke-WebRequest.
   testCommandWindows: string;
-  // Whether the selected project has a Scheduled sync record — the runner route 404s without
-  // one, since a runner pull borrows that record's branch and credential.
-  hasSync: boolean;
 }
 export interface EventLogEntry {
   type: string;
@@ -387,6 +395,8 @@ export const gitConfigApi = baseApi.injectEndpoints({
         enabled?: boolean;
         gatewayUrl?: string;
         labels?: string;
+        project?: string;
+        mode?: "release" | "repo";
         generateToken?: boolean;
         clearToken?: boolean;
       }

@@ -22,16 +22,31 @@ configurable, default 5 minutes.
 **Actions runner (push-time).** A GitHub Actions self-hosted runner connects
 *out* to GitHub and is handed workflow jobs over that same connection, so a
 workflow step can call the gateway from inside the network — the direction
-that already works, with nothing reaching in. `RunnerSetup` generates the
-setup (the `config.sh` registration command, the workflow YAML, and a
-reachability check); `RunnerTrigger` is the route the runner calls,
-authenticated by a bearer token rather than a gateway session, since a
-workflow step has neither.
+that already works, with nothing reaching in. The runner belongs on the host,
+not inside a gateway container: on a Docker host it reaches every gateway on
+its published port, so one runner serves them all. `RunnerSetup` generates the
+setup (Linux, macOS and Windows registration commands, the workflow YAML, and a
+reachability check). Each project chooses how the runner delivers to it:
 
-A runner-requested sync runs even when the project's scheduled sync is
-disabled — turning the timer off means "pull on demand only", not "never
-pull". It still needs a `GitSyncRecord` for that project, because the runner
-route reads that record's branch and credential rather than carrying its own.
+- **Release.** On a version tag the workflow uploads a project export zip to
+  `ReleaseReceiver` (`POST /runner-release`). The gateway replaces the whole
+  project with it — a file dropped from the release disappears, which a
+  copy-over never does — keeping the project's `.git` (the module's repository
+  lives in the project folder) and `ignition/global-props/data.bin` (per-gateway
+  settings such as the default database, which a release ships neutral). The
+  upload is staged under `var/git-release`, outside `projects/`, then moved in
+  and scanned: no restart, and no repository needed on the gateway. A release
+  is authoritative and overwrites uncommitted edits, as any deployment does.
+- **Repo updates.** On a push to the branch the workflow calls `RunnerTrigger`
+  (`POST /runner-sync`) and the gateway pulls. With a `GitSyncRecord` the pull
+  uses its branch and credential; without one it uses the project's checked-out
+  branch, its remote, and the user whose stored credential that remote already
+  uses. It runs even when the scheduled timer is off — "pull on demand only",
+  not "never pull".
+
+The difference matters because a repository and a release are different
+things: the repository is raw source, often with tooling beside the project,
+while a release is the packaged export that should replace the project whole.
 
 The module does not install, register or supervise the runner. A runner
 executes whatever the workflow file says, so hosting one from inside the
@@ -52,12 +67,17 @@ Silently reverting an engineer's unsaved work is worse than not syncing.
 
 ## Workflow security model
 
-`POST /runner-sync` is mounted outside the normal session/CSRF model,
-because a GitHub Actions workflow step has neither:
+`POST /runner-sync` and `POST /runner-release` are mounted outside the normal
+session/CSRF model, because a GitHub Actions workflow step has neither:
 
-- HMAC/bearer token compared in constant time.
+- Bearer token compared in constant time, checked before the body is read.
 - Fails closed: no token configured, or the feature disabled, both 404.
-- 64 KB body cap.
+- `/runner-sync`: 64 KB body cap. `/runner-release`: 256 MB, project name
+  limited to letters, digits, `_` and `-`, every zip entry must land inside the
+  project folder, and `project.json` must be at the zip root.
+- Query parameters are read from the raw query string: `getParameter` would make
+  Jetty parse a large body without a zip Content-Type as a form and fail.
+- A release and a sync of the same project never run at once.
 
 ## The workflow file is committed by the gateway
 

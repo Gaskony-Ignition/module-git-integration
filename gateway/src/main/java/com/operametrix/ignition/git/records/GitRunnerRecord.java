@@ -1,6 +1,8 @@
 package com.operametrix.ignition.git.records;
 
+import com.inductiveautomation.ignition.common.gson.Gson;
 import com.inductiveautomation.ignition.common.gson.JsonElement;
+import com.inductiveautomation.ignition.common.gson.JsonObject;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceType;
 import com.inductiveautomation.ignition.gateway.config.DecodedResource;
 import com.inductiveautomation.ignition.gateway.config.NamedResourceHandler;
@@ -37,7 +39,16 @@ public class GitRunnerRecord {
     /** Labels a generated workflow targets, and that the generated config.sh registers with. */
     public static final String DEFAULT_LABELS = "self-hosted,ignition";
 
-    public record Config(boolean enabled, SecretConfig token, String gatewayUrl, String labels) {}
+    /** How a runner delivers to a project: a release zip replacing it, or a pull of its branch. */
+    public static final String MODE_RELEASE = "release";
+    public static final String MODE_REPO = "repo";
+
+    /**
+     * {@code ignitionUser} and {@code modes} arrived in 3.1.0, so a record saved earlier decodes
+     * them as null. {@code modes} is a JSON object of project name to mode.
+     */
+    public record Config(boolean enabled, SecretConfig token, String gatewayUrl, String labels,
+                         String ignitionUser, String modes) {}
 
     public static final ResourceType TYPE = new ResourceType(MODULE_ID, "git-runner");
 
@@ -63,6 +74,8 @@ public class GitRunnerRecord {
     private SecretConfig token;
     private String gatewayUrl = "";
     private String labels = DEFAULT_LABELS;
+    private String ignitionUser = "";
+    private JsonObject modes = new JsonObject();
 
     public GitRunnerRecord() {
     }
@@ -72,6 +85,14 @@ public class GitRunnerRecord {
         this.token = c.token();
         this.gatewayUrl = c.gatewayUrl() == null ? "" : c.gatewayUrl();
         this.labels = c.labels() == null || c.labels().isBlank() ? DEFAULT_LABELS : c.labels();
+        this.ignitionUser = c.ignitionUser() == null ? "" : c.ignitionUser();
+        try {
+            JsonObject m = c.modes() == null || c.modes().isBlank()
+                    ? null : new Gson().fromJson(c.modes(), JsonObject.class);
+            this.modes = m == null ? new JsonObject() : m;
+        } catch (Exception e) {
+            this.modes = new JsonObject();
+        }
     }
 
     /** The stored configuration, or a disabled default when none has been saved. */
@@ -119,6 +140,34 @@ public class GitRunnerRecord {
 
     public void setLabels(String v) {
         this.labels = v == null || v.isBlank() ? DEFAULT_LABELS : v.trim();
+    }
+
+    /**
+     * The Ignition user who last saved the runner settings. A repo-updates pull runs unattended,
+     * so when no remote credential names a user this is whose credential it falls back to.
+     */
+    public String getIgnitionUser() {
+        return ignitionUser == null ? "" : ignitionUser;
+    }
+
+    public void setIgnitionUser(String v) {
+        this.ignitionUser = v == null ? "" : v.trim();
+    }
+
+    /** The project's delivery mode; a project nobody has chosen for receives releases. */
+    public String getMode(String project) {
+        if (project == null || !modes.has(project)) {
+            return MODE_RELEASE;
+        }
+        String m = modes.get(project).getAsString();
+        return MODE_REPO.equals(m) ? MODE_REPO : MODE_RELEASE;
+    }
+
+    public void setMode(String project, String mode) {
+        if (project == null || project.isBlank()) {
+            return;
+        }
+        modes.addProperty(project, MODE_REPO.equals(mode) ? MODE_REPO : MODE_RELEASE);
     }
 
     /** Generates a new token, stores it encrypted, and returns the plaintext for one-time display. */
@@ -170,7 +219,8 @@ public class GitRunnerRecord {
 
     public void save() {
         try {
-            Config c = new Config(enabled, token, getGatewayUrl(), getLabels());
+            Config c = new Config(enabled, token, getGatewayUrl(), getLabels(), getIgnitionUser(),
+                    modes.toString());
             if (handler.findResource(NAME).isPresent()) {
                 handler.modify(NAME, c).join();
             } else {

@@ -64,11 +64,12 @@ const Automation = () => {
         <div>
           <h3>Automation: pulling changes in</h3>
           <p>
-            Both tabs bring commits from a project&apos;s remote down onto this
-            gateway. Scheduled sync checks on a timer; the Actions runner pulls
-            the moment a branch moves on GitHub. Nothing on this page pushes or
-            sends anything out: commits and pushes happen in the Designer, and
-            gateway config is pushed from the Remote Sync button above.
+            Both tabs bring changes onto this gateway. Scheduled sync pulls a
+            project&apos;s branch on a timer. The Actions runner lets a GitHub
+            workflow install a release, or pull the branch the moment it moves.
+            Nothing on this page pushes or sends anything out: commits and
+            pushes happen in the Designer, and gateway config is pushed from the
+            Remote Sync button above.
           </p>
         </div>
       </div>
@@ -259,9 +260,9 @@ const Automation = () => {
             </h4>
             <p>
               The last 50 git events since the gateway started: commits, pushes,
-              pulls, config auto-commits, and every scheduled or runner sync. An
-              unattended sync that refused or failed is reported here, with its
-              reason, and nowhere else.
+              pulls, config auto-commits, every scheduled or runner sync, and
+              every release a runner installed. An unattended sync that refused
+              or failed is reported here, with its reason, and nowhere else.
             </p>
           </div>
           <div className="gitcfg-excluded-actions">

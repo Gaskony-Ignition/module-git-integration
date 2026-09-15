@@ -3,24 +3,22 @@ package com.operametrix.ignition.git.automation;
 import com.inductiveautomation.ignition.common.gson.Gson;
 import com.inductiveautomation.ignition.common.gson.JsonObject;
 import com.inductiveautomation.ignition.gateway.dataroutes.RequestContext;
+import com.operametrix.ignition.git.managers.GitProjectManager;
+import com.operametrix.ignition.git.records.GitProjectsConfigRecord;
+import com.operametrix.ignition.git.records.GitRemoteCredentialsRecord;
 import com.operametrix.ignition.git.records.GitRunnerRecord;
 import com.operametrix.ignition.git.records.GitSyncRecord;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.util.Arrays;
 
 /**
- * The one route a self-hosted runner calls: pull the named project now.
+ * The route a runner calls in repo-updates mode: pull the named project's branch now.
  *
- * <p>It carries no permission check and no CSRF token, because a workflow step has neither a
- * gateway session nor a way to obtain one. Everything the session would normally do is therefore
- * done here instead, and the order matters: reject before parsing, and parse before acting.
+ * <p>Access control is {@link RunnerAuth}; everything the session would normally do is done
+ * there instead, before the body is read.
  *
  * <p>Unlike the webhook this replaced, the caller is on the local network — the runner dials out
  * to GitHub and is handed the job over its own connection, so nothing about this route needs to
@@ -37,47 +35,21 @@ public final class RunnerTrigger {
     }
 
     public static Object handle(RequestContext req, HttpServletResponse resp) {
-        GitRunnerRecord cfg = GitRunnerRecord.get();
-
-        // Fail closed, and say as little as possible. A gateway with the runner turned off should
-        // be indistinguishable from one that does not have this module at all.
-        if (!cfg.isEnabled() || !cfg.hasToken()) {
-            resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return "{}";
-        }
-
-        byte[] body;
-        try {
-            body = readBody(req);
-        } catch (IllegalStateException tooBig) {
-            resp.setStatus(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
-            return "{\"error\":\"body too large\"}";
-        } catch (Exception e) {
-            resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-            return "{\"error\":\"unreadable body\"}";
-        }
-
-        byte[] expected = cfg.tokenBytes();
-        try {
-            if (!tokenValid(req, expected)) {
-                // Deliberately not logged with the offered token: someone probing this route
-                // should learn nothing from the gateway log either.
-                logger.warn("Rejected a runner sync request with a bad or missing token.");
-                resp.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                return "{\"error\":\"bad token\"}";
-            }
-        } finally {
-            if (expected != null) {
-                Arrays.fill(expected, (byte) 0);
-            }
+        String rejected = RunnerAuth.reject(req, resp);
+        if (rejected != null) {
+            return rejected;
         }
 
         String project;
         try {
+            byte[] body = RunnerAuth.readBody(req, MAX_BODY_BYTES);
             JsonObject o = new Gson().fromJson(new String(body, StandardCharsets.UTF_8),
                     JsonObject.class);
             project = o != null && o.has("project") && !o.get("project").isJsonNull()
                     ? o.get("project").getAsString() : null;
+        } catch (IllegalStateException tooBig) {
+            resp.setStatus(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+            return "{\"error\":\"body too large\"}";
         } catch (Exception e) {
             resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             return "{\"error\":\"body is not JSON\"}";
@@ -88,17 +60,19 @@ public final class RunnerTrigger {
             return "{\"error\":\"no project named\"}";
         }
 
+        // A Scheduled sync record, when one exists, says which branch and credential to use.
+        // Without one the project's own checked-out branch and remote are used.
         GitSyncRecord sync = GitSyncRecord.findByProject(project);
         if (sync == null) {
-            // The runner named a project this gateway does not sync. That is a workflow error
-            // worth reporting plainly — the token already proved the caller is ours.
+            sync = fromProject(project);
+        }
+        if (sync == null) {
             resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return "{\"error\":\"sync is not configured for '" + project + "'\"}";
+            return "{\"error\":\"'" + project + "' is not a git repository with a remote on this gateway\"}";
         }
 
         try {
-            // Deliberately runs even when the project's scheduled sync is disabled: turning the
-            // timer off is how you say "pull on demand only", not "never pull".
+            // Runs even when the scheduled timer is off: that says "pull on demand only".
             String result = SyncScheduler.syncNow(sync);
             logger.info("Runner requested a sync of '{}': {}", project, result);
             JsonObject o = new JsonObject();
@@ -116,42 +90,38 @@ public final class RunnerTrigger {
         }
     }
 
-    /** Constant-time comparison of the bearer token, so a wrong guess leaks no timing. */
-    private static boolean tokenValid(RequestContext req, byte[] expected) {
-        if (expected == null) {
-            return false;
-        }
-        String offered = header(req, "Authorization");
-        if (offered == null) {
-            return false;
-        }
-        offered = offered.trim();
-        if (offered.regionMatches(true, 0, "Bearer ", 0, 7)) {
-            offered = offered.substring(7).trim();
-        }
-        return MessageDigest.isEqual(offered.getBytes(StandardCharsets.UTF_8), expected);
-    }
-
-    private static byte[] readBody(RequestContext req) throws Exception {
-        try (InputStream in = req.getRequest().getInputStream()) {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buf = new byte[8192];
-            int read;
-            while ((read = in.read(buf)) != -1) {
-                out.write(buf, 0, read);
-                if (out.size() > MAX_BODY_BYTES) {
-                    throw new IllegalStateException("body too large");
-                }
-            }
-            return out.toByteArray();
-        }
-    }
-
-    private static String header(RequestContext req, String name) {
-        try {
-            return req.getRequest().getHeader(name);
-        } catch (Exception e) {
+    /**
+     * An unsaved sync setting built from the project itself: its checked-out branch, its remote,
+     * and the user whose stored credential that remote already uses. Null when the project is not
+     * a repository with a remote.
+     */
+    static GitSyncRecord fromProject(String project) {
+        GitProjectManager.ProjectStatus status = GitProjectManager.listProjectStatus().stream()
+                .filter(p -> p.name().equals(project) && p.versioned()
+                        && p.remoteUrl() != null && !p.remoteUrl().isBlank())
+                .findFirst().orElse(null);
+        if (status == null) {
             return null;
         }
+        String remote = status.remoteName() == null ? "origin" : status.remoteName();
+
+        String user = GitRunnerRecord.get().getIgnitionUser();
+        GitProjectsConfigRecord reg = GitProjectsConfigRecord.findByProjectName(project);
+        if (reg != null) {
+            user = GitRemoteCredentialsRecord.listByProject(reg.getId()).stream()
+                    .filter(c -> remote.equals(c.getRemoteName())
+                            && (c.getHttpsCredentialId() > 0 || c.getSshKeyId() > 0))
+                    .map(GitRemoteCredentialsRecord::getIgnitionUser)
+                    .findFirst().orElse(user);
+        }
+
+        GitSyncRecord s = new GitSyncRecord();
+        s.setProject(project);
+        s.setEnabled(false);
+        s.setRemoteName(remote);
+        String branch = status.branch();
+        s.setBranch(branch == null || branch.contains("(detached)") ? "" : branch);
+        s.setIgnitionUser(user);
+        return s;
     }
 }
