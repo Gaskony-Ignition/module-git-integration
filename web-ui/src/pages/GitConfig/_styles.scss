@@ -617,3 +617,42 @@
     color: #b54708;
   }
 }
+
+// One snippet at a time. Three stacked install blocks made every step three screens tall, and
+// the OS you need is rarely the one you are reading the page on.
+.gitcfg-os {
+  margin: 0.5rem 0 0.75rem;
+
+  .gitcfg-subtabs {
+    margin: 0 0 0.35rem;
+  }
+}
+
+// A cross-reference that reads as prose rather than as another button to press.
+.gitcfg-linkish {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #4a90d9;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.gitcfg-help {
+  max-width: 60rem;
+
+  table {
+    margin-bottom: 0.75rem;
+  }
+
+  td:first-child {
+    white-space: nowrap;
+  }
+}
+
+// Comparison tables are the one thing allowed to be wider than the page; they scroll in place
+// rather than making the whole page scroll sideways at 1366px.
+.gitcfg-table-scroll {
+  overflow-x: auto;
+}

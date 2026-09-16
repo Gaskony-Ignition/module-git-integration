@@ -19,18 +19,44 @@ import java.util.Arrays;
  * control. It runs before anything is read from the body: a release upload is up to 256 MB, and
  * an unauthenticated caller must not be able to make the gateway stream that to disk.
  */
-final class RunnerAuth {
+public final class RunnerAuth {
 
     private static final Logger logger = LoggerFactory.getLogger(RunnerAuth.class);
 
+    /**
+     * When a runner last authenticated successfully, and on which route. The Runner tab uses it to
+     * stop asking someone to install a runner that demonstrably already exists — a call that got
+     * this far proves a runner exists, reaches this gateway and holds the right token, which is
+     * more than GitHub's own runners API could tell us without an admin-scoped credential.
+     *
+     * <p>Deliberately in memory and not on the config record: a runner calls on every deploy, and
+     * persisting each one would put a config commit in the versioning history per deploy. The
+     * cost is that a gateway restart forgets it, so the page words the empty case as "not since
+     * this gateway started" rather than as proof that no runner exists.
+     */
+    private static volatile long lastCallAt;
+    private static volatile String lastCallKind = "";
+
     private RunnerAuth() {
+    }
+
+    /** Millis of the last authenticated runner call, or 0 if there has been none. */
+    public static long lastCallAt() {
+        return lastCallAt;
+    }
+
+    /** {@code "release"} or {@code "sync"} — which route that last call was. */
+    public static String lastCallKind() {
+        return lastCallKind;
     }
 
     /**
      * Null when the caller may proceed; otherwise the response body, with the status already set.
      * A gateway with the runner off answers 404, indistinguishable from one without this module.
+     *
+     * @param kind the route being called, recorded for the Runner tab when the call is allowed
      */
-    static String reject(RequestContext req, HttpServletResponse resp) {
+    static String reject(RequestContext req, HttpServletResponse resp, String kind) {
         GitRunnerRecord cfg = GitRunnerRecord.get();
         if (!cfg.isEnabled() || !cfg.hasToken()) {
             resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
@@ -49,6 +75,8 @@ final class RunnerAuth {
                 Arrays.fill(expected, (byte) 0);
             }
         }
+        lastCallAt = System.currentTimeMillis();
+        lastCallKind = kind;
         return null;
     }
 

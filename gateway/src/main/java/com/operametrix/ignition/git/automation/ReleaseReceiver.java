@@ -5,6 +5,7 @@ import com.inductiveautomation.ignition.gateway.dataroutes.RequestContext;
 import com.operametrix.ignition.git.GatewayHook;
 import com.operametrix.ignition.git.managers.GitManager;
 import com.operametrix.ignition.git.managers.GitProjectManager;
+import com.operametrix.ignition.git.records.GitRunnerRecord;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,7 +68,7 @@ public final class ReleaseReceiver {
     }
 
     public static Object handle(RequestContext req, HttpServletResponse resp) {
-        String rejected = RunnerAuth.reject(req, resp);
+        String rejected = RunnerAuth.reject(req, resp, "release");
         if (rejected != null) {
             return rejected;
         }
@@ -81,6 +82,15 @@ public final class ReleaseReceiver {
         if (project == null || !PROJECT_NAME.matcher(project).matches()) {
             resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             return error("name the project with ?project=, letters, digits, _ and - only");
+        }
+        // A project deliberately set to Repo updates must not be replaced wholesale by a release.
+        // Refusing loudly beats installing it anyway: a workflow aimed at the wrong route would
+        // otherwise overwrite a project someone is pulling into, and nothing would say so. A
+        // project nobody has chosen for accepts either route, as it always has.
+        if (GitRunnerRecord.MODE_REPO.equals(GitRunnerRecord.get().chosenMode(project))) {
+            resp.setStatus(HttpServletResponse.SC_CONFLICT);
+            return error("'" + project + "' is set to receive repo updates, not releases."
+                    + " Change its delivery on the Actions runner tab, or call /runner-sync.");
         }
         if (!SyncScheduler.acquire(project)) {
             resp.setStatus(HttpServletResponse.SC_CONFLICT);

@@ -39,7 +39,14 @@ public final class RunnerSetup {
 
     private static final String PROJECT_PLACEHOLDER = "<project>";
     private static final String REPO_PLACEHOLDER = "<repository url>";
+    private static final String ORG_PLACEHOLDER = "<organisation url>";
     private static final String GATEWAY_PLACEHOLDER = "<gateway url>";
+
+    /** A runner registers against one repository. */
+    public static final String SCOPE_REPO = "repo";
+
+    /** A runner registers against the whole organisation and serves every repository in it. */
+    public static final String SCOPE_ORG = "org";
 
     private RunnerSetup() {
     }
@@ -66,6 +73,32 @@ public final class RunnerSetup {
     }
 
     /**
+     * The owning organisation's URL — the repository URL minus its last path segment.
+     *
+     * <p>A runner registers at exactly one scope, and this is the one that matters most of the
+     * time: a machine standing beside a gateway usually receives from several project
+     * repositories, and a repository-scoped runner serves only the one it was registered against.
+     * GitHub's own answer to this is runner groups, which private repositories cannot use below
+     * the Team plan, so scope plus labels is the portable way to do it.
+     */
+    public static String orgUrl(String remoteUrl) {
+        String r = repoUrl(remoteUrl);
+        int slash = r.lastIndexOf('/');
+        // Below three slashes there is no owner segment left — "https://github.com" itself.
+        return slash <= "https://".length() ? "" : r.substring(0, slash);
+    }
+
+    private static String org(String remoteUrl) {
+        String o = orgUrl(remoteUrl);
+        return o.isEmpty() ? ORG_PLACEHOLDER : o;
+    }
+
+    /** Where {@code config.sh --url} points, and where the registration token is minted. */
+    private static String registerAt(String remoteUrl, String scope) {
+        return SCOPE_ORG.equals(scope) ? org(remoteUrl) : repo(remoteUrl);
+    }
+
+    /**
      * The runner labels as {@code config.sh}/{@code config.cmd} need them: comma-separated with no
      * spaces. The field is free text and people type {@code self-hosted, ignition}; pasted raw, the
      * space splits it into two shell arguments and registration fails on a stray {@code ignition}.
@@ -89,15 +122,27 @@ public final class RunnerSetup {
         return cfg.getGatewayUrl().isEmpty() ? GATEWAY_PLACEHOLDER : cfg.getGatewayUrl();
     }
 
+    /** The two comment lines that say where to register and where the token comes from. */
+    private static String scopeNote(String remoteUrl, String scope, String comment) {
+        String at = registerAt(remoteUrl, scope);
+        return SCOPE_ORG.equals(scope)
+                ? comment + " Registering at the ORGANISATION: this one runner then serves every\n"
+                        + comment + " repository in it. Get the token from "
+                        + at + "/settings/actions/runners/new"
+                : comment + " Registering at this REPOSITORY: the runner serves only it. Get the\n"
+                        + comment + " token from " + at + "/settings/actions/runners/new";
+    }
+
     /** Linux and macOS share the tarball install and differ only in the build and the service. */
-    private static String unixInstall(String remoteUrl, GitRunnerRecord cfg, String platform,
-                                      String service) {
-        String repo = repo(remoteUrl);
+    private static String unixInstall(String remoteUrl, GitRunnerRecord cfg, String scope,
+                                      String platform, String service) {
         return String.join("\n",
                 "# Run on the machine that will reach the gateway — the host, NOT inside a gateway",
                 "# container. A runner on a Docker host reaches its gateways on their published ports.",
-                "# Get REG_TOKEN from " + repo + "/settings/actions/runners/new (it expires in an hour),",
-                "# or from the organisation's runner settings to share one runner across repositories.",
+                "# One runner serves every gateway and repository it can reach, so this is once per",
+                "# machine, not once per project.",
+                scopeNote(remoteUrl, scope, "#"),
+                "# The token expires in an hour.",
                 "REG_TOKEN=<paste the registration token>",
                 "",
                 "mkdir -p ~/actions-runner && cd ~/actions-runner",
@@ -105,8 +150,9 @@ public final class RunnerSetup {
                         + RUNNER_VERSION + "/actions-runner-" + platform + "-" + RUNNER_VERSION + ".tar.gz",
                 "tar xzf runner.tar.gz",
                 "",
+                "# --labels is what routes jobs here: a workflow's runs-on must list the same ones.",
                 "./config.sh --unattended \\",
-                "  --url " + repo + " \\",
+                "  --url " + registerAt(remoteUrl, scope) + " \\",
                 "  --token \"$REG_TOKEN\" \\",
                 "  --labels " + labelsArg(cfg) + " \\",
                 "  --name ignition-$(hostname -s)",
@@ -115,28 +161,30 @@ public final class RunnerSetup {
     }
 
     /** The shell that downloads, registers and installs the runner as a service (Linux). */
-    public static String installScript(String remoteUrl, GitRunnerRecord cfg) {
-        return unixInstall(remoteUrl, cfg, "linux-x64", "sudo ./svc.sh install && sudo ./svc.sh start");
+    public static String installScript(String remoteUrl, GitRunnerRecord cfg, String scope) {
+        return unixInstall(remoteUrl, cfg, scope, "linux-x64",
+                "sudo ./svc.sh install && sudo ./svc.sh start");
     }
 
     /**
      * The same for macOS. The runner ships a separate Apple-silicon build, and its {@code svc.sh}
      * installs a launchd agent for the logged-in user, so it runs without sudo.
      */
-    public static String installScriptMac(String remoteUrl, GitRunnerRecord cfg) {
-        return unixInstall(remoteUrl, cfg, "osx-arm64", "./svc.sh install && ./svc.sh start");
+    public static String installScriptMac(String remoteUrl, GitRunnerRecord cfg, String scope) {
+        return unixInstall(remoteUrl, cfg, scope, "osx-arm64", "./svc.sh install && ./svc.sh start");
     }
 
     /**
      * The PowerShell that downloads, registers and installs the runner as a service (Windows).
      * Run elevated, on the host rather than inside a container.
      */
-    public static String installScriptWindows(String remoteUrl, GitRunnerRecord cfg) {
-        String repo = repo(remoteUrl);
+    public static String installScriptWindows(String remoteUrl, GitRunnerRecord cfg, String scope) {
         return String.join("\n",
                 "# Run in an ELEVATED PowerShell (service install needs it), on the machine that",
                 "# will reach the gateway — the host, NOT inside a gateway container.",
-                "# Get $REG_TOKEN from " + repo + "/settings/actions/runners/new (it expires in an hour).",
+                "# One runner serves every gateway and repository it can reach.",
+                scopeNote(remoteUrl, scope, "#"),
+                "# The token expires in an hour.",
                 "$REG_TOKEN = \"<paste the registration token>\"",
                 "",
                 "New-Item -ItemType Directory -Force C:\\actions-runner | Out-Null",
@@ -146,7 +194,8 @@ public final class RunnerSetup {
                         + ".zip -OutFile runner.zip",
                 "Expand-Archive runner.zip -DestinationPath . -Force",
                 "",
-                ".\\config.cmd --unattended --url " + repo
+                "# --labels is what routes jobs here: a workflow's runs-on must list the same ones.",
+                ".\\config.cmd --unattended --url " + registerAt(remoteUrl, scope)
                         + " --token $REG_TOKEN --labels " + labelsArg(cfg)
                         + " --name \"ignition-$env:COMPUTERNAME\" --runasservice");
     }
@@ -169,6 +218,15 @@ public final class RunnerSetup {
         String p = project(project);
         return String.join("\n",
                 "# " + WORKFLOW_PATH,
+                "#",
+                "# An EXAMPLE. If the repository already has a deployment workflow, add the step",
+                "# below to it rather than adding this file — two workflows deploying the same",
+                "# project will fight.",
+                "#",
+                "# Three values have to agree with the Actions runner tab, and nothing checks them:",
+                "#   runs-on   the labels the runner was registered with (a mismatch queues for ever)",
+                "#   the URL   the address the RUNNER reaches this gateway on, not the one you browse",
+                "#   the secret  a repository or organisation secret holding the generated token",
                 "name: Sync to Ignition",
                 "",
                 "on:",
@@ -214,6 +272,17 @@ public final class RunnerSetup {
         String url = base + "/data/git-config/runner-release?project=" + project(project);
         return String.join("\n",
                 "# " + RELEASE_WORKFLOW_PATH,
+                "#",
+                "# An EXAMPLE. If the repository already builds and deploys its release, keep all of",
+                "# that and copy only the upload step, pointing it at the zip you already produce.",
+                "#",
+                "# Three values have to agree with the Actions runner tab, and nothing checks them:",
+                "#   runs-on   the labels the runner was registered with (a mismatch queues for ever)",
+                "#   the URL   the address the RUNNER reaches this gateway on, not the one you browse",
+                "#   the secret  a repository or organisation secret holding the generated token",
+                "#",
+                "# The gateway needs no git credentials for this: the runner does every git",
+                "# operation and the gateway only receives an authenticated zip.",
                 "name: Release to Ignition",
                 "",
                 "on:",

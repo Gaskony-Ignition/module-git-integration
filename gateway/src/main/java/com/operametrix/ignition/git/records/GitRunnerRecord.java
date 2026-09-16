@@ -143,6 +143,29 @@ public class GitRunnerRecord {
     }
 
     /**
+     * A detached copy carrying a different address and labels, for generating the setup commands
+     * from values that have been typed but not yet saved.
+     *
+     * <p>Safe precisely because neither field is used when a runner actually calls: the gateway
+     * authenticates by token and acts on the request, and never reads its own configured address
+     * or labels. They exist only to fill in the commands, so previewing them changes nothing.
+     * A blank override keeps the saved value. The copy is never saved.
+     */
+    public GitRunnerRecord withOverrides(String gatewayUrl, String labels) {
+        if ((gatewayUrl == null || gatewayUrl.isBlank()) && (labels == null || labels.isBlank())) {
+            return this;
+        }
+        GitRunnerRecord copy = new GitRunnerRecord();
+        copy.enabled = this.enabled;
+        copy.token = this.token;
+        copy.ignitionUser = this.ignitionUser;
+        copy.modes = this.modes;
+        copy.setGatewayUrl(gatewayUrl == null || gatewayUrl.isBlank() ? this.gatewayUrl : gatewayUrl);
+        copy.setLabels(labels == null || labels.isBlank() ? this.labels : labels);
+        return copy;
+    }
+
+    /**
      * The Ignition user who last saved the runner settings. A repo-updates pull runs unattended,
      * so when no remote credential names a user this is whose credential it falls back to.
      */
@@ -156,8 +179,21 @@ public class GitRunnerRecord {
 
     /** The project's delivery mode; a project nobody has chosen for receives releases. */
     public String getMode(String project) {
+        String m = chosenMode(project);
+        return m == null ? MODE_RELEASE : m;
+    }
+
+    /**
+     * The mode somebody actually chose for this project, or null if nobody has.
+     *
+     * <p>The routes enforce the choice — a release upload to a project set to Repo updates is
+     * refused rather than silently doing the other thing — and this is what keeps that from
+     * breaking an install upgraded from a version with no modes at all. Unset means "either",
+     * which is exactly how those gateways behave today; enforcement begins when a choice is made.
+     */
+    public String chosenMode(String project) {
         if (project == null || !modes.has(project)) {
-            return MODE_RELEASE;
+            return null;
         }
         String m = modes.get(project).getAsString();
         return MODE_REPO.equals(m) ? MODE_REPO : MODE_RELEASE;

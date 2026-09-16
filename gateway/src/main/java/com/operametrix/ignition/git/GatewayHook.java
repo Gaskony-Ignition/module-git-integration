@@ -2,7 +2,9 @@ package com.operametrix.ignition.git;
 
 import com.operametrix.ignition.git.automation.GitEvent;
 import com.operametrix.ignition.git.automation.ReleaseReceiver;
+import com.operametrix.ignition.git.automation.RunnerAuth;
 import com.operametrix.ignition.git.automation.RunnerSetup;
+import com.operametrix.ignition.git.automation.WorkflowScan;
 import com.operametrix.ignition.git.automation.RunnerTrigger;
 import com.operametrix.ignition.git.automation.GitEvents;
 import com.operametrix.ignition.git.automation.SyncScheduler;
@@ -1299,6 +1301,23 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             o.addProperty("gatewayUrl", cfg.getGatewayUrl());
             o.addProperty("labels", cfg.getLabels());
 
+            // The address and the labels are only ever used to fill in the generated commands —
+            // the gateway itself reads neither when a runner calls. So the page may preview them
+            // as they are typed, before Save. These overrides affect this response and nothing
+            // else: a GET never writes.
+            GitRunnerRecord snippetCfg = cfg.withOverrides(
+                    req.getParameter("gatewayUrl"), req.getParameter("labels"));
+            String scope = RunnerSetup.SCOPE_ORG.equals(req.getParameter("scope"))
+                    ? RunnerSetup.SCOPE_ORG : RunnerSetup.SCOPE_REPO;
+            o.addProperty("scope", scope);
+
+            // Whether a runner already reaches this gateway, so the page can stop asking for an
+            // install that is demonstrably done. In memory, so it is empty after a restart.
+            JsonObject seen = new JsonObject();
+            seen.addProperty("at", RunnerAuth.lastCallAt());
+            seen.addProperty("kind", RunnerAuth.lastCallKind());
+            o.add("runnerSeen", seen);
+
             // Nothing is chosen for the caller. With no project named, every snippet carries
             // placeholders: the snippets read as examples, and a real project name nobody picked
             // would be copied into other people's workflows.
@@ -1331,21 +1350,39 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             o.addProperty("mode", mode);
             o.addProperty("hasRemote", remoteUrl != null);
             o.addProperty("repoUrl", RunnerSetup.repoUrl(remoteUrl));
-            o.addProperty("installScript", RunnerSetup.installScript(remoteUrl, cfg));
-            o.addProperty("installScriptMac", RunnerSetup.installScriptMac(remoteUrl, cfg));
-            o.addProperty("installScriptWindows", RunnerSetup.installScriptWindows(remoteUrl, cfg));
+            o.addProperty("orgUrl", RunnerSetup.orgUrl(remoteUrl));
+            o.addProperty("installScript", RunnerSetup.installScript(remoteUrl, snippetCfg, scope));
+            o.addProperty("installScriptMac",
+                    RunnerSetup.installScriptMac(remoteUrl, snippetCfg, scope));
+            o.addProperty("installScriptWindows",
+                    RunnerSetup.installScriptWindows(remoteUrl, snippetCfg, scope));
             o.addProperty("branch", branch == null ? "" : branch);
             o.addProperty("workflowPath",
                     release ? RunnerSetup.RELEASE_WORKFLOW_PATH : RunnerSetup.WORKFLOW_PATH);
             o.addProperty("workflowYaml", release
-                    ? RunnerSetup.releaseWorkflowYaml(project, cfg)
-                    : RunnerSetup.workflowYaml(project, branch, cfg));
+                    ? RunnerSetup.releaseWorkflowYaml(project, snippetCfg)
+                    : RunnerSetup.workflowYaml(project, branch, snippetCfg));
             o.addProperty("testCommand", release
-                    ? RunnerSetup.releaseTestCommand(project, cfg)
-                    : RunnerSetup.testCommand(project, cfg));
+                    ? RunnerSetup.releaseTestCommand(project, snippetCfg)
+                    : RunnerSetup.testCommand(project, snippetCfg));
             o.addProperty("testCommandWindows", release
-                    ? RunnerSetup.releaseTestCommandWindows(project, cfg)
-                    : RunnerSetup.testCommandWindows(project, cfg));
+                    ? RunnerSetup.releaseTestCommandWindows(project, snippetCfg)
+                    : RunnerSetup.testCommandWindows(project, snippetCfg));
+
+            // What the repository already deploys with. Adding a second workflow beside an
+            // existing one is the wrong answer far more often than it is the right one.
+            WorkflowScan.Result scan = WorkflowScan.scan(project);
+            JsonObject workflows = new JsonObject();
+            workflows.addProperty("detectable", scan.detectable());
+            JsonArray list = new JsonArray();
+            for (WorkflowScan.Workflow w : scan.workflows()) {
+                JsonObject wo = new JsonObject();
+                wo.addProperty("path", w.path());
+                wo.addProperty("callsGateway", w.callsGateway());
+                list.add(wo);
+            }
+            workflows.add("list", list);
+            o.add("workflows", workflows);
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);

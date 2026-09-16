@@ -60,10 +60,24 @@ same connection, so a workflow can hand this gateway a release — or ask it to
 pull a branch — with nothing reaching in. Each project picks **Release** (a zip
 replaces the whole project, applied without a restart) or **Repo updates** (pull
 the branch). The tab generates the setup with this gateway's values in it:
-runner install commands for Linux, macOS and Windows, the workflow, the token,
-and a check that the runner can reach the gateway.
+registration commands for Linux, macOS and Windows — for a runner serving one
+repository or the whole organisation — the workflow, the token, and a check that
+the runner can reach the gateway. It also reports what is already in place: when
+a runner last called this gateway, and which workflows the project's repository
+already has, so an existing deployment gains one step instead of a second
+workflow racing the first.
 
-![The Actions runner tab, with the generated setup](docs/images/versioning-runner.png)
+![The Actions runner tab: every project and its delivery, the values the commands are built from, and what is already in place](docs/images/versioning-runner.png)
+
+Push or pull is a real choice, and the tab beside it makes it rather than
+implying one. git-sync — something polling the repository and writing the files
+down — is the pull model, and this module is already that when a project is set
+to Repo updates or given a scheduled sync. A runner is the push model, and the
+difference that usually decides it is that only push can build, gate, or report
+back. The same tab says which combinations need git credentials on the gateway:
+a release needs none at all.
+
+![The Which should I use? tab, comparing push against pull and listing which delivery modes need credentials](docs/images/versioning-automation-help.png)
 
 ## What it does
 
@@ -114,16 +128,29 @@ sync**, press *Set up* for a project, choose a branch and interval, then
 
 Push-time delivery: **Automation → Actions runner**.
 
-1. Tick *Accept requests from a runner* and set the address the runner reaches
-   this gateway on — for a runner on the same Docker host, `http://localhost:`
-   and the published port.
-2. Generate a token and save it in GitHub as the secret `IGNITION_SYNC_TOKEN`.
-3. Choose the project and **Release** or **Repo updates**.
-4. Install the runner on the host with the command for its OS (once per machine).
-5. Add the workflow: for Release, add it (or just its upload step) to the
-   repository that builds the release; for Repo updates, press *Commit the
-   workflow to the repository*.
-6. Run the test command from the runner machine before relying on it.
+1. Tick *Accept requests from a runner*, and Save. With the token below, this is
+   the whole of what the gateway acts on.
+2. Generate a token and save it in GitHub as the secret `IGNITION_SYNC_TOKEN` —
+   a repository secret, or an organisation secret if the plan allows it. **Keep
+   the value.** It is one token per gateway, shown once; every repository that
+   deploys here holds a copy of it, and generating a new one immediately stops
+   the old one working.
+3. Choose the project and **Release** or **Repo updates**. The gateway holds the
+   project to that choice and refuses the other route.
+4. Set the address the runner reaches this gateway on — for a runner on the same
+   Docker host, `http://localhost:` and the published port — and the labels the
+   runner carries. These fill in the commands below; the gateway reads neither.
+5. If no runner serves the machine yet, register one with the command for its OS,
+   choosing whether it serves this repository or the whole organisation. One
+   runner serves every gateway and repository it can reach.
+6. Make a workflow call the gateway: add the upload step to whatever already
+   deploys the project, or for Repo updates press *Commit the workflow to the
+   repository*. Nothing happens until one does.
+7. Run the test command from the runner machine before relying on it.
+
+*Which should I use?* on the same tab compares this with the pull model
+(Scheduled sync), and says which modes need git credentials on the gateway —
+Release needs none at all.
 
 To build from source you need `gradle.properties` with the signing block —
 copy it from `gradle.template.properties` and fill in the keystore details:

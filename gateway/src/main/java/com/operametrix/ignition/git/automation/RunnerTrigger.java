@@ -35,7 +35,7 @@ public final class RunnerTrigger {
     }
 
     public static Object handle(RequestContext req, HttpServletResponse resp) {
-        String rejected = RunnerAuth.reject(req, resp);
+        String rejected = RunnerAuth.reject(req, resp, "sync");
         if (rejected != null) {
             return rejected;
         }
@@ -58,6 +58,15 @@ public final class RunnerTrigger {
         if (project == null || project.isBlank()) {
             resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             return "{\"error\":\"no project named\"}";
+        }
+
+        // The mirror of the guard in ReleaseReceiver: a project set to receive releases is
+        // replaced wholesale by them, so pulling into it would fight the next release rather
+        // than add to it. Unset accepts either route, as it always has.
+        if (GitRunnerRecord.MODE_RELEASE.equals(GitRunnerRecord.get().chosenMode(project))) {
+            resp.setStatus(HttpServletResponse.SC_CONFLICT);
+            return "{\"error\":\"'" + project + "' is set to receive releases, not repo updates."
+                    + " Change its delivery on the Actions runner tab, or call /runner-release.\"}";
         }
 
         // A Scheduled sync record, when one exists, says which branch and credential to use.

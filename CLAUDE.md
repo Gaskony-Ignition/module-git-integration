@@ -56,39 +56,34 @@ on Vision clients.
 - **After any gateway-side project mutation (pull, checkout, init,
   snapshot), the Designer must call `GitBaseAction.pullProjectFromGateway()`.**
   It discards stale local edits via `DesignableProject.discardChanges`, then
-  reflectively calls `IgnitionDesigner.updateProject()` — without it, gateway
-  changes won't show in the Designer.
+  reflectively calls `IgnitionDesigner.updateProject()`; without it gateway
+  changes never show.
 - **The config-as-code repo is rooted at the data directory**, with
   `projects/` excluded from its `.gitignore` so the per-project repos are
   never nested inside it.
 - **`ConfigAutoCommitter` (a `ResourceCollectionListener`) is the only live
-  config-change notification.** Per-resource listeners on the config
-  collection are never notified. Events within a 2s window coalesce into one
-  commit; `commitLeftovers()` sweeps changes made while the gateway was
-  offline.
-- **Restore resets the working tree to exactly the target commit and keeps
-  HEAD on the branch** (unlike the detaching checkout), then applies the
-  config via a settings rescan — no gateway restart.
+  config-change notification** — per-resource listeners are never notified.
+  Events within 2s coalesce into one commit; `commitLeftovers()` sweeps
+  changes made while the gateway was offline.
+- **Restore resets the working tree to the target commit and keeps HEAD on the
+  branch** (unlike the detaching checkout), then applies it via a settings
+  rescan — no restart.
 - **`GITIGNORE_LINES` must ignore the SQLite sidecars `*-wal`/`*-shm`.**
-  Without them, `initRepo`'s baseline `git add .` races the tag value store
-  and dies with `FileNotFoundException`, so init could never complete on a
-  running gateway.
+  Without them `initRepo`'s `git add .` races the tag value store and dies
+  with `FileNotFoundException`, so init never completes on a live gateway.
 - **Excluded-files tree semantics**: excluding a tracked path also runs
-  `git rm --cached` (a `.gitignore` line has no effect on an already-tracked
-  file); re-including a path under a glob appends a negation rather than
-  editing the glob (deleting `**/logs` to recover one file starts versioning
-  a gigabyte of logs); nothing under an excluded directory can be
-  re-included in git, so that row goes read-only; a folder's tick reflects
-  its children's roll-up, not its own flag, since a rule can exclude a
-  directory's contents without excluding the directory itself.
-- **Change badges are drawn by a `DotBorder`, not the platform's `addBadge`
-  API.** The badge list belongs to the tree's cell-renderer delegate, which
-  stops painting added badges after the first commit of a Designer session;
-  a border sidesteps the delegate entirely. Don't simplify this back to
-  `addBadge`.
+  `git rm --cached`; re-including under a glob appends a negation rather than
+  editing the glob (deleting `**/logs` to recover one file versions a
+  gigabyte); nothing under an excluded directory can be re-included, so that
+  row is read-only; a folder's tick is its children's roll-up, since a rule
+  can exclude a directory's contents but not the directory.
+- **Change badges are drawn by a `DotBorder`, not `addBadge`.** The badge list
+  belongs to the tree's cell-renderer delegate, which stops painting added
+  badges after the first commit of a session; a border sidesteps it entirely.
+  Don't simplify this back.
 - **`PerspectiveNavNode`/`VisionModuleNode` report no resource path**, so a
-  change under them badges from the first resource-backed folder downwards,
-  not on the module root.
+  change under them badges from the first resource-backed folder down, not
+  the module root.
 - **The platform's `TextInput`/`SelectInput`/`TextArea` render their `label`
   prop into an invisible legend.** Import the wrapped versions from
   `web-ui/src/pages/GitConfig/fields.tsx`, not from `../../webui`.
@@ -97,16 +92,19 @@ on Vision clients.
   blanks the page. `SelectInput` needs `values` (not `options`), and its
   `onChange` hands back MUI's event, not the value — sweep every form in a
   browser before releasing.
-- **Automation only pulls changes in; it never pushes.** Polling, not a
-  webhook, is the inbound mechanism, because GitHub cannot open a connection
-  into most gateways. See `docs/AUTOMATION.md` before rebuilding either an
-  event bus or a webhook receiver.
+- **Automation only pulls in; it never pushes.** Polling, not a webhook:
+  GitHub cannot reach most gateways. Read `docs/AUTOMATION.md` before
+  rebuilding an event bus or a webhook receiver.
 - **A release replaces the project folder but carries `.git` and
   `global-props/data.bin` across**, or it destroys the repository and the
   gateway's project properties.
 - **Runner routes read the raw query string**, never `getParameter`: Jetty
   would parse a large non-zip body as a form and 500.
-- **Snippets never carry an unchosen project's name.**
+- **Snippets never carry an unchosen project's name**, and the gateway reads
+  neither its configured address nor its labels at request time — both only
+  fill in generated commands, so a GET may preview unsaved ones.
+- **A runner registers at exactly one scope**, so `--url` must match it; and
+  labels route the job, so a mismatch queues for ever with no error.
 - **Image snapshot walks the store tree** (`getImages` lists one level and
   returns folders as entries with no bytes) **and import merges, never
   deletes** — the store is gateway-scoped, so clearing it first would make

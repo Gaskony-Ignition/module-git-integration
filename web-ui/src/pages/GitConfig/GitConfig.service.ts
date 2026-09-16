@@ -163,6 +163,19 @@ export interface RunnerProject {
   // "release": a release zip replaces the project. "repo": the gateway pulls the branch.
   mode: "release" | "repo";
 }
+// A workflow file already in the project's repository. `callsGateway` is true when its text
+// mentions a runner route, so the page can say "this repo already deploys through the module"
+// instead of asking for a second workflow beside the one that does.
+export interface RunnerWorkflow {
+  path: string;
+  callsGateway: boolean;
+}
+export interface RunnerWorkflows {
+  // False when there is no working tree to look in — a release-mode project need not be a
+  // repository here at all, and "cannot check" is a different answer from "none".
+  detectable: boolean;
+  list: RunnerWorkflow[];
+}
 export interface RunnerConfig {
   enabled: boolean;
   hasToken: boolean;
@@ -174,6 +187,12 @@ export interface RunnerConfig {
   mode: "release" | "repo";
   hasRemote: boolean;
   repoUrl: string;
+  // The owning organisation, for a runner that serves every repository in it.
+  orgUrl: string;
+  scope: "repo" | "org";
+  // Epoch millis of the last authenticated runner call, 0 if none since the gateway started.
+  runnerSeen: { at: number; kind: string };
+  workflows: RunnerWorkflows;
   installScript: string;
   installScriptMac: string;
   // PowerShell equivalent of installScript, for a Windows runner machine.
@@ -380,11 +399,26 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: (body) => ({ url: `${BASE}/sync-now`, method: "POST", body }),
       invalidatesTags: ["automation", "projects"],
     }),
-    getRunner: builder.query<RunnerConfig, string | undefined>({
-      query: (project) =>
-        project
-          ? `${BASE}/runner?project=${encodeURIComponent(project)}`
-          : `${BASE}/runner`,
+    // `scope`, `labels` and `gatewayUrl` only change the generated commands, so the page passes
+    // what has been typed and previews it before Save. The gateway reads none of them when a
+    // runner calls, and this GET writes nothing.
+    getRunner: builder.query<
+      RunnerConfig,
+      {
+        project?: string;
+        scope?: "repo" | "org";
+        labels?: string;
+        gatewayUrl?: string;
+      }
+    >({
+      query: (args) => {
+        const q = new URLSearchParams();
+        Object.entries(args || {}).forEach(([k, v]) => {
+          if (v) q.set(k, String(v));
+        });
+        const s = q.toString();
+        return s ? `${BASE}/runner?${s}` : `${BASE}/runner`;
+      },
       providesTags: ["runner"],
     }),
     // The response carries the new token exactly once, when generateToken is set. There is no

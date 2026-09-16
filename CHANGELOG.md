@@ -3,6 +3,42 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.2.0] - 2026-09-16
+
+The Actions runner tab stops asking for work that is already done, and says which values the
+gateway actually acts on.
+
+### Added
+- **A "Which should I use?" tab** on Automation: push (a runner) against pull (git-sync, which
+  this module already provides as Scheduled sync and Repo updates); which delivery modes need git
+  credentials on the gateway and which need none; and why a job with the wrong labels queues for
+  ever without erroring.
+- **Runner scope.** The install commands can now register a runner against the whole
+  organisation, not only one repository — the right answer whenever more than one repository
+  deploys to a gateway. Previously only the repository form was generated.
+- **Detection instead of instructions.** Step 4 reports when a runner last called this gateway and
+  collapses the install material; step 5 lists the workflows already in the project's repository
+  and says whether any of them already calls a gateway, so a second workflow is not added beside
+  one that works.
+- Live preview: the generated commands follow the address and labels as they are typed.
+- **The delivery choice is now enforced.** A release upload to a project set to *Repo updates* is
+  refused with 409, and a pull request to one set to *Release* likewise, instead of quietly doing
+  the other thing. A project nobody has chosen for still accepts either, so an upgrade changes
+  nothing until a choice is made.
+- **A table of every project and its delivery**, so a configured gateway looks configured. The
+  project select chooses what to edit and is deliberately not remembered, which read as a setting
+  that had been lost.
+
+### Changed
+- **Linux, macOS and Windows snippets are tabs**, opening on the platform the page is being read
+  on, instead of three stacked blocks.
+- **The gateway address and runner labels moved out of step 1** and are labelled as values used
+  only to generate the commands. The gateway reads neither when a runner calls; the whole of what
+  it acts on is *Accept requests from a runner* and the token.
+- The example workflow is collapsed behind a disclosure and carries comments naming the three
+  values that must agree, because a repository that already deploys should gain one step rather
+  than a second workflow.
+
 ## [3.1.0] - 2026-09-15
 
 The Actions runner can now install releases, not only pull a branch.

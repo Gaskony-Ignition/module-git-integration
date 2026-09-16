@@ -48,6 +48,68 @@ The difference matters because a repository and a release are different
 things: the repository is raw source, often with tooling beside the project,
 while a release is the packaged export that should replace the project whole.
 
+The two routes hold a project to its chosen delivery: `/runner-release` refuses
+a project set to Repo updates and `/runner-sync` refuses one set to Release,
+both with 409 and the reason. Quietly performing the other one would let a
+workflow aimed at the wrong route overwrite a project someone is pulling into.
+`GitRunnerRecord.chosenMode` returns null for a project nobody has chosen for,
+and both guards skip in that case, so a gateway upgraded from a version with no
+modes keeps working until a choice is made.
+
+### What the gateway actually acts on
+
+Only two of the runner tab's values change what the gateway does: whether it
+accepts runner requests, and the token. The gateway never reads its configured
+address or its labels when a runner calls — those exist solely to fill in the
+generated commands. They are therefore safe to preview before saving (the GET
+takes them as query parameters and generates from them without writing), and
+they sit beside the snippets rather than in the settings step. Presenting them
+as gateway configuration is what made the tab read as five compulsory steps.
+
+The same split decides what the gateway needs from git. In **Release** mode it
+needs nothing: no repository, no remote, no credential, no route to GitHub — the
+runner performs every git operation and the gateway receives an authenticated
+zip. Only **Repo updates** and **Scheduled sync**, where the gateway itself
+pulls, need the project registered with a remote and a credential.
+
+### Runner scope and labels
+
+A runner registers at exactly one scope — repository, organisation or
+enterprise — and cannot move between them without re-registering, so
+`RunnerSetup` generates both the repository and the organisation form
+(`orgUrl` is the repository URL minus its last segment). Organisation is the
+usual answer: a machine standing beside a gateway normally receives from
+several project repositories, and a repository-scoped runner serves only one.
+GitHub's own mechanism for grouping runners is runner groups, which private
+repositories cannot use below the Team plan, so scope plus labels is the
+portable arrangement.
+
+Labels are the routing key. GitHub adds `self-hosted` plus the OS and
+architecture automatically; the rest come from `--labels` at registration, and a
+workflow's `runs-on` must list a subset of what the runner carries. A mismatch
+queues the job for a day with **no error and no timeout**, which is the failure
+mode here that nobody diagnoses unaided — hence the page generating both halves
+from one field, and saying so. Two gateways must carry different labels, or a
+job lands beside the wrong one; when a second appears, make the label a workflow
+input rather than editing every workflow.
+
+### Asking rather than telling
+
+Two prerequisites are usually already in place, and both are detectable, so the
+page reports on them rather than instructing:
+
+- **A runner reaching this gateway.** `RunnerAuth` records when a runner last
+  authenticated. That proves more than GitHub's runners API could tell us
+  without an admin-scoped credential: a runner exists, reaches this gateway, and
+  holds the right token. It is deliberately in memory — persisting it would put
+  a config commit in the versioning history on every deploy — so a restart
+  forgets it and the page words the empty case accordingly.
+- **Workflows in the repository.** `WorkflowScan` lists
+  `.github/workflows/*.y*ml` in the project's working tree and flags any whose
+  text mentions a runner route. A repository that already deploys should gain
+  one step, not a second workflow racing the first. A project with no working
+  tree here reports "cannot be checked", which is not the same answer as "none".
+
 The module does not install, register or supervise the runner. A runner
 executes whatever the workflow file says, so hosting one from inside the
 module would put repository-supplied shell next to the project store under

@@ -11,11 +11,13 @@ import {
   useSyncNowMutation,
 } from "./GitConfig.service";
 import Runner from "./Runner";
+import AutomationHelp from "./AutomationHelp";
 import { errorToast } from "./errors";
 
 // Both tabs pull a project's remote down onto this gateway — Scheduled sync on a timer,
-// the Actions runner the moment a branch moves. Pushing is a Designer action.
-type Section = "sync" | "runner";
+// the Actions runner the moment a branch moves. Pushing is a Designer action. Help carries the
+// one decision the other two cannot make for you: which way round to point the automation.
+type Section = "sync" | "runner" | "help";
 
 const Automation = () => {
   const { data, isFetching } = useGetAutomationQuery(undefined, {
@@ -79,6 +81,7 @@ const Automation = () => {
           [
             ["sync", "Scheduled sync"],
             ["runner", "Actions runner"],
+            ["help", "Which should I use?"],
           ] as [Section, string][]
         ).map(([key, label]) => (
           <button
@@ -241,9 +244,14 @@ const Automation = () => {
         </>
       ) : null}
 
-      {section === "runner" ? <Runner /> : null}
+      {section === "runner" ? (
+        <Runner onHelp={() => setSection("help")} />
+      ) : null}
 
-      <div className="gitcfg-auto-log">
+      {section === "help" ? <AutomationHelp /> : null}
+
+      {/* The log belongs to the two working tabs; on Help it would just push the tables off. */}
+      <div className="gitcfg-auto-log" hidden={section === "help"}>
         <div className="gitcfg-excluded-head">
           <div>
             <h4>
