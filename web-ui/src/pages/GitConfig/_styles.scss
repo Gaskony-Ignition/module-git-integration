@@ -256,6 +256,15 @@
   }
 }
 
+// The same hint styling when the hint is a list rather than a paragraph.
+ul.gitcfg-auto-hint {
+  padding-left: 1.1rem;
+
+  li {
+    margin: 0.2rem 0;
+  }
+}
+
 .gitcfg-excluded-actions {
   display: flex;
   gap: 0.5rem;

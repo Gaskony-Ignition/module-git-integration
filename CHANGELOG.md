@@ -3,6 +3,19 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.2.1] - 2026-09-16
+
+### Added
+- **An Edge section in the help tab**: what to do where this module cannot be installed — the runner
+  is unchanged, but the release is copied into `data/projects/<project>/` under the name Edge
+  itself carries, owned by the gateway user, and applied by a restart, since Edge has no project
+  import.
+- **An Automation column on the Projects tab**: whether a runner delivers to each project and as
+  what (`Runner · Release`, `Runner · Repo updates`), plus any scheduled sync and its interval.
+  A delivery chosen while the runner is switched off reads as `Runner off (…)`, and a project on
+  an enabled runner that nobody has chosen a delivery for reads as `Runner · either`, because
+  both routes answer for it.
+
 ## [3.2.0] - 2026-09-16
 
 The Actions runner tab stops asking for work that is already done, and says which values the

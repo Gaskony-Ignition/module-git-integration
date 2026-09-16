@@ -87,6 +87,13 @@ export interface ProjectStatus {
   error?: string | null;
   // The image-store folder this project versions. Empty (the default) means it versions none.
   imagePrefix?: string;
+  // What brings changes into this project, so the Projects tab can answer it without sending
+  // anyone to the Automation tab. `runnerMode` is "" when nobody has chosen one, which is a
+  // third state: the routes then accept either delivery.
+  runnerEnabled?: boolean;
+  runnerMode?: "release" | "repo" | "";
+  syncEnabled?: boolean;
+  syncIntervalSeconds?: number;
 }
 export interface ProjectsResp {
   projects: ProjectStatus[];

@@ -1018,6 +1018,12 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     /** Every project on the gateway with its git state — see GitProjectManager#listProjectStatus. */
     private Object handleProjects(RequestContext req, HttpServletResponse resp) {
         try {
+            // What automation, if any, brings changes into each project. The Projects tab is where
+            // someone looks to see the state of a project, and "does anything deploy to this, and
+            // how" was answerable only by going to the Automation tab and opening a select.
+            GitRunnerRecord runner = GitRunnerRecord.get();
+            boolean runnerOn = runner.isEnabled() && runner.hasToken();
+
             JsonArray arr = new JsonArray();
             for (GitProjectManager.ProjectStatus p : GitProjectManager.listProjectStatus()) {
                 JsonObject o = new JsonObject();
@@ -1030,6 +1036,17 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.addProperty("changes", p.changes());
                 o.addProperty("error", p.error());
                 o.addProperty("imagePrefix", GitProjectsConfigRecord.imagePrefixFor(p.name()));
+
+                // The runner only answers at all when it is switched on and holds a token, so a
+                // delivery chosen on a runner nobody enabled is not automation, and says so.
+                o.addProperty("runnerEnabled", runnerOn);
+                // Null when nobody has chosen, which is a third state: the routes then accept
+                // either, so claiming a mode would be a claim the gateway does not make.
+                String chosen = runner.chosenMode(p.name());
+                o.addProperty("runnerMode", chosen == null ? "" : chosen);
+                GitSyncRecord sync = GitSyncRecord.findByProject(p.name());
+                o.addProperty("syncEnabled", sync != null && sync.isEnabled());
+                o.addProperty("syncIntervalSeconds", sync == null ? 0 : sync.getIntervalSeconds());
                 arr.add(o);
             }
             JsonObject out = new JsonObject();

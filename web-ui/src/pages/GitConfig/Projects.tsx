@@ -115,6 +115,25 @@ const Projects = () => {
     return <span className="gitcfg-proj-dirty">{p.changes} uncommitted</span>;
   };
 
+  // What brings changes into this project, in the order it would reach it. A delivery chosen on a
+  // runner that is switched off is not automation, so it reads as the intent it is rather than
+  // claiming something deploys here.
+  const automation = (p: ProjectStatus) => {
+    const parts: string[] = [];
+    if (p.runnerMode) {
+      const how = p.runnerMode === "repo" ? "Repo updates" : "Release";
+      parts.push(p.runnerEnabled ? `Runner · ${how}` : `Runner off (${how})`);
+    } else if (p.runnerEnabled) {
+      // Enabled with no choice made: both routes answer, so neither can be named.
+      parts.push("Runner · either");
+    }
+    if (p.syncEnabled) {
+      parts.push(`Sync ${p.syncIntervalSeconds ?? 0}s`);
+    }
+    if (parts.length === 0) return <span className="gitcfg-proj-off">—</span>;
+    return <span className="gitcfg-proj-ok">{parts.join(" + ")}</span>;
+  };
+
   return (
     <div className="gitcfg-projects">
       <div className="gitcfg-excluded-head">
@@ -141,6 +160,7 @@ const Projects = () => {
               <th>Branch</th>
               <th>Remote</th>
               <th>Images</th>
+              <th>Automation</th>
               <th>State</th>
               <th />
             </tr>
@@ -161,6 +181,7 @@ const Projects = () => {
                 <td className="gitcfg-proj-remote">
                   {p.versioned ? p.imagePrefix || "None" : "—"}
                 </td>
+                <td className="gitcfg-proj-remote">{automation(p)}</td>
                 <td>{state(p)}</td>
                 <td className="gitcfg-proj-act">
                   <Button

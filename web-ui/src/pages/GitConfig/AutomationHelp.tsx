@@ -134,6 +134,58 @@ export default function AutomationHelp() {
         </table>
       </div>
 
+      <h4 className="gitcfg-step">
+        A gateway this module cannot be installed on
+      </h4>
+      <p className="gitcfg-auto-hint">
+        Edge, or any gateway whose module set is fixed, cannot run this module —
+        so there is nothing here to receive a release. The runner still is the
+        answer, and nothing about the GitHub half changes: same workflow, same
+        labels, same self-hosted runner on that machine. Only the last step
+        differs, because the runner writes the project in itself instead of
+        handing it to a gateway that installs it.
+      </p>
+      <p className="gitcfg-auto-hint">
+        Four things about Edge decide the shape of that step:
+      </p>
+      <ul className="gitcfg-auto-hint">
+        <li>
+          <strong>Edge has no project import.</strong> There is no route and no
+          upload — the release is copied into{" "}
+          <code>data/projects/&lt;project&gt;/</code> directly.
+        </li>
+        <li>
+          <strong>Edge runs exactly one project</strong>, whose name comes from
+          the gateway&apos;s own <code>edge-system-properties</code> (
+          <code>Edge</code> by default). The folder must carry that name, not
+          whatever the repository is called.
+        </li>
+        <li>
+          <strong>Own the files.</strong> A copy lands as whoever ran it, and a
+          project the gateway cannot read is skipped in silence — no error, no
+          log line, the old project simply stays. Change ownership to the
+          gateway&apos;s user (uid 2003 in Inductive Automation&apos;s images).
+        </li>
+        <li>
+          <strong>Restart it.</strong> A scan is what applies a change here;
+          with no module to request one, Edge picks the project up on startup.
+        </li>
+      </ul>
+      <p className="gitcfg-auto-hint">
+        So the workflow step becomes: stop the gateway, replace the project
+        folder, restore anything worth keeping across a deploy (its{" "}
+        <code>.git</code> if it has one, and{" "}
+        <code>ignition/global-props/data.bin</code>, which holds that
+        gateway&apos;s own settings), change ownership, start it again. The
+        runner needs whatever access that machine requires — a Docker volume, a
+        file share, or simply being the machine.
+      </p>
+      <p className="gitcfg-auto-hint">
+        The cost is the restart and the access: this gateway installs a release
+        without either. That is the reason to prefer the module where it can be
+        installed, not a reason to avoid Edge.
+      </p>
+
       <h4 className="gitcfg-step">Labels, and why a job can queue for ever</h4>
       <p className="gitcfg-auto-hint">
         A runner is registered with labels, and a workflow&apos;s{" "}
