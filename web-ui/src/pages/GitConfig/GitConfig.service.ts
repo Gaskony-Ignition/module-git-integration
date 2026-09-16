@@ -323,7 +323,9 @@ export const gitConfigApi = baseApi.injectEndpoints({
       }
     >({
       query: (body) => ({ url: `${BASE}/project-init`, method: "POST", body }),
-      invalidatesTags: ["projects"],
+      // The Runner tab lists every project and gates Repo updates on having a remote, so
+      // both of those go stale when a project gains a repository or a remote.
+      invalidatesTags: ["projects", "runner"],
     }),
     setProjectRemote: builder.mutation<
       unknown,
@@ -334,7 +336,9 @@ export const gitConfigApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: ["projects"],
+      // The Runner tab lists every project and gates Repo updates on having a remote, so
+      // both of those go stale when a project gains a repository or a remote.
+      invalidatesTags: ["projects", "runner"],
     }),
     snapshotProjectImages: builder.mutation<unknown, { project: string }>({
       query: (body) => ({
@@ -448,7 +452,10 @@ export const gitConfigApi = baseApi.injectEndpoints({
       }
     >({
       query: (body) => ({ url: `${BASE}/runner`, method: "POST", body }),
-      invalidatesTags: ["runner"],
+      // "projects" too: the Projects tab reports each project's delivery, so a change here makes
+      // its cached copy wrong. Without this it kept serving the old answer until a full page
+      // reload — switching tabs is not a remount, and the cache had not been invalidated.
+      invalidatesTags: ["runner", "projects"],
     }),
     commitRunnerWorkflow: builder.mutation<
       {

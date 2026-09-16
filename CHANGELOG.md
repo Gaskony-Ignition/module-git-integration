@@ -3,6 +3,19 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.2.3] - 2026-09-16
+
+### Fixed
+- **Changing a project's delivery left the Projects tab showing the old one** until the whole page
+  was reloaded: switching tabs is not a remount, and the runner save invalidated only its own
+  cache. It now invalidates the projects cache too, and giving a project a repository or a remote
+  invalidates the runner's, since that is what gates Repo updates.
+
+### Changed
+- The Projects tab's Automation column reads `Runner · not chosen`, greyed, where it previously
+  said `Runner · either`. The column describes the project's own configuration, and an enabled
+  runner with no delivery chosen is something still to set up, not a setting.
+
 ## [3.2.2] - 2026-09-16
 
 ### Fixed

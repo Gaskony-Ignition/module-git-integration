@@ -120,18 +120,27 @@ const Projects = () => {
   // claiming something deploys here.
   const automation = (p: ProjectStatus) => {
     const parts: string[] = [];
+    let settled = true;
     if (p.runnerMode) {
       const how = p.runnerMode === "repo" ? "Repo updates" : "Release";
       parts.push(p.runnerEnabled ? `Runner · ${how}` : `Runner off (${how})`);
     } else if (p.runnerEnabled) {
-      // Enabled with no choice made: both routes answer, so neither can be named.
-      parts.push("Runner · either");
+      // The runner would answer either route for this project, but nothing has been set up FOR
+      // the project, and this column reads as the project's own configuration. It says what is
+      // missing, in the words the Actions runner tab uses for the same state.
+      parts.push("Runner · not chosen");
+      settled = false;
     }
     if (p.syncEnabled) {
       parts.push(`Sync ${p.syncIntervalSeconds ?? 0}s`);
+      settled = true;
     }
     if (parts.length === 0) return <span className="gitcfg-proj-off">—</span>;
-    return <span className="gitcfg-proj-ok">{parts.join(" + ")}</span>;
+    return (
+      <span className={settled ? "gitcfg-proj-ok" : "gitcfg-proj-off"}>
+        {parts.join(" + ")}
+      </span>
+    );
   };
 
   return (
