@@ -298,7 +298,15 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
                   <td>
                     <span className="gitcfg-proj-name">{p.name}</span>
                   </td>
-                  <td>{p.mode === "repo" ? "Repo updates" : "Release"}</td>
+                  <td>
+                    {p.mode === "repo" ? (
+                      "Repo updates"
+                    ) : p.mode === "release" ? (
+                      "Release"
+                    ) : (
+                      <span className="gitcfg-proj-off">Not chosen</span>
+                    )}
+                  </td>
                   <td>
                     {p.hasRemote ? (
                       <span className="gitcfg-proj-ok">Yes</span>
@@ -339,10 +347,13 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
       )}
       {chosen ? (
         <>
+          {/* The CHOSEN mode, not the effective one. Showing the default as a selected radio
+              made an undecided project look decided, and because clicking the option already
+              shown fires no change, the setting could not be reached at all. */}
           <div className="gitcfg-cred-row">
             <Radio
               name="runner-mode"
-              value={data.mode}
+              value={data.chosenMode}
               radios={[
                 {
                   label: "Release — a release zip replaces the whole project",
@@ -359,6 +370,14 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
               }
             />
           </div>
+          {!data.chosenMode ? (
+            <p className="gitcfg-auto-hint">
+              <strong>Not chosen yet.</strong> Both routes are accepted for this
+              project, and a workflow aimed at either will be obeyed. Pick one
+              to hold the project to it — the other then answers with an error
+              instead of quietly doing the opposite.
+            </p>
+          ) : null}
           <p className="gitcfg-auto-hint">
             {release
               ? "On a version tag the workflow uploads the project export. The gateway replaces the project with it — files removed from the release disappear — keeps its own git repository and project properties, and applies it without a restart. This gateway needs no git credentials and no repository at all: the runner does every git operation and the gateway only receives an authenticated zip, which is why it suits a gateway with no internet access."
@@ -367,11 +386,13 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
               ? " Repo updates needs the project set up with a remote on the Projects tab first."
               : ""}
           </p>
-          <p className="gitcfg-auto-hint">
-            The gateway holds this choice to it: once set, it refuses the other
-            route for this project rather than quietly doing the other thing, so
-            a workflow aimed at the wrong one fails where you can see it.
-          </p>
+          {data.chosenMode ? (
+            <p className="gitcfg-auto-hint">
+              The gateway holds this choice to it: it refuses the other route
+              for this project rather than quietly doing the other thing, so a
+              workflow aimed at the wrong one fails where you can see it.
+            </p>
+          ) : null}
         </>
       ) : (
         <p className="gitcfg-auto-hint">

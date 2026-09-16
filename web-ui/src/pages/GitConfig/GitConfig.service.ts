@@ -168,7 +168,8 @@ export interface RunnerProject {
   name: string;
   hasRemote: boolean;
   // "release": a release zip replaces the project. "repo": the gateway pulls the branch.
-  mode: "release" | "repo";
+  // "" when nobody has chosen, and both routes are then accepted.
+  mode: "release" | "repo" | "";
 }
 // A workflow file already in the project's repository. `callsGateway` is true when its text
 // mentions a runner route, so the page can say "this repo already deploys through the module"
@@ -191,7 +192,11 @@ export interface RunnerConfig {
   projects: RunnerProject[];
   // Empty until one is chosen; the snippets then carry placeholders.
   project: string;
+  // What the routes would do today, default included.
   mode: "release" | "repo";
+  // What somebody actually chose; "" when nobody has, and the routes then accept either. The
+  // radio must show this, not `mode`, or a default reads as a decision.
+  chosenMode: "release" | "repo" | "";
   hasRemote: boolean;
   repoUrl: string;
   // The owning organisation, for a runner that serves every repository in it.

@@ -3,6 +3,16 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.2.2] - 2026-09-16
+
+### Fixed
+- **The delivery radio showed a default as though it were a choice.** A project nobody had chosen
+  for rendered with *Release* selected, so it looked settled — and because clicking the option
+  already shown fires no change event, the setting could not be reached at all. Both the radio and
+  the project table now show what was actually chosen, with *Not chosen* and a note saying both
+  routes are accepted until one is picked. The Projects tab was already reporting this correctly
+  as `Runner · either`, which is how the discrepancy surfaced.
+
 ## [3.2.1] - 2026-09-16
 
 ### Added

@@ -1348,7 +1348,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 JsonObject p = new JsonObject();
                 p.addProperty("name", ps.name());
                 p.addProperty("hasRemote", hasRemote);
-                p.addProperty("mode", cfg.getMode(ps.name()));
+                // The chosen mode, empty when nobody has chosen. Listing the default here
+                // made every project look configured.
+                String pm = cfg.chosenMode(ps.name());
+                p.addProperty("mode", pm == null ? "" : pm);
                 projects.add(p);
                 if (ps.name().equals(project)) {
                     known = true;
@@ -1365,6 +1368,12 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             o.add("projects", projects);
             o.addProperty("project", project == null ? "" : project);
             o.addProperty("mode", mode);
+            // What was actually chosen, empty when nobody has. `mode` carries the default, which
+            // the page must not present as a decision: a radio showing Release when nothing is
+            // stored looks settled, and clicking the option already shown fires no change, so the
+            // setting cannot be reached at all.
+            String chosenMode = project == null ? null : cfg.chosenMode(project);
+            o.addProperty("chosenMode", chosenMode == null ? "" : chosenMode);
             o.addProperty("hasRemote", remoteUrl != null);
             o.addProperty("repoUrl", RunnerSetup.repoUrl(remoteUrl));
             o.addProperty("orgUrl", RunnerSetup.orgUrl(remoteUrl));
