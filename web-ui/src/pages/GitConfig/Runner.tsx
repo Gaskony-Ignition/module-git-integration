@@ -2,22 +2,16 @@ import React from "react";
 import { Button, Loading, Radio, useToastNotifications } from "../../webui";
 // Label-painting wrappers — the platform inputs render `label` into an invisible notch legend.
 import { SelectInput, TextInput } from "./fields";
-import {
-  useCommitRunnerWorkflowMutation,
-  useGetRunnerQuery,
-  useSaveRunnerMutation,
-} from "./GitConfig.service";
+import { useGetRunnerQuery, useSaveRunnerMutation } from "./GitConfig.service";
 import { errorToast } from "./errors";
 import { selectValue } from "./selectValue";
 
 // A self-hosted runner needs no inbound path to the gateway, which is the whole reason it is
 // here rather than a webhook.
 //
-// Two things on this tab are settings and the rest is generated text, and the page used to make
-// them look alike. The gateway acts on exactly two values — whether it accepts runner requests,
-// and the token — and reads neither the address nor the labels when a runner calls. So those two
-// live beside the commands they fill in, under a heading that says so, and can be previewed
-// before they are saved. Getting this wrong is what made the tab read as five compulsory steps.
+// The gateway acts on exactly two values — whether it accepts runner requests, and the token.
+// The runner and the workflow are GitHub's, so their steps say what is needed and stop there;
+// the only generated text left is the check, which is why the address sits beside it.
 
 type Os = "linux" | "mac" | "windows";
 
@@ -113,7 +107,6 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
   const toasts = useToastNotifications();
   // Nothing is pre-selected: until a project is chosen the snippets show placeholders.
   const [project, setProject] = React.useState("");
-  const [scope, setScope] = React.useState<"repo" | "org">("org");
   const [os, setOs] = React.useState<Os>(detectOs);
 
   const [gatewayUrl, setGatewayUrl] = React.useState("");
@@ -121,26 +114,20 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
   const [enabled, setEnabled] = React.useState(false);
   // Held only until the page is left. The gateway returns it once and cannot return it again.
   const [issued, setIssued] = React.useState<string | null>(null);
-  const [showWorkflow, setShowWorkflow] = React.useState(false);
-  const [showInstall, setShowInstall] = React.useState(false);
 
   // What the snippets are generated from. Debounced so a keystroke is not a request, and only
   // ever affects the generated text — see the note on the query in GitConfig.service.ts.
-  const [preview, setPreview] = React.useState({ gatewayUrl: "", labels: "" });
+  const [preview, setPreview] = React.useState("");
   React.useEffect(() => {
-    const t = setTimeout(() => setPreview({ gatewayUrl, labels }), 300);
+    const t = setTimeout(() => setPreview(gatewayUrl), 300);
     return () => clearTimeout(t);
-  }, [gatewayUrl, labels]);
+  }, [gatewayUrl]);
 
   const { data, isLoading, refetch } = useGetRunnerQuery({
     project: project || undefined,
-    scope,
-    labels: preview.labels || undefined,
-    gatewayUrl: preview.gatewayUrl || undefined,
+    gatewayUrl: preview || undefined,
   });
   const [save, { isLoading: saving }] = useSaveRunnerMutation();
-  const [commitWorkflow, { isLoading: committing }] =
-    useCommitRunnerWorkflowMutation();
 
   const loaded = React.useRef(false);
   React.useEffect(() => {
@@ -184,17 +171,12 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
 
   const chosen = data.project !== "";
   const release = data.mode === "release";
-  const unsaved = gatewayUrl !== data.gatewayUrl || labels !== data.labels;
+  const unsaved = gatewayUrl !== data.gatewayUrl;
 
   const seenAt = data.runnerSeen?.at ?? 0;
   const wf = data.workflows?.list ?? [];
   const wired = wf.filter((w) => w.callsGateway);
 
-  const installSnippets: Record<Os, string> = {
-    linux: data.installScript,
-    mac: data.installScriptMac,
-    windows: data.installScriptWindows,
-  };
   const testSnippets: Record<Os, string> = {
     linux: data.testCommand,
     mac: data.testCommand,
@@ -400,45 +382,84 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
         </p>
       )}
 
-      <h4 className="gitcfg-step">Values the generated commands use</h4>
-      <p className="gitcfg-auto-hint">
-        Neither of these is a gateway setting — the gateway reads neither when a
-        runner calls. They fill in the commands below, and are saved so this
-        page can regenerate them later.
-      </p>
-      <div className="gitcfg-auto-pair">
-        <TextInput
-          label="Gateway address the runner will use"
-          value={gatewayUrl}
-          placeholder="http://gateway.plant.local:8088"
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-            setGatewayUrl(e.target.value)
-          }
-        />
-        <TextInput
-          label="Runner labels the job must match"
-          value={labels}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-            setLabels(e.target.value)
-          }
-        />
-      </div>
-      <p className="gitcfg-auto-hint">
-        The address starts as the one this page is open on. Change it to the one
-        the <em>runner</em> reaches this gateway on — for a runner on the same
-        Docker host that is usually <code>http://localhost:</code> plus the
-        published port.
-        <br />
-        Labels route the job. GitHub adds <code>self-hosted</code> and the
-        runner&apos;s OS and architecture by itself; the rest are yours.{" "}
-        <strong>
-          If the runner already exists, type the labels it already carries
-        </strong>{" "}
-        — GitHub → Settings → Actions → Runners lists them against each one. A
-        mismatch queues the job for ever with no error, which is the one failure
-        here nobody diagnoses. Two gateways need two different labels, so each
-        job lands on the machine that can reach the right one.
-      </p>
+      {/* Steps 4 and 5 happen outside this module, on GitHub and the runner machine. They are
+          listed so the process reads complete, not taught: GitHub's own pages give the commands,
+          and any workflow that meets the contract below works — not only one shaped like ours. */}
+      <h4 className="gitcfg-step">4 · A runner that can reach this gateway</h4>
+      {seenAt > 0 ? (
+        <p className="gitcfg-auto-hint">
+          <span className="gitcfg-proj-ok">Done</span> — a runner called this
+          gateway at {formatWhen(seenAt)} ({data.runnerSeen.kind}) and its token
+          was accepted.
+        </p>
+      ) : (
+        <p className="gitcfg-auto-hint">
+          No runner has called this gateway since it started.
+        </p>
+      )}
+      <ul className="gitcfg-auto-hint">
+        <li>
+          Install a GitHub self-hosted runner on a machine that can reach this
+          gateway: GitHub → Settings → Actions → Runners → New self-hosted
+          runner.
+        </li>
+        <li>
+          Once per machine, not per project. Registered on the organisation it
+          serves every repository in it; on a repository, only that one.
+        </li>
+        <li>
+          Give it a label no other runner has. That label is how a job finds the
+          machine beside this gateway.
+        </li>
+      </ul>
+
+      <h4 className="gitcfg-step">5 · A workflow that calls this gateway</h4>
+      {!data.workflows?.detectable ? null : wired.length > 0 ? (
+        <p className="gitcfg-auto-hint">
+          <span className="gitcfg-proj-ok">Found</span> —{" "}
+          <code>{wired.map((w) => w.path).join(", ")}</code> calls a gateway
+          through this module.
+        </p>
+      ) : (
+        <p className="gitcfg-auto-hint">
+          {wf.length > 0
+            ? `This repository has ${wf.length} ${
+                wf.length === 1 ? "workflow" : "workflows"
+              }, none of which calls this gateway.`
+            : "This repository has no workflows yet."}
+        </p>
+      )}
+      <ul className="gitcfg-auto-hint">
+        <li>
+          Nothing happens until a workflow calls the gateway — the steps above
+          only make it willing to answer.
+        </li>
+        <li>
+          Its <code>runs-on</code> names the runner&apos;s label. A label no
+          runner carries leaves the job queued with no error.
+        </li>
+        <li>
+          It sends the token from step 2, kept as a GitHub secret, as{" "}
+          <code>Authorization: Bearer &lt;token&gt;</code>.
+        </li>
+        <li>
+          <strong>Release:</strong> POST the project export zip to{" "}
+          <code>/data/git-config/runner-release?project=&lt;name&gt;</code>.{" "}
+          <strong>Repo updates:</strong> POST{" "}
+          <code>{'{"project": "<name>"}'}</code> to{" "}
+          <code>/data/git-config/runner-sync</code>.
+        </li>
+      </ul>
+
+      <h4 className="gitcfg-step">Check it before you rely on it</h4>
+      <TextInput
+        label="Gateway address the runner will use"
+        value={gatewayUrl}
+        placeholder="http://gateway.plant.local:8088"
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+          setGatewayUrl(e.target.value)
+        }
+      />
       <div className="gitcfg-cred-actions">
         {unsaved ? (
           <span className="gitcfg-proj-off">Not saved yet</span>
@@ -447,151 +468,6 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
           Save
         </Button>
       </div>
-
-      <h4 className="gitcfg-step">4 · A runner on the machine</h4>
-      {seenAt > 0 ? (
-        <p className="gitcfg-auto-hint">
-          <span className="gitcfg-proj-ok">Done</span> — a runner called this
-          gateway at {formatWhen(seenAt)} ({data.runnerSeen.kind}) and its token
-          was accepted. Nothing to install.
-        </p>
-      ) : (
-        <p className="gitcfg-auto-hint">
-          No runner has called this gateway since it started, so if one exists
-          it has not been pointed here yet. One runner serves every gateway and
-          repository it can reach, so this is once per machine, not once per
-          project — if the machine already has one, skip to step 5.
-        </p>
-      )}
-      {seenAt > 0 && !showInstall ? (
-        <Button colorClass="secondary" onClick={() => setShowInstall(true)}>
-          Set up another runner anyway
-        </Button>
-      ) : (
-        <>
-          <div className="gitcfg-cred-row">
-            <Radio
-              name="runner-scope"
-              value={scope}
-              radios={[
-                {
-                  label:
-                    "The whole organisation — one runner serves every repository in it",
-                  value: "org",
-                },
-                {
-                  label: "This repository only",
-                  value: "repo",
-                },
-              ]}
-              onChange={(_e: unknown, value: string) =>
-                setScope(value as "repo" | "org")
-              }
-            />
-          </div>
-          <p className="gitcfg-auto-hint">
-            A runner registers at exactly one scope and cannot be moved without
-            re-registering, so this is the decision to get right. The
-            registration token comes from{" "}
-            <code>
-              {(scope === "org" ? data.orgUrl : data.repoUrl) ||
-                "the repository's (or organisation's)"}
-              /settings/actions/runners/new
-            </code>{" "}
-            and expires in an hour.
-          </p>
-          <OsTabs
-            os={os}
-            setOs={setOs}
-            snippets={installSnippets}
-            label="Install the runner"
-          />
-        </>
-      )}
-
-      <h4 className="gitcfg-step">5 · A workflow that calls this gateway</h4>
-      {!data.workflows?.detectable ? (
-        <p className="gitcfg-auto-hint">
-          {chosen
-            ? "This project is not a repository on this gateway, so its workflows cannot be checked from here."
-            : "Choose a project above to see what its repository already has."}
-        </p>
-      ) : wired.length > 0 ? (
-        <p className="gitcfg-auto-hint">
-          <span className="gitcfg-proj-ok">Done</span> —{" "}
-          <code>{wired.map((w) => w.path).join(", ")}</code> already calls a
-          gateway through this module. Add the upload step to it if you need
-          another gateway; do not add a second workflow.
-        </p>
-      ) : wf.length > 0 ? (
-        <p className="gitcfg-auto-hint">
-          This repository has {wf.length}{" "}
-          {wf.length === 1 ? "workflow" : "workflows"} (
-          <code>{wf.map((w) => w.path).join(", ")}</code>) and none of them
-          calls this gateway. Add the one step from the example below to
-          whichever already deploys this project — two workflows deploying the
-          same project will fight.
-        </p>
-      ) : (
-        <p className="gitcfg-auto-hint">
-          This repository has no workflows yet, so nothing will call the gateway
-          until one is added.
-        </p>
-      )}
-      <p className="gitcfg-auto-hint">
-        Nothing happens until a workflow calls the gateway — everything above
-        only makes the gateway willing to answer.
-      </p>
-      <Button
-        colorClass="secondary"
-        onClick={() => setShowWorkflow(!showWorkflow)}
-      >
-        {showWorkflow ? "Hide the example" : "Show an example workflow"}
-      </Button>
-      {showWorkflow ? (
-        <>
-          <Snippet label={data.workflowPath} text={data.workflowYaml} />
-          {!release ? (
-            <>
-              <p className="gitcfg-auto-hint">
-                For a repository with no workflow of its own, the gateway can
-                commit this one: it already has push rights, and it refuses to
-                overwrite a different workflow that is already there.
-              </p>
-              <Button
-                disabled={
-                  committing || !gatewayUrl || !chosen || !data.hasRemote
-                }
-                onClick={async () => {
-                  try {
-                    const r = await commitWorkflow({
-                      project: data.project,
-                    }).unwrap();
-                    if (r.unchanged) toasts.notifySuccess("Already committed");
-                    else if (r.pushed)
-                      toasts.notifySuccess("Committed and pushed");
-                    else
-                      toasts.notify({
-                        type: "error",
-                        title: "Committed, but the push failed",
-                        message:
-                          r.pushError || "Push the project from the Designer.",
-                        autoClose: false,
-                        isDismissible: true,
-                      });
-                  } catch (e) {
-                    errorToast(toasts, "Could not commit the workflow")(e);
-                  }
-                }}
-              >
-                Commit the workflow to the repository
-              </Button>
-            </>
-          ) : null}
-        </>
-      ) : null}
-
-      <h4 className="gitcfg-step">Check it before you rely on it</h4>
       <p className="gitcfg-auto-hint">
         {release
           ? "From the runner machine, with the token in place of the placeholder. It sends no zip, so nothing is installed: 400 “no release zip” means the address and token are right."

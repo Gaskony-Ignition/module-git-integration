@@ -3,6 +3,17 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.2.4] - 2026-09-17
+
+### Changed
+- **Actions runner steps 4 and 5 are now checklists.** Installing a runner and writing a workflow
+  happen on GitHub, not in this module, so the tab says what each needs — a runner that can reach
+  the gateway with a label of its own; a workflow whose `runs-on` names it, sending the token to
+  the release or sync route — and leaves the commands to GitHub. The scope choice, the generated
+  install scripts, the example workflow, the commit-the-workflow button and the labels field are
+  gone. Runner and workflow detection stay. The gateway address now sits with the check command,
+  the only generated text left.
+
 ## [3.2.3] - 2026-09-16
 
 ### Fixed
