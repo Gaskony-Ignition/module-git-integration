@@ -137,16 +137,17 @@ Push-time delivery: **Automation → Actions runner**.
    the old one working.
 3. Choose the project and **Release** or **Repo updates**. The gateway holds the
    project to that choice and refuses the other route.
-4. Set the address the runner reaches this gateway on — for a runner on the same
-   Docker host, `http://localhost:` and the published port — and the labels the
-   runner carries. These fill in the commands below; the gateway reads neither.
-5. If no runner serves the machine yet, register one with the command for its OS,
-   choosing whether it serves this repository or the whole organisation. One
-   runner serves every gateway and repository it can reach.
-6. Make a workflow call the gateway: add the upload step to whatever already
-   deploys the project, or for Repo updates press *Commit the workflow to the
-   repository*. Nothing happens until one does.
-7. Run the test command from the runner machine before relying on it.
+4. Have a GitHub self-hosted runner on a machine that can reach this gateway,
+   with a label no other runner carries. GitHub's *New self-hosted runner* page
+   gives the commands; one runner per machine serves every repository it is
+   registered for. The tab says when a runner last called.
+5. Have a workflow call the gateway: its `runs-on` names that label, and it
+   sends the token to `/data/git-config/runner-release` (Release) or
+   `/data/git-config/runner-sync` (Repo updates). Nothing happens until one
+   does. The tab lists the repository's workflows and which already call.
+6. Set the address the runner reaches this gateway on — for a runner on the same
+   Docker host, `http://localhost:` and the published port — and run the test
+   command from the runner machine before relying on it.
 
 *Which should I use?* on the same tab compares this with the pull model
 (Scheduled sync), and says which modes need git credentials on the gateway —

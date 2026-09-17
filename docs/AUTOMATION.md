@@ -74,24 +74,23 @@ pulls, need the project registered with a remote and a credential.
 
 ### Runner scope and labels
 
+Installing and registering the runner, and writing the workflow, are GitHub's
+steps, so the page lists what each needs and leaves the commands to GitHub
+rather than generating a version shaped like one particular pipeline.
+
 A runner registers at exactly one scope — repository, organisation or
-enterprise — and cannot move between them without re-registering, so
-`RunnerSetup` generates both the repository and the organisation form
-(`orgUrl` is the repository URL minus its last segment). Organisation is the
-usual answer: a machine standing beside a gateway normally receives from
-several project repositories, and a repository-scoped runner serves only one.
-GitHub's own mechanism for grouping runners is runner groups, which private
-repositories cannot use below the Team plan, so scope plus labels is the
-portable arrangement.
+enterprise — and cannot move between them without re-registering.
+Organisation is the usual answer: a machine standing beside a gateway normally
+receives from several project repositories. GitHub's runner groups are not
+available to private repositories below the Team plan, so scope plus labels is
+the portable arrangement.
 
 Labels are the routing key. GitHub adds `self-hosted` plus the OS and
-architecture automatically; the rest come from `--labels` at registration, and a
-workflow's `runs-on` must list a subset of what the runner carries. A mismatch
-queues the job for a day with **no error and no timeout**, which is the failure
-mode here that nobody diagnoses unaided — hence the page generating both halves
-from one field, and saying so. Two gateways must carry different labels, or a
-job lands beside the wrong one; when a second appears, make the label a workflow
-input rather than editing every workflow.
+architecture automatically; a workflow's `runs-on` must list a subset of what
+the runner carries. A mismatch queues the job for a day with **no error and no
+timeout**. Two gateways must carry different labels, or a job lands beside the
+wrong one; when a second appears, make the label a workflow input rather than
+editing every workflow.
 
 ### Asking rather than telling
 
@@ -140,20 +139,6 @@ session/CSRF model, because a GitHub Actions workflow step has neither:
 - Query parameters are read from the raw query string: `getParameter` would make
   Jetty parse a large body without a zip Content-Type as a form and fail.
 - A release and a sync of the same project never run at once.
-
-## The workflow file is committed by the gateway
-
-The module already holds push rights for the project repository, so *Commit
-the workflow to the repository* writes `.github/workflows/ignition-sync.yml`
-inside the project folder (the repository root for a project repo, and the
-only place GitHub reads workflows from), commits it through the ordinary
-project-commit path, and pushes. It refuses to overwrite a differing
-workflow that is already there, and reports `unchanged` rather than making
-an empty commit when nothing changed.
-
-One GitHub requirement worth knowing: writing `.github/workflows/*` needs the
-`workflow` scope on an OAuth-app token. A personal access token or deploy key
-used by the gateway's own push does not hit this restriction.
 
 ## After the pull
 
