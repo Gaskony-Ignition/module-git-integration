@@ -46,10 +46,12 @@ public class GitRunnerRecord {
      *
      * <p>A {@code labels} field was carried until 3.3.0. Nothing ever read it when a runner
      * called — it only filled in generated commands the page no longer shows — so it is gone, and
-     * a resource saved by an earlier version decodes with that key ignored.
+     * a resource saved by an earlier version decodes with that key ignored. {@code gatewayUrl}
+     * went the same way in 3.4.0: it only filled in the check command, and a saved copy on the
+     * gateway was mistaken for the address deploys use.
      */
-    public record Config(boolean enabled, SecretConfig token, String gatewayUrl,
-                         String ignitionUser, String modes) {}
+    public record Config(boolean enabled, SecretConfig token, String ignitionUser,
+                         String modes) {}
 
     public static final ResourceType TYPE = new ResourceType(MODULE_ID, "git-runner");
 
@@ -73,7 +75,6 @@ public class GitRunnerRecord {
 
     private boolean enabled;
     private SecretConfig token;
-    private String gatewayUrl = "";
     private String ignitionUser = "";
     private JsonObject modes = new JsonObject();
 
@@ -83,7 +84,6 @@ public class GitRunnerRecord {
     private GitRunnerRecord(Config c) {
         this.enabled = c.enabled();
         this.token = c.token();
-        this.gatewayUrl = c.gatewayUrl() == null ? "" : c.gatewayUrl();
         this.ignitionUser = c.ignitionUser() == null ? "" : c.ignitionUser();
         try {
             JsonObject m = c.modes() == null || c.modes().isBlank()
@@ -116,43 +116,6 @@ public class GitRunnerRecord {
 
     public boolean hasToken() {
         return token != null;
-    }
-
-    /**
-     * The gateway address the runner should call, as the RUNNER sees it.
-     *
-     * <p>Not derivable here: the gateway knows the address a browser reached it on, which on a
-     * containerised or reverse-proxied install is routinely not the one a machine on the plant
-     * network would use. So it is asked for, and the generated snippets carry whatever is set.
-     */
-    public String getGatewayUrl() {
-        return gatewayUrl == null ? "" : gatewayUrl;
-    }
-
-    public void setGatewayUrl(String v) {
-        this.gatewayUrl = v == null ? "" : v.trim().replaceAll("/+$", "");
-    }
-
-    /**
-     * A detached copy carrying a different address, for generating the check command from an
-     * address that has been typed but not yet saved.
-     *
-     * <p>Safe precisely because the address is not used when a runner actually calls: the gateway
-     * authenticates by token and acts on the request, and never reads its own configured address.
-     * It exists only to fill in the command, so previewing it changes nothing. A blank override
-     * keeps the saved value. The copy is never saved.
-     */
-    public GitRunnerRecord withOverrides(String gatewayUrl) {
-        if (gatewayUrl == null || gatewayUrl.isBlank()) {
-            return this;
-        }
-        GitRunnerRecord copy = new GitRunnerRecord();
-        copy.enabled = this.enabled;
-        copy.token = this.token;
-        copy.ignitionUser = this.ignitionUser;
-        copy.modes = this.modes;
-        copy.setGatewayUrl(gatewayUrl);
-        return copy;
     }
 
     /**
@@ -245,8 +208,7 @@ public class GitRunnerRecord {
 
     public void save() {
         try {
-            Config c = new Config(enabled, token, getGatewayUrl(), getIgnitionUser(),
-                    modes.toString());
+            Config c = new Config(enabled, token, getIgnitionUser(), modes.toString());
             if (handler.findResource(NAME).isPresent()) {
                 handler.modify(NAME, c).join();
             } else {

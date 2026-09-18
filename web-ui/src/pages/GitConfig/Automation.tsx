@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, Loading, useToastNotifications } from "../../webui";
+import { Button, Loading, Radio, useToastNotifications } from "../../webui";
 // Label-painting wrappers — the platform inputs render `label` into an invisible notch legend.
 import { TextInput } from "./fields";
 import {
@@ -99,11 +99,13 @@ const Automation = () => {
       {section === "sync" ? (
         <>
           <p className="gitcfg-hint">
-            The gateway fetches each enabled repository on a timer and
-            fast-forwards it when the tracked branch has moved, then requests a
-            project scan. It refuses when the working tree has local changes —
-            someone is editing — rather than discarding them. There is no
-            inbound webhook: GitHub cannot usually reach a gateway.
+            The gateway fetches each enabled repository on a timer and, when the
+            tracked branch has moved, brings the project up to it and requests a
+            project scan. <strong>Pull</strong> fast-forwards and refuses while
+            anyone has local changes. <strong>Replace</strong> makes the project
+            match the branch exactly, as a release does — point it at a branch
+            that holds built releases and it installs them, rollbacks included.
+            There is no inbound webhook: GitHub cannot usually reach a gateway.
           </p>
           {versioned.length === 0 ? (
             <p className="gitcfg-empty">
@@ -117,6 +119,7 @@ const Automation = () => {
                     <th>Project</th>
                     <th>Sync</th>
                     <th>Branch</th>
+                    <th>Delivery</th>
                     <th>Every</th>
                     <th />
                   </tr>
@@ -137,6 +140,13 @@ const Automation = () => {
                           )}
                         </td>
                         <td>{s?.branch || p.branch || "—"}</td>
+                        <td>
+                          {s
+                            ? s.mode === "replace"
+                              ? "Replace"
+                              : "Pull"
+                            : "—"}
+                        </td>
                         <td>{s ? `${s.intervalSeconds}s` : "—"}</td>
                         <td className="gitcfg-table-act">
                           <Button
@@ -150,6 +160,7 @@ const Automation = () => {
                                   branch: p.branch || "",
                                   intervalSeconds: 300,
                                   ignitionUser: "",
+                                  mode: "pull",
                                 }
                               )
                             }
@@ -185,8 +196,30 @@ const Automation = () => {
                     setSyncDraft({ ...syncDraft, enabled: e.target.checked })
                   }
                 />
-                <span>Fetch and fast-forward on a schedule</span>
+                <span>Sync on a schedule</span>
               </label>
+              <Radio
+                name="sync-mode"
+                value={syncDraft.mode}
+                radios={[
+                  {
+                    label:
+                      "Pull — fast-forward the project; refused while anyone has local changes",
+                    value: "pull",
+                  },
+                  {
+                    label:
+                      "Replace — make the project match the branch exactly, like a release; overwrites local changes and follows a rollback",
+                    value: "replace",
+                  },
+                ]}
+                onChange={(_e: unknown, value: string) =>
+                  setSyncDraft({
+                    ...syncDraft,
+                    mode: value === "replace" ? "replace" : "pull",
+                  })
+                }
+              />
               <div className="gitcfg-auto-pair">
                 <TextInput
                   label="Remote"

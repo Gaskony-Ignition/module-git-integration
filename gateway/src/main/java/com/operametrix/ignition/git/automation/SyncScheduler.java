@@ -10,6 +10,7 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.MergeResult;
 import org.eclipse.jgit.api.PullCommand;
 import org.eclipse.jgit.api.PullResult;
+import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.lib.ObjectId;
@@ -26,14 +27,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Inbound sync: fetch each configured project repository on a timer and fast-forward it when the
- * tracked branch has moved.
+ * Inbound sync: fetch each configured project repository on a timer and, when the tracked branch
+ * has moved, either fast-forward the project (Pull) or make it match the branch exactly (Replace).
  *
  * <p>This is the default inbound mechanism rather than a GitHub webhook because a webhook needs
  * GitHub to open a connection <em>to</em> the gateway, which is not possible on most OT networks
@@ -160,16 +162,20 @@ public final class SyncScheduler {
 
             String current = repo.getBranch();
             String branch = cfg.getBranch().isBlank() ? current : cfg.getBranch();
+            boolean replace = cfg.isReplace();
 
-            // Someone has a Designer open with unsaved work. Refuse: silently discarding or
-            // stashing an engineer's changes is worse than not syncing.
-            Status status = git.status().call();
-            if (!status.isClean()) {
-                String note = "local changes present (" + status.getUncommittedChanges().size()
-                        + " uncommitted); not pulling";
-                GitEvents.fire(GitEvent.of(GitEvent.SYNC).project(project).user(user)
-                        .branch(branch).remote(remoteName).failure(note));
-                return note;
+            // Someone has a Designer open with unsaved work. Pull mode refuses: silently
+            // discarding or stashing an engineer's changes is worse than not syncing. Replace mode
+            // was chosen to be authoritative, like a release, so it goes ahead and says so.
+            if (!replace) {
+                Status status = git.status().call();
+                if (!status.isClean()) {
+                    String note = "local changes present (" + status.getUncommittedChanges().size()
+                            + " uncommitted); not pulling";
+                    GitEvents.fire(GitEvent.of(GitEvent.SYNC).project(project).user(user)
+                            .branch(branch).remote(remoteName).failure(note));
+                    return note;
+                }
             }
 
             FetchCommand fetch = git.fetch().setRemote(remoteName);
@@ -182,49 +188,55 @@ public final class SyncScheduler {
                         "remote '" + remoteName + "' has no branch '" + branch + "'");
             }
 
-            // Sync set to follow a branch that is not the one checked out: switch to it. Pulling
-            // it into whatever IS checked out merges the wrong branch, and because the local ref
-            // never exists the comparison below never matches, so it re-pulled and rescanned the
-            // project on every interval. The tree is clean (refused above), so nothing is lost.
             ObjectId before = repo.resolve("HEAD");
             boolean switched = !branch.equals(current);
-            if (switched) {
-                boolean exists = repo.findRef("refs/heads/" + branch) != null;
-                git.checkout()
-                        .setName(branch)
-                        .setCreateBranch(!exists)
-                        .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
-                        .setStartPoint(exists ? null : remoteName + "/" + branch)
-                        .call();
-            }
+            String message;
 
-            ObjectId local = repo.resolve(branch);
-            if (!switched && tracked.equals(local)) {
-                return "up to date";
-            }
-
-            // The remote branch moved BACKWARDS (a force-push, e.g. a promotion rolled back). A pull
-            // changes nothing, and reporting it as a sync would re-import and rescan every
-            // interval. Following it would mean resetting the project, which sync never does.
-            if (!switched && local != null && isAncestor(repo, tracked, local)) {
-                return "remote branch is behind this gateway; not applied";
-            }
-
-            if (!tracked.equals(local)) {
-                PullCommand pull = git.pull().setRemote(remoteName).setRemoteBranchName(branch);
-                GitManager.setAuthentication(pull, project, user, remoteName);
-                PullResult result = pull.call();
-                if (!result.isSuccessful()) {
-                    MergeResult merge = result.getMergeResult();
-                    String reason = merge == null ? "pull rejected" : ("merge " + merge.getMergeStatus());
-                    throw new IllegalStateException(reason);
+            if (replace) {
+                // Compared with HEAD, not the working tree: a replace runs when the branch moves,
+                // as a release runs when one is published, not whenever someone edits.
+                if (!switched && tracked.equals(before)) {
+                    return "up to date";
                 }
+                message = replace(git, repo, branch, current, remoteName, tracked, before, switched);
+            } else {
+                // Sync set to follow a branch that is not the one checked out: switch to it.
+                // Pulling it into whatever IS checked out merges the wrong branch, and because the
+                // local ref never exists the comparison below never matches, so it re-pulled and
+                // rescanned the project on every interval. The tree is clean (refused above).
+                if (switched) {
+                    checkout(git, repo, branch, remoteName);
+                }
+
+                ObjectId local = repo.resolve(branch);
+                if (!switched && tracked.equals(local)) {
+                    return "up to date";
+                }
+
+                // The remote branch moved BACKWARDS (a force-push, e.g. a promotion rolled back).
+                // A pull changes nothing, and reporting it as a sync would re-import and rescan
+                // every interval. Following it is what Replace mode is for.
+                if (!switched && local != null && isAncestor(repo, tracked, local)) {
+                    return "remote branch is behind this gateway; not applied (Replace mode follows it)";
+                }
+
+                if (!tracked.equals(local)) {
+                    PullCommand pull = git.pull().setRemote(remoteName).setRemoteBranchName(branch);
+                    GitManager.setAuthentication(pull, project, user, remoteName);
+                    PullResult result = pull.call();
+                    if (!result.isSuccessful()) {
+                        MergeResult merge = result.getMergeResult();
+                        String reason = merge == null ? "pull rejected" : ("merge " + merge.getMergeStatus());
+                        throw new IllegalStateException(reason);
+                    }
+                }
+                message = switched ? "Switched from " + current + " to " + branch + "; pulled" : "Pulled";
             }
 
             ObjectId after = repo.resolve(branch);
             List<String> changed = changedPaths(repo, before, after);
 
-            // The pull changed files under data/projects; Ignition does not notice on its own.
+            // The files under data/projects changed; Ignition does not notice on its own.
             GitProjectManager.importProject(project);
             requestScan();
 
@@ -234,13 +246,68 @@ public final class SyncScheduler {
                     .branch(branch)
                     .remote(remoteName)
                     .commit(after == null ? "" : after.getName())
-                    .message((switched ? "Switched from " + current + " to " + branch + "; " : "")
-                            + (switched ? "pulled " : "Pulled ") + changed.size()
-                            + " changed file(s) from " + remoteName + "/" + branch)
+                    .message(message + " " + changed.size() + " changed file(s) from "
+                            + remoteName + "/" + branch)
                     .files(changed)
                     .success());
-            return "pulled " + changed.size() + " file(s)";
+            return (replace ? "replaced, " : "pulled ") + changed.size() + " file(s)";
         }
+    }
+
+    private static void checkout(Git git, Repository repo, String branch, String remoteName)
+            throws Exception {
+        boolean exists = repo.findRef("refs/heads/" + branch) != null;
+        git.checkout()
+                .setName(branch)
+                .setCreateBranch(!exists)
+                .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
+                .setStartPoint(exists ? null : remoteName + "/" + branch)
+                .call();
+    }
+
+    /**
+     * Makes the project exactly the remote branch, as {@link ReleaseReceiver} does with a zip: files
+     * the branch dropped disappear, uncommitted edits are overwritten, and a branch moved backwards
+     * is followed. The gateway's own project properties are kept, because they hold per-gateway
+     * settings a branch ships neutral. Returns the start of the event message.
+     */
+    private static String replace(Git git, Repository repo, String branch, String current,
+                                  String remoteName, ObjectId tracked, ObjectId before,
+                                  boolean switched) throws Exception {
+        Path props = repo.getWorkTree().toPath().resolve(ReleaseReceiver.GLOBAL_PROPS);
+        byte[] keptProps = Files.isRegularFile(props) ? Files.readAllBytes(props) : null;
+
+        Status status = git.status().call();
+        Set<String> overwritten = new TreeSet<>(status.getUncommittedChanges());
+        overwritten.addAll(status.getUntracked());
+        overwritten.remove(ReleaseReceiver.GLOBAL_PROPS);
+
+        // Clean first so the checkout cannot trip over an edit, then move the branch itself —
+        // reset, not merge, so a rollback lands and local commits never block it.
+        git.reset().setMode(ResetCommand.ResetType.HARD).call();
+        git.clean().setCleanDirectories(true).call();
+        if (switched) {
+            checkout(git, repo, branch, remoteName);
+        }
+        git.reset().setMode(ResetCommand.ResetType.HARD).setRef(tracked.getName()).call();
+
+        if (keptProps != null) {
+            Files.createDirectories(props.getParent());
+            Files.write(props, keptProps);
+        }
+
+        // The rollback leads: it is the one thing in this message someone reading the log is
+        // looking for.
+        StringBuilder m = new StringBuilder();
+        if (before != null && !switched && isAncestor(repo, tracked, before)) {
+            m.append("Rolled back. ");
+        }
+        if (!overwritten.isEmpty()) {
+            m.append("Overwrote ").append(overwritten.size()).append(" uncommitted change(s). ");
+        }
+        m.append(switched
+                ? "Switched from " + current + " to " + branch + "; replaced with" : "Replaced with");
+        return m.toString();
     }
 
     private static void requestScan() {

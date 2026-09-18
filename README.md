@@ -46,8 +46,9 @@ indistinguishable — and any of them can be initialised or given a remote here.
 ![The Projects tab listing every project and its git state](docs/images/versioning-projects.png)
 
 Automation brings changes onto this gateway — it never pushes. Scheduled sync
-fetches each project's remote on a timer and fast-forwards it when the tracked
-branch moves; the Actions runner lets a GitHub workflow install a release or
+fetches each project's remote on a timer and, when the tracked branch moves,
+either fast-forwards the project or replaces it whole, as a release does; the
+Actions runner lets a GitHub workflow install a release or
 pull the branch, with nothing reaching in. The event log below records every
 commit, push, pull, config auto-commit, sync and release, successes and failures
 alike — including an unattended one that refused or failed, and why.
@@ -60,7 +61,7 @@ same connection, so a workflow can hand this gateway a release — or ask it to
 pull a branch — with nothing reaching in. Each project picks **Release** (a zip
 replaces the whole project, applied without a restart) or **Repo updates** (pull
 the branch). The tab holds the gateway's side — accept runner requests, the
-address, the token, each project's delivery — and lists what GitHub's side
+token, each project's delivery — and lists what GitHub's side
 needs: a runner with a label of its own, and a workflow that calls the gateway.
 It reports what is already in place (when a runner last called, which workflows
 the repository has) and gives a check to run from the runner machine.
@@ -92,10 +93,13 @@ are never rewritten. Project repositories, the credentials they authenticate
 with, and the automation below are all managed from the same page.
 
 **Automation** — pulls changes into this gateway; it never pushes. **Scheduled
-sync** fetches each project's remote on a timer and fast-forwards it when the
-tracked branch moves, then requests a project scan — polling rather than a
-webhook, because GitHub cannot reach most gateways. A sync refuses when the
-working tree is dirty rather than discarding someone's unsaved work. For
+sync** fetches each project's remote on a timer and, when the tracked branch
+moves, brings the project up to it and requests a project scan — polling rather
+than a webhook, because GitHub cannot reach most gateways. **Pull** fast-forwards
+and refuses when the working tree is dirty rather than discarding someone's
+unsaved work. **Replace** makes the project match the branch exactly — dropped
+files go, a rollback is followed, the gateway's project properties stay — so a
+branch of built releases can deliver a release with no runner. For
 push-time delivery, the **Actions runner** tab generates the setup for a GitHub
 Actions self-hosted runner and opens two token-authenticated routes for it: one
 installs a release zip, replacing the project while keeping its git repository
@@ -121,7 +125,8 @@ Gateway config versioning: **Platform → System → Versioning → Initialize
 versioning**. Adjust what is covered under **Excluded files**.
 
 Automation: **Platform → System → Versioning → Automation**. On **Scheduled
-sync**, press *Set up* for a project, choose a branch and interval, then
+sync**, press *Set up* for a project, choose Pull or Replace, a branch and an
+interval, then
 *Sync now* — the result appears in the Event log below.
 
 Push-time delivery: **Automation → Actions runner**.
@@ -139,12 +144,13 @@ Push-time delivery: **Automation → Actions runner**.
    with a label no other runner carries. GitHub's *New self-hosted runner* page
    gives the commands; one runner per machine serves every repository it is
    registered for. The tab says when a runner last called.
-5. Have a workflow call the gateway: its `runs-on` names that label, and it
+5. Have a workflow call the gateway: its `runs-on` names that label, it
+   names the address the runner reaches this gateway on (for a runner on the
+   same Docker host, `http://localhost:` and the published port), and it
    sends the token to `/data/git-config/runner-release` (Release) or
    `/data/git-config/runner-sync` (Repo updates). Nothing happens until one
    does. The tab lists the repository's workflows and which already call.
-6. Set the address the runner reaches this gateway on — for a runner on the same
-   Docker host, `http://localhost:` and the published port — and run the test
+6. Type that address beside the check at the bottom of the tab and run the test
    command from the runner machine before relying on it.
 
 *Which should I use?* on the same tab compares this with the pull model

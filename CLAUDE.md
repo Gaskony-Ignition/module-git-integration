@@ -101,8 +101,9 @@ on Vision clients.
 - **Runner routes read the raw query string**, never `getParameter`: Jetty
   would parse a large non-zip body as a form and 500.
 - **The check command never carries an unchosen project's name**, and the
-  gateway never reads its configured address at request time — it only fills
-  in that command, so a GET may preview an unsaved one.
+  gateway stores no address of its own (removed in 3.4.0): where deploys go
+  belongs to the workflow or whatever starts it, and a saved copy here was
+  mistaken for it. The page passes the typed address to the GET for the check.
 - **Styles: colour and weight from the platform tokens** (`--neutral-*`,
   `--primary`, `--success`, `--error`, `--warning-dark` for amber text);
   type, spacing, radius and the mono stack from the `--gitcfg-*` block at the

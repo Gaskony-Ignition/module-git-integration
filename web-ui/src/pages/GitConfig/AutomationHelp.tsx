@@ -55,12 +55,19 @@ export default function AutomationHelp() {
             <tr>
               <td>Can run a build step</td>
               <td>yes</td>
-              <td>no — it copies raw repository files</td>
+              <td>no — something else must commit what it builds</td>
             </tr>
             <tr>
-              <td>Delivers a release zip</td>
+              <td>Delivers a release</td>
+              <td>yes, the zip</td>
+              <td>
+                yes, in Replace mode, from a branch that holds built releases
+              </td>
+            </tr>
+            <tr>
+              <td>Rolls back</td>
               <td>yes</td>
-              <td>no</td>
+              <td>Replace mode only</td>
             </tr>
             <tr>
               <td>Pass or fail visible in GitHub</td>
@@ -83,14 +90,17 @@ export default function AutomationHelp() {
         before it lands, or has to report success back to whoever released it.
       </p>
       <p className="gitcfg-hint">
-        <strong>Promoting without a runner.</strong> Give the gateway a branch
-        of its own — <code>deploy/site-a</code>, say — and point Scheduled sync
-        at it. Anything that can move that branch then decides what this gateway
-        runs: a promotion tool that writes git commits, a merge, a person.
-        Nothing reaches in and no runner is needed, but the gateway needs a
-        credential and a route to GitHub; what lands is the repository&apos;s
-        files as committed, with no build step; the pull is refused while anyone
-        has uncommitted edits on the gateway; and whoever moved the branch
+        <strong>Promoting a release without a runner.</strong> A tag holds the
+        source, not the release: a release build typically stamps the version
+        into the title and swaps in neutral settings. So publish what the build
+        produces — on each tag, a workflow on GitHub&apos;s own machines builds
+        the release and commits it to a branch of built releases. Give the
+        gateway a branch of its own, <code>deploy/site-a</code> say, point
+        Scheduled sync at it in <strong>Replace</strong> mode, and let the
+        promotion move that branch to the approved release. The gateway then
+        installs the whole release, keeps its own project properties, and
+        follows a rollback. What remains different from the runner: the gateway
+        needs a credential and a route to GitHub, and whoever moved the branch
         learns nothing about whether the gateway applied it — check the Event
         log.
       </p>

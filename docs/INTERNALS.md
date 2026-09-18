@@ -41,7 +41,7 @@ DTO façade over a `NamedResourceHandler` whose config is a nested Java
 | `GitUserSshKeyRecord` | User-level SSH key; secret is a `SecretConfig` (embedded-encrypted or Secret-Provider reference). Shared across projects. |
 | `GitConfigRemoteRecord` | Gateway-level singleton: the data-dir config repo's remote (URI, branch, credential FK). Manual push only. |
 | `GitSyncRecord` | Per-project scheduled inbound sync: remote, branch, interval, authenticating user. |
-| `GitRunnerRecord` | Gateway-level singleton: runner route on/off, bearer token (`SecretConfig`), the gateway address the runner should call, runner labels. |
+| `GitRunnerRecord` | Gateway-level singleton: runner route on/off, bearer token (`SecretConfig`). Stores no address: the runner's is the workflow's. |
 | `GitUserHttpsCredentialRecord` | User-level HTTPS credential (host pattern, username, encrypted password). `HostPattern` is a picker label only — auth resolves via the FK, never a pattern match. |
 
 A one-time `records.legacy.GitLegacyImporter` migrates the old SimpleORM

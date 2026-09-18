@@ -163,6 +163,9 @@ export interface SyncSetting {
   branch: string;
   intervalSeconds: number;
   ignitionUser: string;
+  // "pull": fast-forward, refused while anyone has local edits. "replace": the project is made
+  // to match the branch exactly, as a release replaces it — edits overwritten, rollbacks followed.
+  mode: "pull" | "replace";
 }
 export interface RunnerProject {
   name: string;
@@ -187,7 +190,6 @@ export interface RunnerWorkflows {
 export interface RunnerConfig {
   enabled: boolean;
   hasToken: boolean;
-  gatewayUrl: string;
   projects: RunnerProject[];
   // Empty until one is chosen; the check command then carries a placeholder.
   project: string;
@@ -404,9 +406,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: (body) => ({ url: `${BASE}/sync-now`, method: "POST", body }),
       invalidatesTags: ["automation", "projects"],
     }),
-    // `gatewayUrl` only changes the generated check command, so the page passes what has been
-    // typed and previews it before Save. The gateway does not read it when a runner calls, and
-    // this GET writes nothing.
+    // `gatewayUrl` only fills in the generated check command; the gateway stores no address.
     getRunner: builder.query<
       RunnerConfig,
       { project?: string; gatewayUrl?: string }
@@ -427,7 +427,6 @@ export const gitConfigApi = baseApi.injectEndpoints({
       { hasToken: boolean; token?: string },
       {
         enabled?: boolean;
-        gatewayUrl?: string;
         project?: string;
         mode?: "release" | "repo";
         generateToken?: boolean;

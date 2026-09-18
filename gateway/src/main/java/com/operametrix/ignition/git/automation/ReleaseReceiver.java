@@ -53,7 +53,8 @@ public final class ReleaseReceiver {
     /** Project names are directory names; nothing that could climb out of {@code projects/}. */
     private static final Pattern PROJECT_NAME = Pattern.compile("[A-Za-z0-9_-]+");
 
-    private static final String GLOBAL_PROPS = "ignition/global-props/data.bin";
+    /** Per-gateway project properties, kept across a release and a replacing sync alike. */
+    static final String GLOBAL_PROPS = "ignition/global-props/data.bin";
 
     private ReleaseReceiver() {
     }

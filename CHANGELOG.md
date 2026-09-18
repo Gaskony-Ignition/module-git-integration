@@ -3,7 +3,23 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
-## [3.3.1] - 2026-09-18
+## [3.4.1] - 2026-09-18
+
+### Added
+- **Scheduled sync has a Replace mode.** Pull (the default, and what every existing sync keeps)
+  fast-forwards and refuses while anyone has local changes. Replace makes the project match the
+  branch exactly, as a release does: files the branch dropped disappear, uncommitted edits are
+  overwritten and reported in the Event log, a branch moved backwards is followed — a rollback —
+  and the gateway's own project properties (`ignition/global-props/data.bin`) are kept. Pointed at
+  a branch that holds built releases, it installs a release with no runner.
+
+### Removed
+- **The runner tab no longer saves a gateway address.** The gateway never used it — it only
+  filled in the check command — while deploys go wherever the workflow, or the promotion tool
+  that starts it, says. Two places holding one address let a changed setting look like it
+  steered a deploy when it did not. The check now has its own unsaved address field, starting
+  at the one the page is open on. A settings resource saved by an earlier version loads with
+  the old address ignored.
 
 ### Fixed
 - **Scheduled sync set to a branch other than the one checked out** pulled that branch into the

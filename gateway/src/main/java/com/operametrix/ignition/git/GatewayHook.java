@@ -1223,6 +1223,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 so.addProperty("branch", s.getBranch());
                 so.addProperty("intervalSeconds", s.getIntervalSeconds());
                 so.addProperty("ignitionUser", s.getIgnitionUser());
+                so.addProperty("mode", s.getMode());
                 syncs.add(so);
             }
 
@@ -1285,6 +1286,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             cfg.setRemoteName(optString(body, "remoteName"));
             cfg.setBranch(optString(body, "branch"));
             cfg.setIntervalSeconds((int) optLong(body, "intervalSeconds"));
+            cfg.setMode(optString(body, "mode"));
             // Sync runs unattended, so it authenticates as a named user's stored credential
             // rather than borrowing whoever happens to be in a Designer. Default to the admin
             // configuring it, who demonstrably has one.
@@ -1307,12 +1309,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             // Never the token itself. It is shown once, when it is generated, and after that the
             // browser can only learn whether one exists.
             o.addProperty("hasToken", cfg.hasToken());
-            o.addProperty("gatewayUrl", cfg.getGatewayUrl());
 
-            // The address is only ever used to fill in the check command — the gateway never reads
-            // it when a runner calls. So the page may preview it as it is typed, before Save. This
-            // override affects this response and nothing else: a GET never writes.
-            GitRunnerRecord snippetCfg = cfg.withOverrides(req.getParameter("gatewayUrl"));
+            // The address as the runner reaches this gateway, typed on the page for the check
+            // command only. The gateway stores none: where deploys go belongs to the workflow.
+            String gatewayUrl = req.getParameter("gatewayUrl");
 
             // Whether a runner already reaches this gateway, so the page can stop asking for an
             // install that is demonstrably done. In memory, so it is empty after a restart.
@@ -1360,11 +1360,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             o.addProperty("chosenMode", chosenMode == null ? "" : chosenMode);
             o.addProperty("hasRemote", remoteUrl != null);
             o.addProperty("testCommand", release
-                    ? RunnerSetup.releaseTestCommand(project, snippetCfg)
-                    : RunnerSetup.testCommand(project, snippetCfg));
+                    ? RunnerSetup.releaseTestCommand(project, gatewayUrl)
+                    : RunnerSetup.testCommand(project, gatewayUrl));
             o.addProperty("testCommandWindows", release
-                    ? RunnerSetup.releaseTestCommandWindows(project, snippetCfg)
-                    : RunnerSetup.testCommandWindows(project, snippetCfg));
+                    ? RunnerSetup.releaseTestCommandWindows(project, gatewayUrl)
+                    : RunnerSetup.testCommandWindows(project, gatewayUrl));
 
             // What the repository already deploys with. Adding a second workflow beside an
             // existing one is the wrong answer far more often than it is the right one.
@@ -1392,9 +1392,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             GitRunnerRecord cfg = GitRunnerRecord.get();
             if (body.has("enabled")) {
                 cfg.setEnabled(body.get("enabled").getAsBoolean());
-            }
-            if (body.has("gatewayUrl")) {
-                cfg.setGatewayUrl(optString(body, "gatewayUrl"));
             }
             if (body.has("project") && body.has("mode")) {
                 cfg.setMode(optString(body, "project"), optString(body, "mode"));

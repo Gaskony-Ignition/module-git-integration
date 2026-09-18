@@ -109,14 +109,17 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
   const [project, setProject] = React.useState("");
   const [os, setOs] = React.useState<Os>(detectOs);
 
-  const [gatewayUrl, setGatewayUrl] = React.useState("");
+  // Only for the check command at the bottom. Never saved: the address a runner uses belongs to
+  // whatever drives the workflow (a promotion tool, a workflow input), and the gateway never
+  // reads one. A saved copy here only invited the belief that it steered deploys.
+  const [gatewayUrl, setGatewayUrl] = React.useState(window.location.origin);
   const [enabled, setEnabled] = React.useState(false);
   // Held only until the page is left. The gateway returns it once and cannot return it again.
   const [issued, setIssued] = React.useState<string | null>(null);
 
   // What the snippets are generated from. Debounced so a keystroke is not a request, and only
   // ever affects the generated text — see the note on the query in GitConfig.service.ts.
-  const [preview, setPreview] = React.useState("");
+  const [preview, setPreview] = React.useState(gatewayUrl);
   React.useEffect(() => {
     const t = setTimeout(() => setPreview(gatewayUrl), 300);
     return () => clearTimeout(t);
@@ -130,13 +133,9 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
 
   const loaded = React.useRef(false);
   React.useEffect(() => {
-    // Only the first response seeds the fields — later ones carry the values being previewed,
-    // and reseeding from those would fight whatever is being typed.
+    // Only the first response seeds the tick box — later ones would fight an unsaved change.
     if (!data || loaded.current) return;
     loaded.current = true;
-    // An unsaved address starts as the one this page was opened on. It is only a starting point:
-    // on a container or behind a proxy the runner usually needs a different one.
-    setGatewayUrl(data.gatewayUrl || window.location.origin);
     setEnabled(data.enabled);
   }, [data]);
 
@@ -144,11 +143,7 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
 
   const onSave = async (extra: Record<string, unknown> = {}) => {
     try {
-      const res = await save({
-        enabled,
-        gatewayUrl,
-        ...extra,
-      }).unwrap();
+      const res = await save({ enabled, ...extra }).unwrap();
       if (res.token) setIssued(res.token);
       else toasts.notifySuccess("Saved");
       refetch();
@@ -168,7 +163,7 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
 
   const chosen = data.project !== "";
   const release = data.mode === "release";
-  const unsaved = gatewayUrl !== data.gatewayUrl;
+  const unsaved = enabled !== data.enabled;
 
   const seenAt = data.runnerSeen?.at ?? 0;
   const wf = data.workflows?.list ?? [];
@@ -205,22 +200,6 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
         />
         <span>Accept requests from a runner</span>
       </label>
-      <TextInput
-        label="Gateway address the runner will use"
-        value={gatewayUrl}
-        placeholder="http://gateway.plant.local:8088"
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-          setGatewayUrl(e.target.value)
-        }
-      />
-      <p className="gitcfg-hint">
-        The address starts as the one this page is open on. Change it to the one
-        the <em>runner</em> reaches this gateway on — for a runner on the same
-        Docker host that is usually <code>http://localhost:</code> plus the
-        published port. The gateway does not act on it: it fills in the check at
-        the bottom of this page. The tick box and the token below are what the
-        gateway acts on.
-      </p>
       <div className="gitcfg-actions is-end">
         {unsaved ? <span className="gitcfg-off">Not saved yet</span> : null}
         <Button colorClass="primary" disabled={saving} onClick={() => onSave()}>
@@ -457,6 +436,12 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
           <code>Authorization: Bearer &lt;token&gt;</code>.
         </li>
         <li>
+          It names this gateway&apos;s address as the <em>runner</em> reaches it
+          — for a runner on the same Docker host, usually{" "}
+          <code>http://localhost:</code> plus the published port. That address
+          lives with the workflow or whatever starts it, not on this gateway.
+        </li>
+        <li>
           <strong>Release:</strong> POST the project export zip to{" "}
           <code>/data/git-config/runner-release?project=&lt;name&gt;</code>.{" "}
           <strong>Repo updates:</strong> POST{" "}
@@ -471,6 +456,14 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
           ? "From the runner machine, with the token in place of the placeholder. It sends no zip, so nothing is installed: 400 “no release zip” means the address and token are right."
           : "From the runner machine, with the token in place of the placeholder. A success means the workflow will work."}
       </p>
+      <TextInput
+        label="Address the runner reaches this gateway on — for this check only, not saved"
+        value={gatewayUrl}
+        placeholder="http://gateway.plant.local:8088"
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+          setGatewayUrl(e.target.value)
+        }
+      />
       <OsTabs
         os={os}
         setOs={setOs}

@@ -20,7 +20,8 @@ import java.util.List;
 public class GitSyncRecord {
 
     public record Config(long id, String project, boolean enabled, String remoteName,
-                         String branch, int intervalSeconds, String ignitionUser) {}
+                         String branch, int intervalSeconds, String ignitionUser,
+                         String mode) {}
 
     public static final ResourceType TYPE =
             new ResourceType(GitProjectsConfigRecord.MODULE_ID, "git-sync");
@@ -47,6 +48,14 @@ public class GitSyncRecord {
     public static final int MIN_INTERVAL_SECONDS = 30;
     public static final int DEFAULT_INTERVAL_SECONDS = 300;
 
+    /** Fast-forward the project when the branch moves; refuse while anyone has local edits. */
+    public static final String MODE_PULL = "pull";
+    /**
+     * Make the project match the branch exactly, as a release does: local edits are overwritten
+     * and a branch moved backwards is followed, which is what makes a rollback possible.
+     */
+    public static final String MODE_REPLACE = "replace";
+
     private long id;
     private String project = "";
     private boolean enabled;
@@ -54,6 +63,7 @@ public class GitSyncRecord {
     private String branch = "";
     private int intervalSeconds = DEFAULT_INTERVAL_SECONDS;
     private String ignitionUser = "";
+    private String mode = MODE_PULL;
 
     public GitSyncRecord() {
     }
@@ -66,6 +76,12 @@ public class GitSyncRecord {
         this.branch = nz(c.branch());
         this.intervalSeconds = Math.max(MIN_INTERVAL_SECONDS, c.intervalSeconds());
         this.ignitionUser = nz(c.ignitionUser());
+        // Absent in records saved before 3.4.0, which all pulled.
+        this.mode = normaliseMode(c.mode());
+    }
+
+    private static String normaliseMode(String m) {
+        return MODE_REPLACE.equals(m) ? MODE_REPLACE : MODE_PULL;
     }
 
     private static String nz(String s) {
@@ -125,6 +141,18 @@ public class GitSyncRecord {
         this.ignitionUser = nz(v);
     }
 
+    public String getMode() {
+        return mode;
+    }
+
+    public void setMode(String v) {
+        this.mode = normaliseMode(v);
+    }
+
+    public boolean isReplace() {
+        return MODE_REPLACE.equals(mode);
+    }
+
     private static final Object SAVE_LOCK = new Object();
 
     public void save() {
@@ -140,7 +168,7 @@ public class GitSyncRecord {
                                     .orElse(0L) + 1L;
                 }
                 Config c = new Config(id, project, enabled, remoteName, branch, intervalSeconds,
-                        ignitionUser);
+                        ignitionUser, mode);
                 String key = String.valueOf(id);
                 if (handler.findResource(key).isPresent()) {
                     handler.modify(key, c).join();

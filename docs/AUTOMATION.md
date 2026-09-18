@@ -15,9 +15,20 @@ installs could never use.
 Inbound sync ships as two mechanisms instead:
 
 **Polling (default).** A scheduled task per repository: `git fetch`, compare
-the tracked remote branch to local, pull if it moved. No inbound exposure,
+the tracked remote branch to local, and act if it moved. No inbound exposure,
 works behind NAT, works with no GitHub involvement at all. Interval
-configurable, default 5 minutes.
+configurable, default 5 minutes. Each sync has a delivery:
+
+- **Pull** fast-forwards the project, and refuses while the tree is dirty (see
+  the dirty-tree rule) or when the remote moved backwards.
+- **Replace** resets the project to the remote branch — hard reset plus clean,
+  so dropped files go — keeping `ignition/global-props/data.bin` as a release
+  does. It runs only when the branch moves (compared with HEAD, not the
+  working tree), overwrites uncommitted edits and says how many, and follows a
+  branch moved backwards. This is the runnerless release route: a tag holds
+  source, so a workflow builds each release and commits the unzipped result to
+  a branch of releases, and a promotion moves the gateway's own branch to the
+  approved one.
 
 **Actions runner (push-time).** A GitHub Actions self-hosted runner connects
 *out* to GitHub and is handed workflow jobs over that same connection, so a
@@ -60,11 +71,12 @@ modes keeps working until a choice is made.
 ### What the gateway actually acts on
 
 Only two of the runner tab's values change what the gateway does: whether it
-accepts runner requests, and the token. The gateway never reads its configured
-address when a runner calls — it exists solely to fill in the check command, so
-it is safe to preview before saving (the GET takes it as a query parameter and
-generates from it without writing). Presenting them
-as gateway configuration is what made the tab read as five compulsory steps.
+accepts runner requests, and the token. The address a runner calls is not one
+of them — it belongs to the workflow, or to whatever starts it (a promotion
+tool passes it per target). Until 3.4.0 the gateway also saved one, used only to
+fill in the check command; it was taken for the address deploys use, so it went.
+The page now passes whatever is typed beside the check to the GET, which
+generates from it and stores nothing.
 
 The same split decides what the gateway needs from git. In **Release** mode it
 needs nothing: no repository, no remote, no credential, no route to GitHub — the
@@ -119,8 +131,10 @@ concrete gateway that GitHub can actually reach.
 ## The dirty-tree rule
 
 Either mechanism can find local uncommitted changes — someone has a Designer
-open. Both refuse rather than stash or force: log it, leave the tree alone.
-Silently reverting an engineer's unsaved work is worse than not syncing.
+open. Pull and Repo updates refuse rather than stash or force: log it, leave
+the tree alone. Silently reverting an engineer's unsaved work is worse than not
+syncing. Release and Replace are chosen to be authoritative, so they overwrite
+— and Replace reports the count in its event, so it is never silent.
 
 ## Workflow security model
 
