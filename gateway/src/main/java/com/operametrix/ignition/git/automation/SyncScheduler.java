@@ -4,6 +4,7 @@ import com.operametrix.ignition.git.GatewayHook;
 import com.operametrix.ignition.git.managers.GitManager;
 import com.operametrix.ignition.git.managers.GitProjectManager;
 import com.operametrix.ignition.git.records.GitSyncRecord;
+import org.eclipse.jgit.api.CreateBranchCommand;
 import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.MergeResult;
@@ -157,7 +158,8 @@ public final class SyncScheduler {
                         "repository has no commits yet — run Pull once from the Designer to finish it");
             }
 
-            String branch = cfg.getBranch().isBlank() ? repo.getBranch() : cfg.getBranch();
+            String current = repo.getBranch();
+            String branch = cfg.getBranch().isBlank() ? current : cfg.getBranch();
 
             // Someone has a Designer open with unsaved work. Refuse: silently discarding or
             // stashing an engineer's changes is worse than not syncing.
@@ -174,28 +176,53 @@ public final class SyncScheduler {
             GitManager.setAuthentication(fetch, project, user, remoteName);
             fetch.call();
 
-            ObjectId local = repo.resolve(branch);
             ObjectId tracked = repo.resolve("refs/remotes/" + remoteName + "/" + branch);
             if (tracked == null) {
                 throw new IllegalStateException(
                         "remote '" + remoteName + "' has no branch '" + branch + "'");
             }
-            if (local != null && local.equals(tracked)) {
+
+            // Sync set to follow a branch that is not the one checked out: switch to it. Pulling
+            // it into whatever IS checked out merges the wrong branch, and because the local ref
+            // never exists the comparison below never matches, so it re-pulled and rescanned the
+            // project on every interval. The tree is clean (refused above), so nothing is lost.
+            ObjectId before = repo.resolve("HEAD");
+            boolean switched = !branch.equals(current);
+            if (switched) {
+                boolean exists = repo.findRef("refs/heads/" + branch) != null;
+                git.checkout()
+                        .setName(branch)
+                        .setCreateBranch(!exists)
+                        .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
+                        .setStartPoint(exists ? null : remoteName + "/" + branch)
+                        .call();
+            }
+
+            ObjectId local = repo.resolve(branch);
+            if (!switched && tracked.equals(local)) {
                 return "up to date";
             }
 
-            PullCommand pull = git.pull().setRemote(remoteName).setRemoteBranchName(branch);
-            GitManager.setAuthentication(pull, project, user, remoteName);
-            PullResult result = pull.call();
+            // The remote branch moved BACKWARDS (a force-push, e.g. a promotion rolled back). A pull
+            // changes nothing, and reporting it as a sync would re-import and rescan every
+            // interval. Following it would mean resetting the project, which sync never does.
+            if (!switched && local != null && isAncestor(repo, tracked, local)) {
+                return "remote branch is behind this gateway; not applied";
+            }
 
-            if (!result.isSuccessful()) {
-                MergeResult merge = result.getMergeResult();
-                String reason = merge == null ? "pull rejected" : ("merge " + merge.getMergeStatus());
-                throw new IllegalStateException(reason);
+            if (!tracked.equals(local)) {
+                PullCommand pull = git.pull().setRemote(remoteName).setRemoteBranchName(branch);
+                GitManager.setAuthentication(pull, project, user, remoteName);
+                PullResult result = pull.call();
+                if (!result.isSuccessful()) {
+                    MergeResult merge = result.getMergeResult();
+                    String reason = merge == null ? "pull rejected" : ("merge " + merge.getMergeStatus());
+                    throw new IllegalStateException(reason);
+                }
             }
 
             ObjectId after = repo.resolve(branch);
-            List<String> changed = changedPaths(repo, local, after);
+            List<String> changed = changedPaths(repo, before, after);
 
             // The pull changed files under data/projects; Ignition does not notice on its own.
             GitProjectManager.importProject(project);
@@ -207,8 +234,9 @@ public final class SyncScheduler {
                     .branch(branch)
                     .remote(remoteName)
                     .commit(after == null ? "" : after.getName())
-                    .message("Pulled " + changed.size() + " changed file(s) from " + remoteName
-                            + "/" + branch)
+                    .message((switched ? "Switched from " + current + " to " + branch + "; " : "")
+                            + (switched ? "pulled " : "Pulled ") + changed.size()
+                            + " changed file(s) from " + remoteName + "/" + branch)
                     .files(changed)
                     .success());
             return "pulled " + changed.size() + " file(s)";
@@ -222,6 +250,14 @@ public final class SyncScheduler {
             }
         } catch (Exception e) {
             logger.warn("Project scan request after a git sync failed.", e);
+        }
+    }
+
+    private static boolean isAncestor(Repository repo, ObjectId maybeAncestor, ObjectId of) {
+        try (RevWalk walk = new RevWalk(repo)) {
+            return walk.isMergedInto(walk.parseCommit(maybeAncestor), walk.parseCommit(of));
+        } catch (Exception e) {
+            return false;
         }
     }
 

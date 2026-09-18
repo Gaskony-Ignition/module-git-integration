@@ -3,6 +3,18 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.3.1] - 2026-09-18
+
+### Fixed
+- **Scheduled sync set to a branch other than the one checked out** pulled that branch into the
+  checked-out one, and — because it compared against a local branch that never existed — pulled,
+  imported and rescanned the project on every interval, logging a sync each time with nothing
+  changed. Sync now switches the project to the branch it is set to follow (only ever with no
+  uncommitted changes, which it already refused) and fast-forwards it from there. This is what
+  lets a gateway follow a branch of its own that a promotion tool moves.
+- A remote branch that moved **backwards** (force-pushed, e.g. a rolled-back promotion) no longer
+  counts as a sync on every interval. Sync reports it as not applied — it never resets a project.
+
 ## [3.3.0] - 2026-09-18
 
 ### Changed

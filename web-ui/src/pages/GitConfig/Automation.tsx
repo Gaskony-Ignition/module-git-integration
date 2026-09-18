@@ -196,7 +196,7 @@ const Automation = () => {
                   }
                 />
                 <TextInput
-                  label="Branch — empty follows whatever is checked out"
+                  label="Branch — the project switches to it; empty follows whatever is checked out"
                   value={syncDraft.branch}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setSyncDraft({ ...syncDraft, branch: e.target.value })
