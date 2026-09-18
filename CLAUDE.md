@@ -7,10 +7,8 @@ Designer popup list — this file is standing instructions and gotchas only.
 ## Project overview
 
 A Java module for Ignition 8.3 that embeds a Git client into the Designer:
-commit, push, fetch, pull with merge-conflict resolution, revert, branch
-management, snapshotting gateway-side resources (tags/themes/images) into the
-project, and remote or local-only repository init — from the Designer's
-dockable panels and status bar. It also versions the gateway **data
+commit, push, pull with conflict resolution, branches, and snapshotting
+gateway resources (tags/themes/images) into the project. It also versions the gateway **data
 directory** (config-as-code) in a separate repo, surfaced through a gateway
 web page (Platform → System → "Versioning"): config changes auto-commit as
 they happen, and the page gives history/restore. Originally built by
@@ -40,8 +38,7 @@ gateway   (scope: G)    — all git operations + persistence + config-as-code RE
 web-ui    (no scope)    — React gateway page, bundled into the gateway jar
 ```
 
-The Vision client scope is unused — there is no `system.git.*` script module
-on Vision clients.
+No Vision client scope.
 
 ## Gotchas
 
