@@ -110,7 +110,6 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
   const [os, setOs] = React.useState<Os>(detectOs);
 
   const [gatewayUrl, setGatewayUrl] = React.useState("");
-  const [labels, setLabels] = React.useState("");
   const [enabled, setEnabled] = React.useState(false);
   // Held only until the page is left. The gateway returns it once and cannot return it again.
   const [issued, setIssued] = React.useState<string | null>(null);
@@ -138,7 +137,6 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
     // An unsaved address starts as the one this page was opened on. It is only a starting point:
     // on a container or behind a proxy the runner usually needs a different one.
     setGatewayUrl(data.gatewayUrl || window.location.origin);
-    setLabels(data.labels);
     setEnabled(data.enabled);
   }, [data]);
 
@@ -149,7 +147,6 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
       const res = await save({
         enabled,
         gatewayUrl,
-        labels,
         ...extra,
       }).unwrap();
       if (res.token) setIssued(res.token);
@@ -208,13 +205,30 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
         />
         <span>Accept requests from a runner</span>
       </label>
+      <TextInput
+        label="Gateway address the runner will use"
+        value={gatewayUrl}
+        placeholder="http://gateway.plant.local:8088"
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+          setGatewayUrl(e.target.value)
+        }
+      />
       <p className="gitcfg-auto-hint">
-        This and the token below are the whole of what the gateway acts on.
-        Everything further down generates the commands you run elsewhere.
+        The address starts as the one this page is open on. Change it to the one
+        the <em>runner</em> reaches this gateway on — for a runner on the same
+        Docker host that is usually <code>http://localhost:</code> plus the
+        published port. The gateway does not act on it: it fills in the check at
+        the bottom of this page. The tick box and the token below are what the
+        gateway acts on.
       </p>
-      <Button disabled={saving} onClick={() => onSave()}>
-        Save
-      </Button>
+      <div className="gitcfg-cred-actions">
+        {unsaved ? (
+          <span className="gitcfg-proj-off">Not saved yet</span>
+        ) : null}
+        <Button colorClass="primary" disabled={saving} onClick={() => onSave()}>
+          Save
+        </Button>
+      </div>
 
       <h4 className="gitcfg-step">2 · Generate a token</h4>
       <p className="gitcfg-auto-hint">
@@ -452,22 +466,6 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
       </ul>
 
       <h4 className="gitcfg-step">Check it before you rely on it</h4>
-      <TextInput
-        label="Gateway address the runner will use"
-        value={gatewayUrl}
-        placeholder="http://gateway.plant.local:8088"
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-          setGatewayUrl(e.target.value)
-        }
-      />
-      <div className="gitcfg-cred-actions">
-        {unsaved ? (
-          <span className="gitcfg-proj-off">Not saved yet</span>
-        ) : null}
-        <Button disabled={saving} onClick={() => onSave()}>
-          Save
-        </Button>
-      </div>
       <p className="gitcfg-auto-hint">
         {release
           ? "From the runner machine, with the token in place of the placeholder. It sends no zip, so nothing is installed: 400 “no release zip” means the address and token are right."

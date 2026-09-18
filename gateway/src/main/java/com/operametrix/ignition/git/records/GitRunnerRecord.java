@@ -36,9 +36,6 @@ public class GitRunnerRecord {
     /** The one resource name; the runner configuration is a gateway-level singleton. */
     private static final String NAME = "runner";
 
-    /** Labels a generated workflow targets, and that the generated config.sh registers with. */
-    public static final String DEFAULT_LABELS = "self-hosted,ignition";
-
     /** How a runner delivers to a project: a release zip replacing it, or a pull of its branch. */
     public static final String MODE_RELEASE = "release";
     public static final String MODE_REPO = "repo";
@@ -46,8 +43,12 @@ public class GitRunnerRecord {
     /**
      * {@code ignitionUser} and {@code modes} arrived in 3.1.0, so a record saved earlier decodes
      * them as null. {@code modes} is a JSON object of project name to mode.
+     *
+     * <p>A {@code labels} field was carried until 3.3.0. Nothing ever read it when a runner
+     * called — it only filled in generated commands the page no longer shows — so it is gone, and
+     * a resource saved by an earlier version decodes with that key ignored.
      */
-    public record Config(boolean enabled, SecretConfig token, String gatewayUrl, String labels,
+    public record Config(boolean enabled, SecretConfig token, String gatewayUrl,
                          String ignitionUser, String modes) {}
 
     public static final ResourceType TYPE = new ResourceType(MODULE_ID, "git-runner");
@@ -73,7 +74,6 @@ public class GitRunnerRecord {
     private boolean enabled;
     private SecretConfig token;
     private String gatewayUrl = "";
-    private String labels = DEFAULT_LABELS;
     private String ignitionUser = "";
     private JsonObject modes = new JsonObject();
 
@@ -84,7 +84,6 @@ public class GitRunnerRecord {
         this.enabled = c.enabled();
         this.token = c.token();
         this.gatewayUrl = c.gatewayUrl() == null ? "" : c.gatewayUrl();
-        this.labels = c.labels() == null || c.labels().isBlank() ? DEFAULT_LABELS : c.labels();
         this.ignitionUser = c.ignitionUser() == null ? "" : c.ignitionUser();
         try {
             JsonObject m = c.modes() == null || c.modes().isBlank()
@@ -134,25 +133,17 @@ public class GitRunnerRecord {
         this.gatewayUrl = v == null ? "" : v.trim().replaceAll("/+$", "");
     }
 
-    public String getLabels() {
-        return labels == null || labels.isBlank() ? DEFAULT_LABELS : labels;
-    }
-
-    public void setLabels(String v) {
-        this.labels = v == null || v.isBlank() ? DEFAULT_LABELS : v.trim();
-    }
-
     /**
-     * A detached copy carrying a different address and labels, for generating the setup commands
-     * from values that have been typed but not yet saved.
+     * A detached copy carrying a different address, for generating the check command from an
+     * address that has been typed but not yet saved.
      *
-     * <p>Safe precisely because neither field is used when a runner actually calls: the gateway
-     * authenticates by token and acts on the request, and never reads its own configured address
-     * or labels. They exist only to fill in the commands, so previewing them changes nothing.
-     * A blank override keeps the saved value. The copy is never saved.
+     * <p>Safe precisely because the address is not used when a runner actually calls: the gateway
+     * authenticates by token and acts on the request, and never reads its own configured address.
+     * It exists only to fill in the command, so previewing it changes nothing. A blank override
+     * keeps the saved value. The copy is never saved.
      */
-    public GitRunnerRecord withOverrides(String gatewayUrl, String labels) {
-        if ((gatewayUrl == null || gatewayUrl.isBlank()) && (labels == null || labels.isBlank())) {
+    public GitRunnerRecord withOverrides(String gatewayUrl) {
+        if (gatewayUrl == null || gatewayUrl.isBlank()) {
             return this;
         }
         GitRunnerRecord copy = new GitRunnerRecord();
@@ -160,8 +151,7 @@ public class GitRunnerRecord {
         copy.token = this.token;
         copy.ignitionUser = this.ignitionUser;
         copy.modes = this.modes;
-        copy.setGatewayUrl(gatewayUrl == null || gatewayUrl.isBlank() ? this.gatewayUrl : gatewayUrl);
-        copy.setLabels(labels == null || labels.isBlank() ? this.labels : labels);
+        copy.setGatewayUrl(gatewayUrl);
         return copy;
     }
 
@@ -255,7 +245,7 @@ public class GitRunnerRecord {
 
     public void save() {
         try {
-            Config c = new Config(enabled, token, getGatewayUrl(), getLabels(), getIgnitionUser(),
+            Config c = new Config(enabled, token, getGatewayUrl(), getIgnitionUser(),
                     modes.toString());
             if (handler.findResource(NAME).isPresent()) {
                 handler.modify(NAME, c).join();

@@ -40,15 +40,11 @@ import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import com.inductiveautomation.ignition.gateway.rpc.GatewayRpcImplementation;
 import com.inductiveautomation.ignition.gateway.web.session.WebUiSession;
 import com.inductiveautomation.ignition.gateway.web.systemjs.SystemJsModule;
-import com.operametrix.ignition.git.managers.GitManager;
 import com.operametrix.ignition.git.managers.GitProjectManager;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -350,10 +346,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         routes.newRoute("/runner").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleSaveRunner).mount();
-
-        routes.newRoute("/runner-workflow").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
-                .requirePermission(PermissionType.WRITE)
-                .handler(this::handleRunnerWorkflow).mount();
 
         // OPEN_ROUTE on purpose and uniquely: a workflow step has no gateway session and no way
         // to obtain the X-CSRF-Token that requirePermission's strategy demands, so the route
@@ -1316,17 +1308,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             // browser can only learn whether one exists.
             o.addProperty("hasToken", cfg.hasToken());
             o.addProperty("gatewayUrl", cfg.getGatewayUrl());
-            o.addProperty("labels", cfg.getLabels());
 
-            // The address and the labels are only ever used to fill in the generated commands —
-            // the gateway itself reads neither when a runner calls. So the page may preview them
-            // as they are typed, before Save. These overrides affect this response and nothing
-            // else: a GET never writes.
-            GitRunnerRecord snippetCfg = cfg.withOverrides(
-                    req.getParameter("gatewayUrl"), req.getParameter("labels"));
-            String scope = RunnerSetup.SCOPE_ORG.equals(req.getParameter("scope"))
-                    ? RunnerSetup.SCOPE_ORG : RunnerSetup.SCOPE_REPO;
-            o.addProperty("scope", scope);
+            // The address is only ever used to fill in the check command — the gateway never reads
+            // it when a runner calls. So the page may preview it as it is typed, before Save. This
+            // override affects this response and nothing else: a GET never writes.
+            GitRunnerRecord snippetCfg = cfg.withOverrides(req.getParameter("gatewayUrl"));
 
             // Whether a runner already reaches this gateway, so the page can stop asking for an
             // install that is demonstrably done. In memory, so it is empty after a restart.
@@ -1335,12 +1321,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             seen.addProperty("kind", RunnerAuth.lastCallKind());
             o.add("runnerSeen", seen);
 
-            // Nothing is chosen for the caller. With no project named, every snippet carries
-            // placeholders: the snippets read as examples, and a real project name nobody picked
-            // would be copied into other people's workflows.
+            // Nothing is chosen for the caller. With no project named the check command carries a
+            // placeholder: it reads as an example, and a real project name nobody picked would be
+            // copied into other people's workflows.
             String project = req.getParameter("project");
             String remoteUrl = null;
-            String branch = null;
             boolean known = false;
             JsonArray projects = new JsonArray();
             for (GitProjectManager.ProjectStatus ps : GitProjectManager.listProjectStatus()) {
@@ -1356,7 +1341,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 if (ps.name().equals(project)) {
                     known = true;
                     remoteUrl = hasRemote ? ps.remoteUrl() : null;
-                    branch = ps.branch();
                 }
             }
             if (!known) {
@@ -1375,19 +1359,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             String chosenMode = project == null ? null : cfg.chosenMode(project);
             o.addProperty("chosenMode", chosenMode == null ? "" : chosenMode);
             o.addProperty("hasRemote", remoteUrl != null);
-            o.addProperty("repoUrl", RunnerSetup.repoUrl(remoteUrl));
-            o.addProperty("orgUrl", RunnerSetup.orgUrl(remoteUrl));
-            o.addProperty("installScript", RunnerSetup.installScript(remoteUrl, snippetCfg, scope));
-            o.addProperty("installScriptMac",
-                    RunnerSetup.installScriptMac(remoteUrl, snippetCfg, scope));
-            o.addProperty("installScriptWindows",
-                    RunnerSetup.installScriptWindows(remoteUrl, snippetCfg, scope));
-            o.addProperty("branch", branch == null ? "" : branch);
-            o.addProperty("workflowPath",
-                    release ? RunnerSetup.RELEASE_WORKFLOW_PATH : RunnerSetup.WORKFLOW_PATH);
-            o.addProperty("workflowYaml", release
-                    ? RunnerSetup.releaseWorkflowYaml(project, snippetCfg)
-                    : RunnerSetup.workflowYaml(project, branch, snippetCfg));
             o.addProperty("testCommand", release
                     ? RunnerSetup.releaseTestCommand(project, snippetCfg)
                     : RunnerSetup.testCommand(project, snippetCfg));
@@ -1425,9 +1396,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             if (body.has("gatewayUrl")) {
                 cfg.setGatewayUrl(optString(body, "gatewayUrl"));
             }
-            if (body.has("labels")) {
-                cfg.setLabels(optString(body, "labels"));
-            }
             if (body.has("project") && body.has("mode")) {
                 cfg.setMode(optString(body, "project"), optString(body, "mode"));
             }
@@ -1449,87 +1417,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 // The only time this value ever leaves the gateway. It is not recoverable
                 // afterwards — a lost token is replaced, not read back.
                 o.addProperty("token", issued);
-            }
-            return o.toString();
-        } catch (Exception e) {
-            return error(resp, e);
-        }
-    }
-
-    /**
-     * Writes the sync workflow into the project repository, commits it and pushes.
-     *
-     * <p>The module already holds push rights for this repository — that is how project
-     * versioning works at all — so asking someone to copy a generated file into it by hand was
-     * a step with no purpose. The commit is the ordinary project-commit path, so it raises the
-     * same git event and appears in the same history as any other.
-     */
-    private Object handleRunnerWorkflow(RequestContext req, HttpServletResponse resp) {
-        try {
-            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
-            String project = optString(body, "project");
-            if (project == null || project.isBlank()) {
-                throw new RuntimeException("A project is required.");
-            }
-            GitRunnerRecord cfg = GitRunnerRecord.get();
-            if (GitRunnerRecord.MODE_RELEASE.equals(cfg.getMode(project))) {
-                throw new RuntimeException("Committing the workflow is for repo updates. A release"
-                        + " workflow belongs in the repository that builds the release.");
-            }
-            if (cfg.getGatewayUrl().isBlank()) {
-                throw new RuntimeException(
-                        "Set the gateway address first — the workflow has to carry a real URL.");
-            }
-
-            Path root = GitManager.getProjectFolderPath(project);
-            Path target = root.resolve(RunnerSetup.WORKFLOW_PATH);
-            String branch = GitProjectManager.listProjectStatus().stream()
-                    .filter(p -> p.name().equals(project))
-                    .map(GitProjectManager.ProjectStatus::branch)
-                    .filter(b -> b != null && !b.isBlank())
-                    .findFirst().orElse(null);
-            String yaml = RunnerSetup.workflowYaml(project, branch, cfg);
-
-            boolean existed = Files.exists(target);
-            if (existed && !optBool(body, "overwrite")) {
-                String current = Files.readString(target, StandardCharsets.UTF_8);
-                if (current.equals(yaml)) {
-                    JsonObject o = new JsonObject();
-                    o.addProperty("ok", true);
-                    o.addProperty("unchanged", true);
-                    return o.toString();
-                }
-                // Never silently rewrite a workflow someone has edited — it may have gained
-                // steps that have nothing to do with this module.
-                throw new RuntimeException("A different " + RunnerSetup.WORKFLOW_PATH
-                        + " is already committed. Tick overwrite to replace it.");
-            }
-
-            Files.createDirectories(target.getParent());
-            Files.writeString(target, yaml, StandardCharsets.UTF_8);
-
-            String message = existed
-                    ? "Update the Ignition sync workflow"
-                    : "Add the Ignition sync workflow";
-            scriptModule.commitImpl(project, req.getActor(),
-                    List.of(RunnerSetup.WORKFLOW_PATH), message, false);
-
-            JsonObject o = new JsonObject();
-            o.addProperty("ok", true);
-            o.addProperty("committed", true);
-            // A commit that cannot be pushed is still progress, and the reason is worth saying
-            // plainly rather than failing the whole call.
-            try {
-                String remote = GitProjectManager.listProjectStatus().stream()
-                        .filter(p -> p.name().equals(project))
-                        .map(GitProjectManager.ProjectStatus::remoteName)
-                        .filter(n -> n != null && !n.isBlank())
-                        .findFirst().orElse("origin");
-                scriptModule.pushImpl(project, req.getActor(), remote, false, false, false);
-                o.addProperty("pushed", true);
-            } catch (Exception pushFailed) {
-                o.addProperty("pushed", false);
-                o.addProperty("pushError", GitEvents.reason(pushFailed));
             }
             return o.toString();
         } catch (Exception e) {

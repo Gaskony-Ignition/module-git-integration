@@ -188,9 +188,8 @@ export interface RunnerConfig {
   enabled: boolean;
   hasToken: boolean;
   gatewayUrl: string;
-  labels: string;
   projects: RunnerProject[];
-  // Empty until one is chosen; the snippets then carry placeholders.
+  // Empty until one is chosen; the check command then carries a placeholder.
   project: string;
   // What the routes would do today, default included.
   mode: "release" | "repo";
@@ -198,19 +197,9 @@ export interface RunnerConfig {
   // radio must show this, not `mode`, or a default reads as a decision.
   chosenMode: "release" | "repo" | "";
   hasRemote: boolean;
-  repoUrl: string;
-  // The owning organisation, for a runner that serves every repository in it.
-  orgUrl: string;
-  scope: "repo" | "org";
   // Epoch millis of the last authenticated runner call, 0 if none since the gateway started.
   runnerSeen: { at: number; kind: string };
   workflows: RunnerWorkflows;
-  installScript: string;
-  installScriptMac: string;
-  // PowerShell equivalent of installScript, for a Windows runner machine.
-  installScriptWindows: string;
-  workflowPath: string;
-  workflowYaml: string;
   testCommand: string;
   // PowerShell form: Windows PowerShell 5.1 aliases curl to Invoke-WebRequest.
   testCommandWindows: string;
@@ -415,17 +404,12 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: (body) => ({ url: `${BASE}/sync-now`, method: "POST", body }),
       invalidatesTags: ["automation", "projects"],
     }),
-    // `scope`, `labels` and `gatewayUrl` only change the generated commands, so the page passes
-    // what has been typed and previews it before Save. The gateway reads none of them when a
-    // runner calls, and this GET writes nothing.
+    // `gatewayUrl` only changes the generated check command, so the page passes what has been
+    // typed and previews it before Save. The gateway does not read it when a runner calls, and
+    // this GET writes nothing.
     getRunner: builder.query<
       RunnerConfig,
-      {
-        project?: string;
-        scope?: "repo" | "org";
-        labels?: string;
-        gatewayUrl?: string;
-      }
+      { project?: string; gatewayUrl?: string }
     >({
       query: (args) => {
         const q = new URLSearchParams();
@@ -444,7 +428,6 @@ export const gitConfigApi = baseApi.injectEndpoints({
       {
         enabled?: boolean;
         gatewayUrl?: string;
-        labels?: string;
         project?: string;
         mode?: "release" | "repo";
         generateToken?: boolean;
@@ -456,22 +439,6 @@ export const gitConfigApi = baseApi.injectEndpoints({
       // its cached copy wrong. Without this it kept serving the old answer until a full page
       // reload — switching tabs is not a remount, and the cache had not been invalidated.
       invalidatesTags: ["runner", "projects"],
-    }),
-    commitRunnerWorkflow: builder.mutation<
-      {
-        committed?: boolean;
-        unchanged?: boolean;
-        pushed?: boolean;
-        pushError?: string;
-      },
-      { project: string; overwrite?: boolean }
-    >({
-      query: (body) => ({
-        url: `${BASE}/runner-workflow`,
-        method: "POST",
-        body,
-      }),
-      invalidatesTags: ["runner", "history", "projects"],
     }),
     setProjectCredential: builder.mutation<
       unknown,
@@ -525,6 +492,5 @@ export const {
   useSyncNowMutation,
   useGetRunnerQuery,
   useSaveRunnerMutation,
-  useCommitRunnerWorkflowMutation,
   useSetProjectCredentialMutation,
 } = gitConfigApi;

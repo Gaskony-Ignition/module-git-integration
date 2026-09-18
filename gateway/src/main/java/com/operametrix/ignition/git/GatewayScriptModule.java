@@ -155,7 +155,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     @Override
-    public boolean pushImpl(String projectName, String userName, String remoteName, boolean pushAllBranches, boolean pushTags, boolean forcePush) throws Exception {
+    protected boolean pushImpl(String projectName, String userName, String remoteName, boolean pushAllBranches, boolean pushTags, boolean forcePush) throws Exception {
         try {
             boolean ok = doPush(projectName, userName, remoteName, pushAllBranches, pushTags, forcePush);
             GitEvents.fire(GitEvent.of(GitEvent.PUSH)
