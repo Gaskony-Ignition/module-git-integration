@@ -12,6 +12,8 @@ upstream's; everything below is this fork.
   or push. A fine-grained token carries none of this, so the gateway asks the host: on save, when
   attached to a project, daily, and on **Check**. The push test only asks whether a push would be
   accepted; nothing is sent.
+- **Edit a credential in place** — replace an expiring token, or change the username or host,
+  without re-pointing the projects that use it. A blank secret keeps the stored one.
 - **The Projects tab flags a credential problem** in the State column: expired, refused, cannot
   read the remote, or expiring within 14 days.
 

@@ -544,6 +544,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 c.addProperty("id", key.getId());
                 c.addProperty("type", "SSH");
                 c.addProperty("label", key.getKeyName());
+                c.addProperty("name", key.getKeyName());
                 c.add("check", checkJson(CredentialCheck.get("SSH", key.getId())));
                 arr.add(c);
             }
@@ -552,6 +553,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 c.addProperty("id", cred.getId());
                 c.addProperty("type", "HTTPS");
                 c.addProperty("label", cred.getHostPattern() + " — " + cred.getUserName());
+                c.addProperty("host", cred.getHostPattern());
+                c.addProperty("username", cred.getUserName());
                 c.add("check", checkJson(CredentialCheck.get("HTTPS", cred.getId())));
                 arr.add(c);
             }
@@ -770,23 +773,32 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 }
                 referenced = SecretConfig.referenced(providerName.trim(), secretName.trim());
             }
+            // With an id this edits that credential in place, so the projects using it stay linked
+            // when its token is replaced. A blank inline secret keeps the stored one.
+            long editId = optLong(body, "id");
+            String actor = req.getActor();
             JsonObject o = new JsonObject();
             if ("SSH".equalsIgnoreCase(type)) {
                 String name = optString(body, "name");
                 if (name == null || name.isBlank()) {
                     throw new RuntimeException("A key name is required.");
                 }
-                GitUserSshKeyRecord record = new GitUserSshKeyRecord();
-                record.setIgnitionUser(req.getActor());
+                GitUserSshKeyRecord record = editId > 0
+                        ? GitUserSshKeyRecord.findByIdAndUser(editId, actor) : new GitUserSshKeyRecord();
+                if (record == null) {
+                    throw new RuntimeException("No such SSH key for this user.");
+                }
+                record.setIgnitionUser(actor);
                 record.setKeyName(name.trim());
                 if (reference) {
                     record.setSSHKeySecret(referenced);
                 } else {
                     String key = optString(body, "key");
-                    if (key == null || key.isBlank()) {
+                    if (key != null && !key.isBlank()) {
+                        record.setSSHKey(key);
+                    } else if (editId == 0) {
                         throw new RuntimeException("The private key is required.");
                     }
-                    record.setSSHKey(key);
                 }
                 record.save();
                 o.addProperty("id", record.getId());
@@ -796,18 +808,24 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 if (host == null || host.isBlank()) {
                     throw new RuntimeException("A host label is required.");
                 }
-                GitUserHttpsCredentialRecord record = new GitUserHttpsCredentialRecord();
-                record.setIgnitionUser(req.getActor());
+                GitUserHttpsCredentialRecord record = editId > 0
+                        ? GitUserHttpsCredentialRecord.findByIdAndUser(editId, actor)
+                        : new GitUserHttpsCredentialRecord();
+                if (record == null) {
+                    throw new RuntimeException("No such credential for this user.");
+                }
+                record.setIgnitionUser(actor);
                 record.setHostPattern(host.trim());
                 record.setUserName(username == null ? "" : username.trim());
                 if (reference) {
                     record.setPasswordSecret(referenced);
                 } else {
                     String password = optString(body, "password");
-                    if (password == null || password.isBlank()) {
+                    if (password != null && !password.isBlank()) {
+                        record.setPassword(password);
+                    } else if (editId == 0) {
                         throw new RuntimeException("The password/token is required.");
                     }
-                    record.setPassword(password);
                 }
                 record.save();
                 o.addProperty("id", record.getId());

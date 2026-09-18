@@ -41,6 +41,10 @@ export interface CredentialOption {
   id: number;
   type: "SSH" | "HTTPS";
   label: string;
+  // Prefill for editing: an SSH key's name; an HTTPS credential's host and username.
+  name?: string;
+  host?: string;
+  username?: string;
   // Null until the gateway's first check of it finishes.
   check: CredentialCheck | null;
 }
@@ -267,9 +271,10 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: () => `${BASE}/secret-providers`,
       providesTags: ["secretProviders"],
     }),
+    // With an id, edits that credential in place.
     addCredential: builder.mutation<
       { id: number; type: string },
-      AddCredentialReq
+      AddCredentialReq & { id?: number }
     >({
       query: (body) => ({ url: `${BASE}/credentials`, method: "POST", body }),
       invalidatesTags: ["credentials"],

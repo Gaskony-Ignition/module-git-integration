@@ -52,7 +52,8 @@ from a GitHub Actions runner. Each repository credential shows when its token
 expires and which projects it can read or push — asked of the host on save,
 daily and on **Check**, since a fine-grained token carries neither. A project
 whose credential has expired, is refused, or cannot read its remote says so on
-the Projects tab, as does one expiring within 14 days.
+the Projects tab, as does one expiring within 14 days. **Edit** replaces a
+token in place, so the projects using it stay linked.
 
 ![The Credentials tab: expiry and reach per credential](docs/images/versioning-credentials.png)
 

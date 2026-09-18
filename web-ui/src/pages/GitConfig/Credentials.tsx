@@ -59,6 +59,8 @@ const Credentials = () => {
   };
 
   const [open, setOpen] = React.useState(false);
+  // Set when the drawer edits an existing credential: same id, so its projects stay linked.
+  const [editId, setEditId] = React.useState<number | null>(null);
   const [kind, setKind] = React.useState<Kind>("SSH");
   const [mode, setMode] = React.useState<Mode>("inline");
   const [name, setName] = React.useState("");
@@ -83,16 +85,30 @@ const Credentials = () => {
     setSecretName("");
   };
 
+  const openAdd = () => {
+    reset();
+    setEditId(null);
+    setMode("inline");
+    setOpen(true);
+  };
+  const openEdit = (c: CredentialOption) => {
+    reset();
+    setEditId(c.id);
+    setKind(c.type);
+    setMode("inline");
+    setName(c.name ?? "");
+    setHost(c.host ?? "");
+    setUsername(c.username ?? "");
+    setOpen(true);
+  };
+
+  // Editing, a blank typed secret keeps the stored one.
+  const secretReady =
+    mode === "inline"
+      ? editId !== null || (kind === "SSH" ? key.trim() : password) !== ""
+      : providerName !== "" && secretName !== "";
   const ready =
-    kind === "SSH"
-      ? name.trim() !== "" &&
-        (mode === "inline"
-          ? key.trim() !== ""
-          : providerName !== "" && secretName !== "")
-      : host.trim() !== "" &&
-        (mode === "inline"
-          ? password !== ""
-          : providerName !== "" && secretName !== "");
+    (kind === "SSH" ? name.trim() !== "" : host.trim() !== "") && secretReady;
 
   const save = async () => {
     let body: AddCredentialReq;
@@ -126,7 +142,7 @@ const Credentials = () => {
               secretName,
             };
     }
-    await add(body).unwrap();
+    await add(editId !== null ? { ...body, id: editId } : body).unwrap();
     // Cleared the moment it is stored, so the closed drawer holds no copy of the secret.
     reset();
     toasts.notifySuccess("Credential saved");
@@ -160,7 +176,7 @@ const Credentials = () => {
       <div className="gitcfg-section-head">
         <h4>Repositories</h4>
         <div className="gitcfg-actions">
-          <Button colorClass="primary" onClick={() => setOpen(true)}>
+          <Button colorClass="primary" onClick={openAdd}>
             Add credential
           </Button>
         </div>
@@ -168,7 +184,7 @@ const Credentials = () => {
 
       <SettingsDrawer
         open={open}
-        title="Add credential"
+        title={editId !== null ? "Edit credential" : "Add credential"}
         onClose={() => setOpen(false)}
         onSave={save}
         saveDisabled={!ready}
@@ -180,19 +196,21 @@ const Credentials = () => {
             radio with `label`/`checked` it reads `radios.map` on undefined and takes the whole
             page down with an Application Error.
           */}
-          <div className="gitcfg-cred-row">
-            <Radio
-              name="cred-kind"
-              value={kind}
-              radios={[
-                { label: "SSH key", value: "SSH" },
-                { label: "HTTPS username and token", value: "HTTPS" },
-              ]}
-              onChange={(_e: unknown, value: string) =>
-                setKind(value as "SSH" | "HTTPS")
-              }
-            />
-          </div>
+          {editId === null ? (
+            <div className="gitcfg-cred-row">
+              <Radio
+                name="cred-kind"
+                value={kind}
+                radios={[
+                  { label: "SSH key", value: "SSH" },
+                  { label: "HTTPS username and token", value: "HTTPS" },
+                ]}
+                onChange={(_e: unknown, value: string) =>
+                  setKind(value as "SSH" | "HTTPS")
+                }
+              />
+            </div>
+          ) : null}
 
           {kind === "SSH" ? (
             <TextInput
@@ -239,7 +257,11 @@ const Credentials = () => {
           {mode === "inline" ? (
             kind === "SSH" ? (
               <TextArea
-                label="Private key"
+                label={
+                  editId !== null
+                    ? "New private key — blank keeps the current one"
+                    : "Private key"
+                }
                 rows={8}
                 value={key}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
@@ -248,7 +270,11 @@ const Credentials = () => {
               />
             ) : (
               <TextInput
-                label="Password or token"
+                label={
+                  editId !== null
+                    ? "New password or token — blank keeps the current one"
+                    : "Password or token"
+                }
                 type="password"
                 value={password}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
@@ -328,6 +354,9 @@ const Credentials = () => {
                       }
                     >
                       Check
+                    </Button>
+                    <Button colorClass="secondary" onClick={() => openEdit(c)}>
+                      Edit
                     </Button>
                     <Button
                       colorClass="secondary"
