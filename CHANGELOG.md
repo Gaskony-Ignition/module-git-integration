@@ -3,6 +3,18 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.6.0] - 2026-09-18
+
+### Added
+- **Credentials show when a token expires and what it can reach.** For each repository
+  credential: the GitHub token's expiry date (amber within 14 days, red once expired or refused),
+  the account it belongs to, and each project — and the gateway config repository — it can read
+  or push. A fine-grained token carries none of this, so the gateway asks the host: on save, when
+  attached to a project, daily, and on **Check**. The push test only asks whether a push would be
+  accepted; nothing is sent.
+- **The Projects tab flags a credential problem** in the State column: expired, refused, cannot
+  read the remote, or expiring within 14 days.
+
 ## [3.5.0] - 2026-09-18
 
 ### Changed

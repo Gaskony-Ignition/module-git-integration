@@ -48,7 +48,15 @@ and its delivery.
 ![A project's drawer: repository, then delivery](docs/images/versioning-project-drawer.png)
 
 **Credentials** holds what the gateway authenticates with: to repositories, and
-from a GitHub Actions runner. **Logs** lists every commit, push, pull, sync and
+from a GitHub Actions runner. Each repository credential shows when its token
+expires and which projects it can read or push — asked of the host on save,
+daily and on **Check**, since a fine-grained token carries neither. A project
+whose credential has expired, is refused, or cannot read its remote says so on
+the Projects tab, as does one expiring within 14 days.
+
+![The Credentials tab: expiry and reach per credential](docs/images/versioning-credentials.png)
+
+**Logs** lists every commit, push, pull, sync and
 release since the gateway started, including an unattended one that failed, and
 why.
 
@@ -99,6 +107,12 @@ versioning**. Adjust what is covered under **Git Ignore**.
 A project's delivery: **Versioning → Projects → Edit**, choose the delivery,
 Save. A project must exist on the gateway first — for its first release, create
 it empty under **Platform → Projects**.
+
+For a GitHub remote, use a fine-grained token per gateway: owned by the
+organisation, limited to the repositories that gateway deploys, **Contents:
+Read-only** unless the gateway pushes. The Credentials tab then shows it reading,
+not pushing. Expiry is read for github.com only; SSH keys and other hosts show
+reach alone.
 
 Runner delivery, once per gateway:
 

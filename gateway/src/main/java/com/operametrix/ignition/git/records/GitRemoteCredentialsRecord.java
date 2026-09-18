@@ -66,6 +66,10 @@ public class GitRemoteCredentialsRecord {
         return id;
     }
 
+    public long getProjectId() {
+        return projectId;
+    }
+
     public void setProjectId(long projectId) {
         this.projectId = projectId;
     }

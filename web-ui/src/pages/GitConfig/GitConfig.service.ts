@@ -41,6 +41,22 @@ export interface CredentialOption {
   id: number;
   type: "SSH" | "HTTPS";
   label: string;
+  // Null until the gateway's first check of it finishes.
+  check: CredentialCheck | null;
+}
+export interface CredentialCheck {
+  checkedAt: number;
+  account?: string | null;
+  // ISO date, "never", or null when the host cannot say (SSH keys, hosts other than GitHub).
+  expires?: string | null;
+  // The host refused the token outright: expired or revoked.
+  rejected: boolean;
+  reach: {
+    target: string;
+    read: boolean;
+    push: boolean;
+    error?: string | null;
+  }[];
 }
 export interface RemoteResp {
   configured: boolean;
@@ -95,6 +111,8 @@ export interface ProjectStatus {
   syncBranch: string;
   syncIntervalSeconds: number;
   syncUser: string;
+  // What is wrong with the credential this project pulls with, if anything.
+  credentialIssue?: string | null;
 }
 export type Delivery =
   | "off"
@@ -267,6 +285,17 @@ export const gitConfigApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ["credentials"],
     }),
+    checkCredential: builder.mutation<
+      unknown,
+      { type: "SSH" | "HTTPS"; id: number }
+    >({
+      query: (body) => ({
+        url: `${BASE}/credential-check`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["credentials", "projects"],
+    }),
     getProjects: builder.query<ProjectsResp, void>({
       query: () => `${BASE}/projects`,
       providesTags: ["projects"],
@@ -413,6 +442,7 @@ export const {
   usePushMutation,
   useAddCredentialMutation,
   useRemoveCredentialMutation,
+  useCheckCredentialMutation,
   useGetProjectsQuery,
   useInitProjectMutation,
   useSetProjectRemoteMutation,

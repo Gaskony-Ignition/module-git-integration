@@ -4,7 +4,9 @@ import { Button, Loading, Radio, useToastNotifications } from "../../webui";
 import { SelectInput, TextArea, TextInput } from "./fields";
 import {
   AddCredentialReq,
+  CredentialOption,
   useAddCredentialMutation,
+  useCheckCredentialMutation,
   useGetCredentialsQuery,
   useGetRunnerQuery,
   useGetSecretProvidersQuery,
@@ -23,7 +25,12 @@ type Kind = "SSH" | "HTTPS";
 type Mode = "inline" | "reference";
 
 const Credentials = () => {
-  const { data, isFetching } = useGetCredentialsQuery();
+  // Polls only while a check the gateway queued (after an add) has not reported yet.
+  const [pending, setPending] = React.useState(false);
+  const { data, isFetching } = useGetCredentialsQuery(undefined, {
+    pollingInterval: pending ? 3000 : 0,
+  });
+  const [check, { isLoading: checking }] = useCheckCredentialMutation();
   const { data: providers } = useGetSecretProvidersQuery();
   const [add] = useAddCredentialMutation();
   const [remove] = useRemoveCredentialMutation();
@@ -133,6 +140,10 @@ const Credentials = () => {
   };
 
   const rows = data?.credentials ?? [];
+  React.useEffect(
+    () => setPending((data?.credentials ?? []).some((c) => c.check === null)),
+    [data]
+  );
 
   return (
     <div>
@@ -286,6 +297,8 @@ const Credentials = () => {
               <tr>
                 <th>Type</th>
                 <th>Credential</th>
+                <th>Expires</th>
+                <th>Reaches</th>
                 <th />
               </tr>
             </thead>
@@ -293,8 +306,29 @@ const Credentials = () => {
               {rows.map((c) => (
                 <tr key={`${c.type}-${c.id}`}>
                   <td>{c.type}</td>
-                  <td>{c.label}</td>
+                  <td>
+                    {c.label}
+                    {c.check?.account &&
+                    !c.label.endsWith(`— ${c.check.account}`) ? (
+                      <span className="gitcfg-proj-title">
+                        {c.check.account}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td>{expiry(c)}</td>
+                  <td>{reach(c)}</td>
                   <td className="gitcfg-table-act">
+                    <Button
+                      colorClass="secondary"
+                      disabled={checking}
+                      onClick={() =>
+                        check({ type: c.type, id: c.id })
+                          .unwrap()
+                          .catch(errorToast(toasts, "Could not check it"))
+                      }
+                    >
+                      Check
+                    </Button>
                     <Button
                       colorClass="secondary"
                       onClick={() => del(c.type, c.id, c.label)}
@@ -369,6 +403,46 @@ const Credentials = () => {
 };
 
 export default Credentials;
+
+const DAY = 86400000;
+
+/** DD/MM/YYYY from an ISO date. */
+const ddmmyyyy = (iso: string) => iso.split("-").reverse().join("/");
+
+// A GitHub token's expiry. Amber within 14 days, matching the Projects tab's warning.
+function expiry(c: CredentialOption) {
+  const k = c.check;
+  if (!k) return <span className="gitcfg-off">Checking…</span>;
+  if (k.rejected)
+    return <span className="gitcfg-err">Rejected — expired or revoked</span>;
+  if (!k.expires) return <span className="gitcfg-off">—</span>;
+  if (k.expires === "never") return "No expiry";
+  const days = Math.ceil(
+    (new Date(`${k.expires}T00:00:00`).getTime() - Date.now()) / DAY
+  );
+  const text = `${ddmmyyyy(k.expires)} (${
+    days <= 0 ? "expired" : `${days} ${days === 1 ? "day" : "days"}`
+  })`;
+  if (days <= 0) return <span className="gitcfg-err">{text}</span>;
+  if (days <= 14) return <span className="gitcfg-dirty">{text}</span>;
+  return text;
+}
+
+// Each remote using the credential, and what it may do there.
+function reach(c: CredentialOption) {
+  const k = c.check;
+  if (!k) return null;
+  if (k.reach.length === 0) return <span className="gitcfg-off">Unused</span>;
+  return k.reach.map((r) => (
+    <span
+      key={r.target}
+      className={`gitcfg-reach ${r.read ? "" : "gitcfg-err"}`}
+      title={r.error ?? undefined}
+    >
+      {r.target}: {r.push ? "read, push" : r.read ? "read" : "no access"}
+    </span>
+  ));
+}
 
 /** The token, with a copy button: retyping one is how it breaks. */
 function Snippet({ text }: { text: string }) {

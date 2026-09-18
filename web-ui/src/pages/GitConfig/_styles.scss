@@ -464,6 +464,11 @@ ul.gitcfg-hint {
   font-size: var(--gitcfg-text-sm);
 }
 
+// One remote per line in the Credentials table's Reaches column.
+.gitcfg-reach {
+  display: block;
+}
+
 // Monospace metadata in a cell: remotes, paths, timestamps.
 .gitcfg-meta {
   font-family: var(--gitcfg-font-mono);

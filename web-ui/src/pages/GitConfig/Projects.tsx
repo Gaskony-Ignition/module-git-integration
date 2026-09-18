@@ -185,7 +185,20 @@ const Projects = () => {
                       : "—"}
                   </td>
                   <td>{deliveryCell(p)}</td>
-                  <td>{state(p)}</td>
+                  <td>
+                    {state(p)}
+                    {p.credentialIssue ? (
+                      <span
+                        className={`gitcfg-reach ${
+                          p.credentialIssue.startsWith("Credential expires")
+                            ? "gitcfg-dirty"
+                            : "gitcfg-err"
+                        }`}
+                      >
+                        {p.credentialIssue}
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="gitcfg-table-act">
                     <Button
                       colorClass="secondary"

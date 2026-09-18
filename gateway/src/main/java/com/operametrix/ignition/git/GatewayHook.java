@@ -17,6 +17,7 @@ import com.operametrix.ignition.git.records.GitUserSshKeyRecord;
 import com.operametrix.ignition.git.records.legacy.GitLegacyImporter;
 import com.operametrix.ignition.git.records.legacy.RetiredResourceCleanup;
 import com.operametrix.ignition.git.managers.ConfigAutoCommitter;
+import com.operametrix.ignition.git.managers.CredentialCheck;
 import com.operametrix.ignition.git.managers.DataDirGitManager;
 import com.inductiveautomation.ignition.common.gson.Gson;
 import com.inductiveautomation.ignition.common.gson.JsonArray;
@@ -153,6 +154,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         // Scheduled sync. Inert until a project has a sync record configured, so starting it
         // unconditionally costs one idle thread and keeps the wiring in one place.
         SyncScheduler.start();
+        CredentialCheck.start();
 
         // One-time migration of any legacy SimpleORM rows from a pre-8.3 install.
         try {
@@ -180,6 +182,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     @Override
     public void shutdown() {
         SyncScheduler.shutdown();
+        CredentialCheck.shutdown();
         if (runnerHandler != null) runnerHandler.shutdown();
         if (syncHandler != null) syncHandler.shutdown();
         if (autoCommitter != null) {
@@ -286,6 +289,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         routes.newRoute("/credential-remove").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleRemoveCredential).mount();
+
+        routes.newRoute("/credential-check").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleCheckCredential).mount();
 
         routes.newRoute("/projects").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.READ).nocache()
@@ -537,6 +544,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 c.addProperty("id", key.getId());
                 c.addProperty("type", "SSH");
                 c.addProperty("label", key.getKeyName());
+                c.add("check", checkJson(CredentialCheck.get("SSH", key.getId())));
                 arr.add(c);
             }
             for (GitUserHttpsCredentialRecord cred : GitUserHttpsCredentialRecord.listAll()) {
@@ -544,11 +552,51 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 c.addProperty("id", cred.getId());
                 c.addProperty("type", "HTTPS");
                 c.addProperty("label", cred.getHostPattern() + " — " + cred.getUserName());
+                c.add("check", checkJson(CredentialCheck.get("HTTPS", cred.getId())));
                 arr.add(c);
             }
             JsonObject o = new JsonObject();
             o.add("credentials", arr);
             return o.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    /** A credential's last check, or JSON null before the first one finishes. */
+    private static JsonElement checkJson(CredentialCheck.Result r) {
+        if (r == null) {
+            return com.inductiveautomation.ignition.common.gson.JsonNull.INSTANCE;
+        }
+        JsonObject o = new JsonObject();
+        o.addProperty("checkedAt", r.checkedAt());
+        o.addProperty("account", r.account());
+        o.addProperty("expires", r.expires());
+        o.addProperty("rejected", r.rejected());
+        JsonArray reach = new JsonArray();
+        for (CredentialCheck.Reach x : r.reach()) {
+            JsonObject t = new JsonObject();
+            t.addProperty("target", x.target());
+            t.addProperty("read", x.read());
+            t.addProperty("push", x.push());
+            t.addProperty("error", x.error());
+            reach.add(t);
+        }
+        o.add("reach", reach);
+        return o;
+    }
+
+    private Object handleCheckCredential(RequestContext req, HttpServletResponse resp) {
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            String type = optString(body, "type");
+            if (!"SSH".equalsIgnoreCase(type) && !"HTTPS".equalsIgnoreCase(type)) {
+                throw new RuntimeException("Unknown credential type: " + type);
+            }
+            if (CredentialCheck.check(type, optLong(body, "id")) == null) {
+                throw new RuntimeException("No such credential.");
+            }
+            return ok();
         } catch (Exception e) {
             return error(resp, e);
         }
@@ -766,6 +814,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             } else {
                 throw new RuntimeException("Unknown credential type: " + type);
             }
+            CredentialCheck.checkSoon(type, o.get("id").getAsLong());
             o.addProperty("ok", true);
             o.addProperty("type", type.toUpperCase());
             return o.toString();
@@ -1032,6 +1081,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.addProperty("changes", p.changes());
                 o.addProperty("error", p.error());
                 o.addProperty("imagePrefix", GitProjectsConfigRecord.imagePrefixFor(p.name()));
+                o.addProperty("credentialIssue", CredentialCheck.issueFor(p.name()));
 
                 // A runner delivery on a runner nobody switched on delivers nothing; say so.
                 o.addProperty("runnerEnabled", runnerOn);
@@ -1136,6 +1186,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 long httpsId = body.has("httpsCredentialId") && !body.get("httpsCredentialId").isJsonNull()
                         ? body.get("httpsCredentialId").getAsLong() : 0L;
                 ok = scriptModule.initializeProject(project, url.trim(), actor, sshKeyId, httpsId);
+                if (ok && (sshKeyId > 0 || httpsId > 0)) {
+                    CredentialCheck.checkSoon(sshKeyId > 0 ? "SSH" : "HTTPS",
+                            sshKeyId > 0 ? sshKeyId : httpsId);
+                }
             }
             JsonObject o = new JsonObject();
             o.addProperty("ok", ok);
@@ -1178,6 +1232,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 throw new RuntimeException(
                         "Could not attach the credential — check the gateway log.");
             }
+            CredentialCheck.checkSoon(sshKeyId > 0 ? "SSH" : "HTTPS",
+                    sshKeyId > 0 ? sshKeyId : httpsCredentialId);
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             return o.toString();
