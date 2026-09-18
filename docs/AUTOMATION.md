@@ -24,9 +24,10 @@ configurable, default 5 minutes.
 workflow step can call the gateway from inside the network — the direction
 that already works, with nothing reaching in. The runner belongs on the host,
 not inside a gateway container: on a Docker host it reaches every gateway on
-its published port, so one runner serves them all. `RunnerSetup` generates the
-setup (Linux, macOS and Windows registration commands, the workflow YAML, and a
-reachability check). Each project chooses how the runner delivers to it:
+its published port, so one runner serves them all. Installing the runner and
+writing the workflow are GitHub's steps; the page lists what each needs, and
+`RunnerSetup` generates only the reachability check. Each project chooses how
+the runner delivers to it:
 
 - **Release.** On a version tag the workflow uploads a project export zip to
   `ReleaseReceiver` (`POST /runner-release`). The gateway replaces the whole
@@ -60,10 +61,9 @@ modes keeps working until a choice is made.
 
 Only two of the runner tab's values change what the gateway does: whether it
 accepts runner requests, and the token. The gateway never reads its configured
-address or its labels when a runner calls — those exist solely to fill in the
-generated commands. They are therefore safe to preview before saving (the GET
-takes them as query parameters and generates from them without writing), and
-they sit beside the snippets rather than in the settings step. Presenting them
+address when a runner calls — it exists solely to fill in the check command, so
+it is safe to preview before saving (the GET takes it as a query parameter and
+generates from it without writing). Presenting them
 as gateway configuration is what made the tab read as five compulsory steps.
 
 The same split decides what the gateway needs from git. In **Release** mode it
@@ -73,10 +73,6 @@ zip. Only **Repo updates** and **Scheduled sync**, where the gateway itself
 pulls, need the project registered with a remote and a credential.
 
 ### Runner scope and labels
-
-Installing and registering the runner, and writing the workflow, are GitHub's
-steps, so the page lists what each needs and leaves the commands to GitHub
-rather than generating a version shaped like one particular pipeline.
 
 A runner registers at exactly one scope — repository, organisation or
 enterprise — and cannot move between them without re-registering.

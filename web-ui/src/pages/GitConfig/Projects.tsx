@@ -106,13 +106,11 @@ const Projects = () => {
   };
 
   const state = (p: ProjectStatus) => {
-    if (p.error) return <span className="gitcfg-proj-err">{p.error}</span>;
-    if (!p.versioned)
-      return <span className="gitcfg-proj-off">Not versioned</span>;
-    if (p.changes < 0)
-      return <span className="gitcfg-proj-err">Unreadable</span>;
-    if (p.changes === 0) return <span className="gitcfg-proj-ok">Clean</span>;
-    return <span className="gitcfg-proj-dirty">{p.changes} uncommitted</span>;
+    if (p.error) return <span className="gitcfg-err">{p.error}</span>;
+    if (!p.versioned) return <span className="gitcfg-off">Not versioned</span>;
+    if (p.changes < 0) return <span className="gitcfg-err">Unreadable</span>;
+    if (p.changes === 0) return <span className="gitcfg-ok">Clean</span>;
+    return <span className="gitcfg-dirty">{p.changes} uncommitted</span>;
   };
 
   // What brings changes into this project, in the order it would reach it. A delivery chosen on a
@@ -135,17 +133,17 @@ const Projects = () => {
       parts.push(`Sync ${p.syncIntervalSeconds ?? 0}s`);
       settled = true;
     }
-    if (parts.length === 0) return <span className="gitcfg-proj-off">—</span>;
+    if (parts.length === 0) return <span className="gitcfg-off">—</span>;
     return (
-      <span className={settled ? "gitcfg-proj-ok" : "gitcfg-proj-off"}>
+      <span className={settled ? "gitcfg-ok" : "gitcfg-off"}>
         {parts.join(" + ")}
       </span>
     );
   };
 
   return (
-    <div className="gitcfg-projects">
-      <div className="gitcfg-excluded-head">
+    <div>
+      <div className="gitcfg-page-head">
         <div>
           <h3>Projects</h3>
           <p>
@@ -162,53 +160,61 @@ const Projects = () => {
       ) : projects.length === 0 ? (
         <p className="gitcfg-empty">No projects on this gateway.</p>
       ) : (
-        <table className="gitcfg-proj-table">
-          <thead>
-            <tr>
-              <th>Project</th>
-              <th>Branch</th>
-              <th>Remote</th>
-              <th>Images</th>
-              <th>Automation</th>
-              <th>State</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {projects.map((p) => (
-              <tr key={p.name}>
-                <td>
-                  <span className="gitcfg-proj-name">{p.name}</span>
-                  {p.title && p.title !== p.name ? (
-                    <span className="gitcfg-proj-title">{p.title}</span>
-                  ) : null}
-                </td>
-                <td>{p.branch || "—"}</td>
-                <td className="gitcfg-proj-remote">
-                  {p.remoteUrl ? p.remoteUrl : p.versioned ? "Local only" : "—"}
-                </td>
-                <td className="gitcfg-proj-remote">
-                  {p.versioned ? p.imagePrefix || "None" : "—"}
-                </td>
-                <td className="gitcfg-proj-remote">{automation(p)}</td>
-                <td>{state(p)}</td>
-                <td className="gitcfg-proj-act">
-                  <Button
-                    colorClass="secondary"
-                    onClick={() => {
-                      setTarget(p);
-                      setUrl(p.remoteUrl || "");
-                      setCredId("");
-                      setImagePrefix(p.imagePrefix || "");
-                    }}
-                  >
-                    {p.versioned ? "Edit" : "Set up"}
-                  </Button>
-                </td>
+        <div className="gitcfg-table-scroll">
+          <table className="gitcfg-table">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>Branch</th>
+                <th>Remote</th>
+                <th>Images</th>
+                <th>Automation</th>
+                <th>State</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {projects.map((p) => (
+                <tr key={p.name}>
+                  <td>
+                    <span className="gitcfg-proj-name">{p.name}</span>
+                    {p.title && p.title !== p.name ? (
+                      <span className="gitcfg-proj-title">{p.title}</span>
+                    ) : null}
+                  </td>
+                  <td>{p.branch || "—"}</td>
+                  <td className="gitcfg-meta gitcfg-proj-remote">
+                    {p.remoteUrl
+                      ? p.remoteUrl
+                      : p.versioned
+                      ? "Local only"
+                      : "—"}
+                  </td>
+                  <td className="gitcfg-meta gitcfg-proj-remote">
+                    {p.versioned ? p.imagePrefix || "None" : "—"}
+                  </td>
+                  <td className="gitcfg-meta gitcfg-proj-remote">
+                    {automation(p)}
+                  </td>
+                  <td>{state(p)}</td>
+                  <td className="gitcfg-table-act">
+                    <Button
+                      colorClass="secondary"
+                      onClick={() => {
+                        setTarget(p);
+                        setUrl(p.remoteUrl || "");
+                        setCredId("");
+                        setImagePrefix(p.imagePrefix || "");
+                      }}
+                    >
+                      {p.versioned ? "Edit" : "Set up"}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {target ? (
@@ -242,7 +248,7 @@ const Projects = () => {
                 onChange={(e: unknown) => setImagePrefix(selectValue(e))}
               />
               {target.imagePrefix ? (
-                <div className="gitcfg-cred-actions">
+                <div className="gitcfg-actions is-end">
                   <Button
                     colorClass="secondary"
                     disabled={snapshotting}
@@ -282,7 +288,7 @@ const Projects = () => {
               onChange={(e: unknown) => setCredId(selectValue(e))}
             />
           ) : null}
-          <div className="gitcfg-cred-actions">
+          <div className="gitcfg-actions is-end">
             <Button colorClass="secondary" onClick={close}>
               Cancel
             </Button>

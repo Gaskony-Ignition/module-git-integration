@@ -269,8 +269,8 @@ const ExcludedFiles = () => {
   };
 
   return (
-    <div className="gitcfg-excluded">
-      <div className="gitcfg-excluded-head">
+    <div>
+      <div className="gitcfg-page-head">
         <div>
           <h3>Excluded files</h3>
           <p>
@@ -280,7 +280,7 @@ const ExcludedFiles = () => {
             the rest of the data directory is runtime state.
           </p>
         </div>
-        <div className="gitcfg-excluded-actions">
+        <div className="gitcfg-actions">
           <Button
             colorClass="secondary"
             onClick={() => {

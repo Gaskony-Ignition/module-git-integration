@@ -114,9 +114,16 @@ const HistoryList = () => {
   };
 
   return (
-    <section className="gitcfg-section">
-      <div className="gitcfg-section-header">
-        <h3>History</h3>
+    <section>
+      <div className="gitcfg-page-head">
+        <div>
+          <h3>History</h3>
+          <p>
+            Every commit to this gateway&apos;s configuration repository, newest
+            first. Restore puts the configuration back as it was at that commit
+            and applies it without a restart.
+          </p>
+        </div>
       </div>
       <DataGrid
         id="git-config-history"

@@ -19,16 +19,16 @@ AXONE-IO, maintained by Operametrix; this fork is Gaskony's build on top.
 ## Build commands
 
 ```bash
-./gradlew build           # produces build/Git.modl (also builds the web-ui React bundle)
-./gradlew :web-ui:webpack # build only the gateway web page bundle
+rm -rf build/moduleContent && ./gradlew build   # -> build/GitIntegration-<ver>.modl
 ```
 
-`:web-ui` downloads Node 18 and runs yarn/webpack (needs network access on
-first build). If the webpack build fails on Prettier violations, run
-`node_modules/.bin/prettier --write "src/**/*.{ts,tsx}"` from `web-ui/`.
+Clear `build/moduleContent` first: after a version bump it keeps the previous
+version's jars and the `.modl` ships both. A `clean build` can drop
+`certificates.p7b`. Prettier violations fail webpack — run
+`node_modules/.bin/prettier --write "src/**/*.{ts,tsx}"` in `web-ui/`.
 
-No automated tests. Testing is manual: install the `.modl` and exercise the
-Designer UI and the gateway Versioning page.
+No automated tests: install the `.modl` and exercise the Designer and the
+Versioning page.
 
 ## Architecture
 
@@ -100,11 +100,15 @@ on Vision clients.
   gateway's project properties.
 - **Runner routes read the raw query string**, never `getParameter`: Jetty
   would parse a large non-zip body as a form and 500.
-- **Snippets never carry an unchosen project's name**, and the gateway reads
-  neither its configured address nor its labels at request time — both only
-  fill in generated commands, so a GET may preview unsaved ones.
-- **A runner registers at exactly one scope**, so `--url` must match it; and
-  labels route the job, so a mismatch queues for ever with no error.
+- **The check command never carries an unchosen project's name**, and the
+  gateway never reads its configured address at request time — it only fills
+  in that command, so a GET may preview an unsaved one.
+- **Styles: colour and weight from the platform tokens** (`--neutral-*`,
+  `--primary`, `--success`, `--error`, `--warning-dark` for amber text);
+  type, spacing, radius and the mono stack from the `--gitcfg-*` block at the
+  top of `_styles.scss`. No hex or font stack anywhere else. `.ia-card-header`
+  and `.gitcfg-blank > div:first-child` reach into platform DOM — re-check
+  both after a web-ui package upgrade.
 - **Image snapshot walks the store tree** (`getImages` lists one level and
   returns folders as entries with no bytes) **and import merges, never
   deletes** — the store is gateway-scoped, so clearing it first would make
@@ -120,20 +124,10 @@ on Vision clients.
 
 ## Module packaging
 
-`io.ia.sdk.modl` plugin. Module ID `com.operametrix.ignition.git`; version is
-`2.0.0.<yyyyMMddHH>` (the build appends a timestamp). `compileSdkVersion` is
-deliberately decoupled from `requiredIgnitionVersion` so the `.modl` installs
-on any 8.3.x gateway. `:web-ui` has no module scope — its bundle is pulled
-into the gateway jar via `modlImplementation(project(":web-ui"))`.
-`skipModlSigning` is `false`; copy `gradle.template.properties` to
-`gradle.properties` (gitignored) and fill in signing credentials, or flip
-`skipModlSigning` to `true` locally for unsigned dev builds.
-
-## Java version
-
-Java 17 source/target, via the toolchain in each subproject's `build.gradle.kts`.
-
-## Dependency repositories
-
-Resolved from Inductive Automation's Nexus and Maven Central, configured in
-`settings.gradle`.
+Module ID `com.operametrix.ignition.git`; the version comes from
+`version.properties` and the build appends a timestamp. `compileSdkVersion` is
+decoupled from `requiredIgnitionVersion` so the `.modl` installs on any 8.3.x
+gateway. `:web-ui`'s bundle rides in the gateway jar via
+`modlImplementation(project(":web-ui"))`.
+Signing comes from `gradle.properties` (gitignored; template in
+`gradle.template.properties`). Every released `.modl` is signed.

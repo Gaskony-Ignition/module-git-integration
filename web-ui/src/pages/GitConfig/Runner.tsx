@@ -182,7 +182,7 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
 
   return (
     <>
-      <p className="gitcfg-auto-hint">
+      <p className="gitcfg-hint">
         A self-hosted runner is a small service that connects out to GitHub and
         is handed workflow jobs over that same connection, so nothing has to
         reach in. Install it on the host, not inside a gateway container: a
@@ -196,7 +196,7 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
         ) : null}
       </p>
 
-      <h4 className="gitcfg-step">1 · Let the runner call this gateway</h4>
+      <h4>1 · Let the runner call this gateway</h4>
       <label className="gitcfg-check">
         <input
           type="checkbox"
@@ -213,7 +213,7 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
           setGatewayUrl(e.target.value)
         }
       />
-      <p className="gitcfg-auto-hint">
+      <p className="gitcfg-hint">
         The address starts as the one this page is open on. Change it to the one
         the <em>runner</em> reaches this gateway on — for a runner on the same
         Docker host that is usually <code>http://localhost:</code> plus the
@@ -221,17 +221,15 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
         the bottom of this page. The tick box and the token below are what the
         gateway acts on.
       </p>
-      <div className="gitcfg-cred-actions">
-        {unsaved ? (
-          <span className="gitcfg-proj-off">Not saved yet</span>
-        ) : null}
+      <div className="gitcfg-actions is-end">
+        {unsaved ? <span className="gitcfg-off">Not saved yet</span> : null}
         <Button colorClass="primary" disabled={saving} onClick={() => onSave()}>
           Save
         </Button>
       </div>
 
-      <h4 className="gitcfg-step">2 · Generate a token</h4>
-      <p className="gitcfg-auto-hint">
+      <h4>2 · Generate a token</h4>
+      <p className="gitcfg-hint">
         {data.hasToken
           ? "A token is set. Generating a new one immediately stops the old one working."
           : "No token yet. Until one exists the gateway answers the runner with a 404."}{" "}
@@ -269,9 +267,7 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
         </div>
       ) : null}
 
-      <h4 className="gitcfg-step">
-        3 · Choose a project and how it is delivered
-      </h4>
+      <h4>3 · Choose a project and how it is delivered</h4>
       {data.projects.length === 0 ? (
         <p className="gitcfg-empty">No projects on this gateway yet.</p>
       ) : (
@@ -279,50 +275,54 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
           {/* Every project and its delivery, without having to open the select to find out.
               The select below chooses what to EDIT and is deliberately not remembered, which
               reads as a lost setting unless the settings themselves are on show. */}
-          <table className="gitcfg-proj-table">
-            <thead>
-              <tr>
-                <th>Project</th>
-                <th>Delivered as</th>
-                <th>Has a remote</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {data.projects.map((p) => (
-                <tr key={p.name}>
-                  <td>
-                    <span className="gitcfg-proj-name">{p.name}</span>
-                  </td>
-                  <td>
-                    {p.mode === "repo" ? (
-                      "Repo updates"
-                    ) : p.mode === "release" ? (
-                      "Release"
-                    ) : (
-                      <span className="gitcfg-proj-off">Not chosen</span>
-                    )}
-                  </td>
-                  <td>
-                    {p.hasRemote ? (
-                      <span className="gitcfg-proj-ok">Yes</span>
-                    ) : (
-                      <span className="gitcfg-proj-off">No</span>
-                    )}
-                  </td>
-                  <td className="gitcfg-proj-act">
-                    <Button
-                      colorClass="secondary"
-                      onClick={() => setProject(p.name)}
-                    >
-                      {project === p.name ? "Editing" : "Edit"}
-                    </Button>
-                  </td>
+          <div className="gitcfg-table-scroll">
+            <table className="gitcfg-table">
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th>Delivered as</th>
+                  <th>Has a remote</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="gitcfg-auto-hint">
+              </thead>
+              <tbody>
+                {data.projects.map((p) => (
+                  <tr key={p.name}>
+                    <td>
+                      <span className="gitcfg-proj-name">{p.name}</span>
+                    </td>
+                    <td>
+                      {p.mode === "repo" ? (
+                        "Repo updates"
+                      ) : p.mode === "release" ? (
+                        "Release"
+                      ) : (
+                        <span className="gitcfg-off">Not chosen</span>
+                      )}
+                    </td>
+                    <td>
+                      {p.hasRemote ? (
+                        <span className="gitcfg-ok">Yes</span>
+                      ) : (
+                        <span className="gitcfg-off">No</span>
+                      )}
+                    </td>
+                    <td className="gitcfg-table-act">
+                      <Button
+                        colorClass={
+                          project === p.name ? "primary" : "secondary"
+                        }
+                        onClick={() => setProject(p.name)}
+                      >
+                        {p.mode ? "Edit" : "Set up"}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="gitcfg-hint">
             Every project is listed. There is nothing to add: a project receives
             through the runner as soon as the gateway accepts requests and the
             workflow calls it, and the delivery above is how it will be applied.
@@ -367,14 +367,14 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
             />
           </div>
           {!data.chosenMode ? (
-            <p className="gitcfg-auto-hint">
+            <p className="gitcfg-hint">
               <strong>Not chosen yet.</strong> Both routes are accepted for this
               project, and a workflow aimed at either will be obeyed. Pick one
               to hold the project to it — the other then answers with an error
               instead of quietly doing the opposite.
             </p>
           ) : null}
-          <p className="gitcfg-auto-hint">
+          <p className="gitcfg-hint">
             {release
               ? "On a version tag the workflow uploads the project export. The gateway replaces the project with it — files removed from the release disappear — keeps its own git repository and project properties, and applies it without a restart. This gateway needs no git credentials and no repository at all: the runner does every git operation and the gateway only receives an authenticated zip, which is why it suits a gateway with no internet access."
               : "On a push to the branch the workflow asks the gateway to pull. This gateway does the git work itself, so the project must be a repository with a remote (Projects tab) and pulls with the credential that remote already uses."}
@@ -383,7 +383,7 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
               : ""}
           </p>
           {data.chosenMode ? (
-            <p className="gitcfg-auto-hint">
+            <p className="gitcfg-hint">
               The gateway holds this choice to it: it refuses the other route
               for this project rather than quietly doing the other thing, so a
               workflow aimed at the wrong one fails where you can see it.
@@ -391,7 +391,7 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
           ) : null}
         </>
       ) : (
-        <p className="gitcfg-auto-hint">
+        <p className="gitcfg-hint">
           The commands below show placeholders until a project is chosen.
         </p>
       )}
@@ -399,19 +399,19 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
       {/* Steps 4 and 5 happen outside this module, on GitHub and the runner machine. They are
           listed so the process reads complete, not taught: GitHub's own pages give the commands,
           and any workflow that meets the contract below works — not only one shaped like ours. */}
-      <h4 className="gitcfg-step">4 · A runner that can reach this gateway</h4>
+      <h4>4 · A runner that can reach this gateway</h4>
       {seenAt > 0 ? (
-        <p className="gitcfg-auto-hint">
-          <span className="gitcfg-proj-ok">Done</span> — a runner called this
-          gateway at {formatWhen(seenAt)} ({data.runnerSeen.kind}) and its token
-          was accepted.
+        <p className="gitcfg-hint">
+          <span className="gitcfg-ok">Done</span> — a runner called this gateway
+          at {formatWhen(seenAt)} ({data.runnerSeen.kind}) and its token was
+          accepted.
         </p>
       ) : (
-        <p className="gitcfg-auto-hint">
+        <p className="gitcfg-hint">
           No runner has called this gateway since it started.
         </p>
       )}
-      <ul className="gitcfg-auto-hint">
+      <ul className="gitcfg-hint">
         <li>
           Install a GitHub self-hosted runner on a machine that can reach this
           gateway: GitHub → Settings → Actions → Runners → New self-hosted
@@ -427,15 +427,15 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
         </li>
       </ul>
 
-      <h4 className="gitcfg-step">5 · A workflow that calls this gateway</h4>
+      <h4>5 · A workflow that calls this gateway</h4>
       {!data.workflows?.detectable ? null : wired.length > 0 ? (
-        <p className="gitcfg-auto-hint">
-          <span className="gitcfg-proj-ok">Found</span> —{" "}
+        <p className="gitcfg-hint">
+          <span className="gitcfg-ok">Found</span> —{" "}
           <code>{wired.map((w) => w.path).join(", ")}</code> calls a gateway
           through this module.
         </p>
       ) : (
-        <p className="gitcfg-auto-hint">
+        <p className="gitcfg-hint">
           {wf.length > 0
             ? `This repository has ${wf.length} ${
                 wf.length === 1 ? "workflow" : "workflows"
@@ -443,7 +443,7 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
             : "This repository has no workflows yet."}
         </p>
       )}
-      <ul className="gitcfg-auto-hint">
+      <ul className="gitcfg-hint">
         <li>
           Nothing happens until a workflow calls the gateway — the steps above
           only make it willing to answer.
@@ -465,8 +465,8 @@ export default function Runner({ onHelp }: { onHelp?: () => void }) {
         </li>
       </ul>
 
-      <h4 className="gitcfg-step">Check it before you rely on it</h4>
-      <p className="gitcfg-auto-hint">
+      <h4>Check it before you rely on it</h4>
+      <p className="gitcfg-hint">
         {release
           ? "From the runner machine, with the token in place of the placeholder. It sends no zip, so nothing is installed: 400 “no release zip” means the address and token are right."
           : "From the runner machine, with the token in place of the placeholder. A success means the workflow will work."}

@@ -59,15 +59,13 @@ runner on the host connects out to GitHub and is handed workflow jobs over that
 same connection, so a workflow can hand this gateway a release — or ask it to
 pull a branch — with nothing reaching in. Each project picks **Release** (a zip
 replaces the whole project, applied without a restart) or **Repo updates** (pull
-the branch). The tab generates the setup with this gateway's values in it:
-registration commands for Linux, macOS and Windows — for a runner serving one
-repository or the whole organisation — the workflow, the token, and a check that
-the runner can reach the gateway. It also reports what is already in place: when
-a runner last called this gateway, and which workflows the project's repository
-already has, so an existing deployment gains one step instead of a second
-workflow racing the first.
+the branch). The tab holds the gateway's side — accept runner requests, the
+address, the token, each project's delivery — and lists what GitHub's side
+needs: a runner with a label of its own, and a workflow that calls the gateway.
+It reports what is already in place (when a runner last called, which workflows
+the repository has) and gives a check to run from the runner machine.
 
-![The Actions runner tab: every project and its delivery, the values the commands are built from, and what is already in place](docs/images/versioning-runner.png)
+![The Actions runner tab: the gateway's settings, every project and its delivery, and what is already in place](docs/images/versioning-runner.png)
 
 Push or pull is a real choice, and the tab beside it makes it rather than
 implying one. git-sync — something polling the repository and writing the files

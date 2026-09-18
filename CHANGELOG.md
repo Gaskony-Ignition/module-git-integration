@@ -3,6 +3,27 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.3.0] - 2026-09-18
+
+### Changed
+- **One look across every tab.** The page now takes colour and weight from the gateway's own
+  tokens and declares its type scale, spacing, radius and monospace stack once. Headings, hints,
+  tables, button rows and status colours are one style each, where there were up to four. Hints
+  are 13px everywhere (some were 11px), secondary grey text meets WCAG AA contrast, and every
+  table scrolls in place rather than widening the page. History gained the same header as the
+  other tabs.
+- **The runner tab has one Save.** The gateway address sits in step 1 with *Accept requests*;
+  the check at the bottom uses the saved address.
+- The Help tab says how to promote to a gateway **without a runner**: give it a branch of its own
+  and point Scheduled sync at it. Its credentials table no longer lists committing a workflow.
+
+### Removed
+- Everything 3.2.4 stopped showing: the runner install-script and example-workflow generators,
+  the `POST /runner-workflow` route that committed a workflow, and nine unread fields of
+  `GET /runner`. Only the check command is still generated.
+- The runner's `labels` setting. The gateway never read it; a runner resource saved by an
+  earlier version still loads, with that field ignored.
+
 ## [3.2.4] - 2026-09-17
 
 ### Changed

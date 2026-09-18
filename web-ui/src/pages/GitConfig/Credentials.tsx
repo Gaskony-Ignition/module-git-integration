@@ -116,8 +116,8 @@ const Credentials = () => {
   const rows = data?.credentials ?? [];
 
   return (
-    <div className="gitcfg-creds">
-      <div className="gitcfg-excluded-head">
+    <div>
+      <div className="gitcfg-page-head">
         <div>
           <h3>Credentials</h3>
           <p>
@@ -127,7 +127,7 @@ const Credentials = () => {
             first, then set the remote from the Designer or the Projects tab.
           </p>
         </div>
-        <div className="gitcfg-excluded-actions">
+        <div className="gitcfg-actions">
           <Button colorClass="primary" onClick={() => setOpen(!open)}>
             {open ? "Cancel" : "Add credential"}
           </Button>
@@ -243,7 +243,7 @@ const Credentials = () => {
             </>
           )}
 
-          <div className="gitcfg-cred-actions">
+          <div className="gitcfg-actions is-end">
             <Button
               colorClass="primary"
               disabled={!ready || adding}
@@ -263,31 +263,33 @@ const Credentials = () => {
           project has to reach a remote.
         </p>
       ) : (
-        <table className="gitcfg-cred-table">
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Credential</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => (
-              <tr key={`${c.type}-${c.id}`}>
-                <td>{c.type}</td>
-                <td>{c.label}</td>
-                <td className="gitcfg-cred-del">
-                  <Button
-                    colorClass="secondary"
-                    onClick={() => del(c.type, c.id, c.label)}
-                  >
-                    Remove
-                  </Button>
-                </td>
+        <div className="gitcfg-table-scroll">
+          <table className="gitcfg-table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Credential</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((c) => (
+                <tr key={`${c.type}-${c.id}`}>
+                  <td>{c.type}</td>
+                  <td>{c.label}</td>
+                  <td className="gitcfg-table-act">
+                    <Button
+                      colorClass="secondary"
+                      onClick={() => del(c.type, c.id, c.label)}
+                    >
+                      Remove
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

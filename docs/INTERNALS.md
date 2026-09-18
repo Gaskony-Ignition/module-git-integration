@@ -18,7 +18,7 @@ is `POST /runner-sync` — see Automation below.
 | Projects & credentials | `GET /projects`, `/credentials` |
 | Projects & credentials | `POST /project-init`, `/project-remote`, `/project-credential`, `/project-images`, `/project-snapshot-images`, `/credentials`, `/credential-remove` |
 | Automation | `GET /automation`, `/runner` |
-| Automation | `POST /automation-clear`, `/sync`, `/sync-now`, `/runner`, `/runner-workflow`, `/runner-sync` |
+| Automation | `POST /automation-clear`, `/sync`, `/sync-now`, `/runner`, `/runner-sync`, `/runner-release` |
 
 `POST /runner-sync` is the one route with no permission check and no CSRF
 token — a GitHub Actions workflow step has neither a gateway session nor a
@@ -57,7 +57,7 @@ deletes the resource types left over from removed features, both idempotent.
 | `ConfigAutoCommitter` | Listens for config changes and commits them; the only live notification surface (per-resource listeners on the config collection are never called). |
 | `GitProjectManager` / `GitTagManager` / `GitThemeManager` / `GitImageManager` | Per-project resource import, and gateway-resource snapshot (tags/themes/images) into the project tree. |
 | `SyncScheduler` | Per-project scheduled fetch + fast-forward; refuses a dirty tree or an unborn repo. |
-| `RunnerSetup` / `RunnerTrigger` | Generate the Actions-runner setup (install script, workflow YAML, reachability check); handle the authenticated pull request from the runner. |
+| `RunnerSetup` / `RunnerTrigger` | Generate the check command that proves a runner can reach the gateway; handle the authenticated pull request from the runner. |
 | `GitEvents` | Synchronous, log-only ring buffer (50 entries) behind the Automation event log; never throws or blocks the operation that fired it. |
 
 ## Designer popups

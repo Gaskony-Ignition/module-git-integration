@@ -296,7 +296,7 @@ const ConfigDrawer = ({
       </Card>
 
       <Card title="Danger Zone" className="gitcfg-danger-card">
-        <p className="gitcfg-muted">
+        <p className="gitcfg-off">
           {"This action will permanently delete the gateway's versioning"}
         </p>
         <Button

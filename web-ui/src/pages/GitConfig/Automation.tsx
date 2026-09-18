@@ -61,8 +61,8 @@ const Automation = () => {
   const stats = data?.stats;
 
   return (
-    <div className="gitcfg-automation">
-      <div className="gitcfg-excluded-head">
+    <div>
+      <div className="gitcfg-page-head">
         <div>
           <h3>Automation: pulling changes in</h3>
           <p>
@@ -98,7 +98,7 @@ const Automation = () => {
 
       {section === "sync" ? (
         <>
-          <p className="gitcfg-auto-hint">
+          <p className="gitcfg-hint">
             The gateway fetches each enabled repository on a timer and
             fast-forwards it when the tracked branch has moved, then requests a
             project scan. It refuses when the working tree has local changes —
@@ -110,66 +110,68 @@ const Automation = () => {
               No versioned projects. Set one up on the Projects tab first.
             </p>
           ) : (
-            <table className="gitcfg-proj-table">
-              <thead>
-                <tr>
-                  <th>Project</th>
-                  <th>Sync</th>
-                  <th>Branch</th>
-                  <th>Every</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {versioned.map((p) => {
-                  const s = syncs.find((x) => x.project === p.name);
-                  return (
-                    <tr key={p.name}>
-                      <td>
-                        <span className="gitcfg-proj-name">{p.name}</span>
-                      </td>
-                      <td>
-                        {s?.enabled ? (
-                          <span className="gitcfg-proj-ok">On</span>
-                        ) : (
-                          <span className="gitcfg-proj-off">Off</span>
-                        )}
-                      </td>
-                      <td>{s?.branch || p.branch || "—"}</td>
-                      <td>{s ? `${s.intervalSeconds}s` : "—"}</td>
-                      <td className="gitcfg-proj-act">
-                        <Button
-                          colorClass="secondary"
-                          onClick={() =>
-                            setSyncDraft(
-                              s ?? {
-                                project: p.name,
-                                enabled: true,
-                                remoteName: p.remoteName || "origin",
-                                branch: p.branch || "",
-                                intervalSeconds: 300,
-                                ignitionUser: "",
-                              }
-                            )
-                          }
-                        >
-                          {s ? "Edit" : "Set up"}
-                        </Button>
-                        {s?.enabled ? (
+            <div className="gitcfg-table-scroll">
+              <table className="gitcfg-table">
+                <thead>
+                  <tr>
+                    <th>Project</th>
+                    <th>Sync</th>
+                    <th>Branch</th>
+                    <th>Every</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {versioned.map((p) => {
+                    const s = syncs.find((x) => x.project === p.name);
+                    return (
+                      <tr key={p.name}>
+                        <td>
+                          <span className="gitcfg-proj-name">{p.name}</span>
+                        </td>
+                        <td>
+                          {s?.enabled ? (
+                            <span className="gitcfg-ok">On</span>
+                          ) : (
+                            <span className="gitcfg-off">Off</span>
+                          )}
+                        </td>
+                        <td>{s?.branch || p.branch || "—"}</td>
+                        <td>{s ? `${s.intervalSeconds}s` : "—"}</td>
+                        <td className="gitcfg-table-act">
                           <Button
                             colorClass="secondary"
-                            disabled={syncing}
-                            onClick={() => onSyncNow(p.name)}
+                            onClick={() =>
+                              setSyncDraft(
+                                s ?? {
+                                  project: p.name,
+                                  enabled: true,
+                                  remoteName: p.remoteName || "origin",
+                                  branch: p.branch || "",
+                                  intervalSeconds: 300,
+                                  ignitionUser: "",
+                                }
+                              )
+                            }
                           >
-                            Sync now
+                            {s ? "Edit" : "Set up"}
                           </Button>
-                        ) : null}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                          {s?.enabled ? (
+                            <Button
+                              colorClass="secondary"
+                              disabled={syncing}
+                              onClick={() => onSyncNow(p.name)}
+                            >
+                              Sync now
+                            </Button>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
 
           {syncDraft ? (
@@ -211,7 +213,7 @@ const Automation = () => {
                   })
                 }
               />
-              <p className="gitcfg-auto-hint">
+              <p className="gitcfg-hint">
                 Sync runs unattended, so it authenticates with the stored
                 credential of a named user rather than borrowing whoever is in a
                 Designer. Left empty it uses yours.
@@ -224,7 +226,7 @@ const Automation = () => {
                   setSyncDraft({ ...syncDraft, ignitionUser: e.target.value })
                 }
               />
-              <div className="gitcfg-cred-actions">
+              <div className="gitcfg-actions is-end">
                 <Button
                   colorClass="secondary"
                   onClick={() => setSyncDraft(null)}
@@ -252,7 +254,7 @@ const Automation = () => {
 
       {/* The log belongs to the two working tabs; on Help it would just push the tables off. */}
       <div className="gitcfg-auto-log" hidden={section === "help"}>
-        <div className="gitcfg-excluded-head">
+        <div className="gitcfg-page-head">
           <div>
             <h4>
               Event log
@@ -273,7 +275,7 @@ const Automation = () => {
               or failed is reported here, with its reason, and nowhere else.
             </p>
           </div>
-          <div className="gitcfg-excluded-actions">
+          <div className="gitcfg-actions">
             <Button
               colorClass="secondary"
               onClick={() =>
@@ -291,55 +293,57 @@ const Automation = () => {
             Nothing yet. Commit or push from a Designer, or press Sync now.
           </p>
         ) : (
-          <table className="gitcfg-proj-table">
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Event</th>
-                <th>Where</th>
-                <th>Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.log ?? []).map((e, i) => {
-                const details = [
-                  e.user,
-                  e.commit ? e.commit.slice(0, 7) : "",
-                  e.fileCount > 0 ? `${e.fileCount} file(s)` : "",
-                  e.remote,
-                ]
-                  .filter((v) => v)
-                  .join(" · ");
-                return (
-                  <tr key={`${e.timestamp}-${i}`}>
-                    <td className="gitcfg-auto-when">
-                      {e.timestamp.replace("T", " ").replace(/\..*$/, "")}
-                    </td>
-                    <td>
-                      <span
-                        className={
-                          e.outcome === "failure"
-                            ? "gitcfg-proj-err"
-                            : "gitcfg-proj-ok"
-                        }
-                      >
-                        {e.type}
-                      </span>
-                      {e.message ? (
-                        <span className="gitcfg-proj-title">{e.message}</span>
-                      ) : null}
-                    </td>
-                    <td>
-                      {e.scope === "config"
-                        ? "gateway config"
-                        : `${e.project}${e.branch ? ` · ${e.branch}` : ""}`}
-                    </td>
-                    <td className="gitcfg-proj-remote">{details}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="gitcfg-table-scroll">
+            <table className="gitcfg-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Event</th>
+                  <th>Where</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.log ?? []).map((e, i) => {
+                  const details = [
+                    e.user,
+                    e.commit ? e.commit.slice(0, 7) : "",
+                    e.fileCount > 0 ? `${e.fileCount} file(s)` : "",
+                    e.remote,
+                  ]
+                    .filter((v) => v)
+                    .join(" · ");
+                  return (
+                    <tr key={`${e.timestamp}-${i}`}>
+                      <td className="gitcfg-meta">
+                        {e.timestamp.replace("T", " ").replace(/\..*$/, "")}
+                      </td>
+                      <td>
+                        <span
+                          className={
+                            e.outcome === "failure" ? "gitcfg-err" : "gitcfg-ok"
+                          }
+                        >
+                          {e.type}
+                        </span>
+                        {e.message ? (
+                          <span className="gitcfg-proj-title">{e.message}</span>
+                        ) : null}
+                      </td>
+                      <td>
+                        {e.scope === "config"
+                          ? "gateway config"
+                          : `${e.project}${e.branch ? ` · ${e.branch}` : ""}`}
+                      </td>
+                      <td className="gitcfg-meta gitcfg-proj-remote">
+                        {details}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
