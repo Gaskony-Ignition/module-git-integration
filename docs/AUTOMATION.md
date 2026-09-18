@@ -1,148 +1,85 @@
-# Automation — design note
+# Delivery — design note
 
-Automation only pulls changes into this gateway; it never pushes. The
+Delivery only brings changes into this gateway; it never pushes. The
 gateway-config repository pushes separately, by hand, from the Remote Sync
 button on the Versioning page.
+
+## One delivery per project, opt-in
+
+Each project has exactly one delivery, set on the Projects tab: **Off**,
+**Runner — release**, **Runner — repo updates**, **Sync — pull** or
+**Sync — replace**. `POST /delivery` writes the two stores behind it together —
+the runner's per-project mode map (`GitRunnerRecord`) and the project's
+`GitSyncRecord` — so they can never both claim a project. A delivery that pulls
+is refused for a project with no remote.
+
+**Off is the default and refuses the runner.** Until 3.5.0 the runner switch and
+token were the only gate: a workflow could install any project name it sent,
+creating one if none existed, and the per-project choice only blocked the other
+route. Now both runner routes refuse (409) a project that does not exist on the
+gateway or is not set to that exact delivery. A new project's first release
+therefore needs the project created empty first.
+
+Upgrading to 3.5.0 runs `GitRunnerRecord.migrateToOptIn` once: with the runner
+on, every project with no mode and no enabled sync is set to Runner — release,
+so existing deploys keep working. The record's `optIn` flag then stops it
+running again, so a project set to Off later stays Off.
 
 ## The reachability problem
 
 A GitHub webhook is GitHub making an inbound HTTPS connection **to** the
 gateway. Most OT gateways sit behind NAT or a firewall and cannot be reached
-that way — the same is true of customer sites generally, not just a
-particular lab network. A webhook receiver is therefore a feature that most
-installs could never use.
+that way. So there are two mechanisms, both with nothing reaching in:
 
-Inbound sync ships as two mechanisms instead:
+**Sync (pull).** A scheduled task per project: fetch, compare the tracked remote
+branch with HEAD, act if it moved. Works behind NAT and with any git host.
 
-**Polling (default).** A scheduled task per repository: `git fetch`, compare
-the tracked remote branch to local, and act if it moved. No inbound exposure,
-works behind NAT, works with no GitHub involvement at all. Interval
-configurable, default 5 minutes. Each sync has a delivery:
+- **Pull** fast-forwards, and refuses while the tree has real local changes or
+  when the remote moved backwards.
+- **Replace** hard-resets and cleans to the remote branch, keeping
+  `ignition/global-props/data.bin`. It runs only when the branch moves, overwrites
+  and counts local edits, and follows a branch moved backwards. This is the
+  runnerless release route: a tag holds source, so a workflow builds each
+  release and commits it to a branch of releases, and a promotion moves the
+  gateway's own branch to the approved one.
 
-- **Pull** fast-forwards the project, and refuses while the tree is dirty (see
-  the dirty-tree rule) or when the remote moved backwards.
-- **Replace** resets the project to the remote branch — hard reset plus clean,
-  so dropped files go — keeping `ignition/global-props/data.bin` as a release
-  does. It runs only when the branch moves (compared with HEAD, not the
-  working tree), overwrites uncommitted edits and says how many, and follows a
-  branch moved backwards. This is the runnerless release route: a tag holds
-  source, so a workflow builds each release and commits the unzipped result to
-  a branch of releases, and a promotion moves the gateway's own branch to the
-  approved one.
+**Runner (push).** A GitHub Actions self-hosted runner connects *out* to GitHub
+and is handed jobs over that connection, so a workflow step can call the gateway
+from inside the network. The module does not install or supervise the runner: a
+runner executes whatever the workflow says, and hosting one inside the module
+would put repository-supplied shell beside the project store.
 
-**Actions runner (push-time).** A GitHub Actions self-hosted runner connects
-*out* to GitHub and is handed workflow jobs over that same connection, so a
-workflow step can call the gateway from inside the network — the direction
-that already works, with nothing reaching in. The runner belongs on the host,
-not inside a gateway container: on a Docker host it reaches every gateway on
-its published port, so one runner serves them all. Installing the runner and
-writing the workflow are GitHub's steps; the page lists what each needs, and
-`RunnerSetup` generates only the reachability check. Each project chooses how
-the runner delivers to it:
+- **Release.** The workflow uploads a project export zip to `ReleaseReceiver`
+  (`POST /runner-release`). The gateway replaces the whole project — a file
+  dropped from the release disappears — keeping `.git` and
+  `ignition/global-props/data.bin`. Staged under `var/git-release`, moved in and
+  scanned: no restart, no repository needed on the gateway.
+- **Repo updates.** The workflow calls `RunnerTrigger` (`POST /runner-sync`) and
+  the gateway pulls, using the project's sync record for branch and credential
+  (kept, disabled, for exactly this) or its checked-out branch.
 
-- **Release.** On a version tag the workflow uploads a project export zip to
-  `ReleaseReceiver` (`POST /runner-release`). The gateway replaces the whole
-  project with it — a file dropped from the release disappears, which a
-  copy-over never does — keeping the project's `.git` (the module's repository
-  lives in the project folder) and `ignition/global-props/data.bin` (per-gateway
-  settings such as the default database, which a release ships neutral). The
-  upload is staged under `var/git-release`, outside `projects/`, then moved in
-  and scanned: no restart, and no repository needed on the gateway. A release
-  is authoritative and overwrites uncommitted edits, as any deployment does.
-- **Repo updates.** On a push to the branch the workflow calls `RunnerTrigger`
-  (`POST /runner-sync`) and the gateway pulls. With a `GitSyncRecord` the pull
-  uses its branch and credential; without one it uses the project's checked-out
-  branch, its remote, and the user whose stored credential that remote already
-  uses. It runs even when the scheduled timer is off — "pull on demand only",
-  not "never pull".
+**A webhook receiver was built and removed.** It worked, but could not receive a
+delivery on a gateway GitHub cannot reach — which is most of them.
 
-The difference matters because a repository and a release are different
-things: the repository is raw source, often with tooling beside the project,
-while a release is the packaged export that should replace the project whole.
+## Local changes
 
-The two routes hold a project to its chosen delivery: `/runner-release` refuses
-a project set to Repo updates and `/runner-sync` refuses one set to Release,
-both with 409 and the reason. Quietly performing the other one would let a
-workflow aimed at the wrong route overwrite a project someone is pulling into.
-`GitRunnerRecord.chosenMode` returns null for a project nobody has chosen for,
-and both guards skip in that case, so a gateway upgraded from a version with no
-modes keeps working until a choice is made.
+Pull and repo updates refuse rather than stash or force: silently reverting an
+engineer's unsaved work is worse than not syncing. Release and Replace are
+chosen to be authoritative, so they overwrite — and Replace reports the count.
 
-### What the gateway actually acts on
+Ignition rewrites the JSON it imports (no final newline, escaped apostrophes,
+`"parent": ""`, reordered `files`), so git sees those files modified with
+identical content. `IgnitionReformat` counts changes by parsed content; without
+it Pull refused for ever after the first import.
 
-Only two of the runner tab's values change what the gateway does: whether it
-accepts runner requests, and the token. The address a runner calls is not one
-of them — it belongs to the workflow, or to whatever starts it (a promotion
-tool passes it per target). Until 3.4.0 the gateway also saved one, used only to
-fill in the check command; it was taken for the address deploys use, so it went.
-The page now passes whatever is typed beside the check to the GET, which
-generates from it and stores nothing.
-
-The same split decides what the gateway needs from git. In **Release** mode it
-needs nothing: no repository, no remote, no credential, no route to GitHub — the
-runner performs every git operation and the gateway receives an authenticated
-zip. Only **Repo updates** and **Scheduled sync**, where the gateway itself
-pulls, need the project registered with a remote and a credential.
-
-### Runner scope and labels
-
-A runner registers at exactly one scope — repository, organisation or
-enterprise — and cannot move between them without re-registering.
-Organisation is the usual answer: a machine standing beside a gateway normally
-receives from several project repositories. GitHub's runner groups are not
-available to private repositories below the Team plan, so scope plus labels is
-the portable arrangement.
-
-Labels are the routing key. GitHub adds `self-hosted` plus the OS and
-architecture automatically; a workflow's `runs-on` must list a subset of what
-the runner carries. A mismatch queues the job for a day with **no error and no
-timeout**. Two gateways must carry different labels, or a job lands beside the
-wrong one; when a second appears, make the label a workflow input rather than
-editing every workflow.
-
-### Asking rather than telling
-
-Two prerequisites are usually already in place, and both are detectable, so the
-page reports on them rather than instructing:
-
-- **A runner reaching this gateway.** `RunnerAuth` records when a runner last
-  authenticated. That proves more than GitHub's runners API could tell us
-  without an admin-scoped credential: a runner exists, reaches this gateway, and
-  holds the right token. It is deliberately in memory — persisting it would put
-  a config commit in the versioning history on every deploy — so a restart
-  forgets it and the page words the empty case accordingly.
-- **Workflows in the repository.** `WorkflowScan` lists
-  `.github/workflows/*.y*ml` in the project's working tree and flags any whose
-  text mentions a runner route. A repository that already deploys should gain
-  one step, not a second workflow racing the first. A project with no working
-  tree here reports "cannot be checked", which is not the same answer as "none".
-
-The module does not install, register or supervise the runner. A runner
-executes whatever the workflow file says, so hosting one from inside the
-module would put repository-supplied shell next to the project store under
-the gateway's own identity, and would need a stored GitHub admin credential
-to keep re-fetching registration tokens.
-
-**A webhook receiver was built and removed.** It authenticated correctly and
-pulled the matching project, but could not receive a delivery on a gateway
-GitHub cannot reach — which is most of them. Do not rebuild one without a
-concrete gateway that GitHub can actually reach.
-
-## The dirty-tree rule
-
-Either mechanism can find local uncommitted changes — someone has a Designer
-open. Pull and Repo updates refuse rather than stash or force: log it, leave
-the tree alone. Silently reverting an engineer's unsaved work is worse than not
-syncing. Release and Replace are chosen to be authoritative, so they overwrite
-— and Replace reports the count in its event, so it is never silent.
-
-## Workflow security model
+## Runner route security
 
 `POST /runner-sync` and `POST /runner-release` are mounted outside the normal
-session/CSRF model, because a GitHub Actions workflow step has neither:
+session/CSRF model, because a workflow step has neither:
 
 - Bearer token compared in constant time, checked before the body is read.
-- Fails closed: no token configured, or the feature disabled, both 404.
+- Fails closed: no token, or the runner switched off, both 404.
+- Opt-in per project, as above: 409 otherwise.
 - `/runner-sync`: 64 KB body cap. `/runner-release`: 256 MB, project name
   limited to letters, digits, `_` and `-`, every zip entry must land inside the
   project folder, and `project.json` must be at the zip root.
@@ -150,7 +87,8 @@ session/CSRF model, because a GitHub Actions workflow step has neither:
   Jetty parse a large body without a zip Content-Type as a form and fail.
 - A release and a sync of the same project never run at once.
 
-## After the pull
+## After the change
 
-Pulling changes files under `data/projects/<name>/`, which Ignition does not
-notice on its own, so the pull is followed by a project scan request.
+Changing files under `data/projects/<name>/` is not noticed by Ignition on its
+own, so every delivery ends with a project import and a scan request, and an
+event on the Logs tab.

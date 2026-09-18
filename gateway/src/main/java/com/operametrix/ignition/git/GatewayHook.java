@@ -3,8 +3,6 @@ package com.operametrix.ignition.git;
 import com.operametrix.ignition.git.automation.GitEvent;
 import com.operametrix.ignition.git.automation.ReleaseReceiver;
 import com.operametrix.ignition.git.automation.RunnerAuth;
-import com.operametrix.ignition.git.automation.RunnerSetup;
-import com.operametrix.ignition.git.automation.WorkflowScan;
 import com.operametrix.ignition.git.automation.RunnerTrigger;
 import com.operametrix.ignition.git.automation.GitEvents;
 import com.operametrix.ignition.git.automation.SyncScheduler;
@@ -142,6 +140,15 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         configRemoteHandler.startup();
         syncHandler.startup();
         runnerHandler.startup();
+
+        // Delivery became opt-in in 3.5.0: once, keep projects the runner already delivered to.
+        try {
+            GitRunnerRecord.migrateToOptIn(GitProjectManager.listProjectStatus().stream()
+                    .map(GitProjectManager.ProjectStatus::name).toList());
+        } catch (Exception e) {
+            logger.error("Could not carry runner delivery over to opt-in; set each project's"
+                    + " delivery on the Projects tab.", e);
+        }
 
         // Scheduled sync. Inert until a project has a sync record configured, so starting it
         // unconditionally costs one idle thread and keeps the wiring in one place.
@@ -305,18 +312,18 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleProjectCredential).mount();
 
-        // Automation: scheduled sync, the runner, and the event log that reports them.
-        routes.newRoute("/automation").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
+        // The Logs tab, and each project's delivery: how, if at all, changes reach it.
+        routes.newRoute("/events").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.READ).nocache()
-                .handler(this::handleGetAutomation).mount();
+                .handler(this::handleGetEvents).mount();
 
-        routes.newRoute("/automation-clear").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+        routes.newRoute("/events-clear").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
-                .handler(this::handleClearAutomationLog).mount();
+                .handler(this::handleClearEvents).mount();
 
-        routes.newRoute("/sync").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+        routes.newRoute("/delivery").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
-                .handler(this::handleSaveSync).mount();
+                .handler(this::handleSaveDelivery).mount();
 
         routes.newRoute("/sync-now").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
@@ -338,7 +345,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleDeinit).mount();
 
-        // GitHub Actions runner: the setup helper, and the one route the runner itself calls.
+        // Runner access (Credentials tab), and the two routes the runner itself calls.
         routes.newRoute("/runner").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.READ).nocache()
                 .handler(this::handleGetRunner).mount();
@@ -1010,9 +1017,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     /** Every project on the gateway with its git state — see GitProjectManager#listProjectStatus. */
     private Object handleProjects(RequestContext req, HttpServletResponse resp) {
         try {
-            // What automation, if any, brings changes into each project. The Projects tab is where
-            // someone looks to see the state of a project, and "does anything deploy to this, and
-            // how" was answerable only by going to the Automation tab and opening a select.
             GitRunnerRecord runner = GitRunnerRecord.get();
             boolean runnerOn = runner.isEnabled() && runner.hasToken();
 
@@ -1029,16 +1033,14 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.addProperty("error", p.error());
                 o.addProperty("imagePrefix", GitProjectsConfigRecord.imagePrefixFor(p.name()));
 
-                // The runner only answers at all when it is switched on and holds a token, so a
-                // delivery chosen on a runner nobody enabled is not automation, and says so.
+                // A runner delivery on a runner nobody switched on delivers nothing; say so.
                 o.addProperty("runnerEnabled", runnerOn);
-                // Null when nobody has chosen, which is a third state: the routes then accept
-                // either, so claiming a mode would be a claim the gateway does not make.
-                String chosen = runner.chosenMode(p.name());
-                o.addProperty("runnerMode", chosen == null ? "" : chosen);
                 GitSyncRecord sync = GitSyncRecord.findByProject(p.name());
-                o.addProperty("syncEnabled", sync != null && sync.isEnabled());
-                o.addProperty("syncIntervalSeconds", sync == null ? 0 : sync.getIntervalSeconds());
+                o.addProperty("delivery", deliveryOf(runner, sync, p.name()));
+                o.addProperty("syncBranch", sync == null ? "" : sync.getBranch());
+                o.addProperty("syncIntervalSeconds", sync == null
+                        ? GitSyncRecord.DEFAULT_INTERVAL_SECONDS : sync.getIntervalSeconds());
+                o.addProperty("syncUser", sync == null ? "" : sync.getIgnitionUser());
                 arr.add(o);
             }
             JsonObject out = new JsonObject();
@@ -1203,30 +1205,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         }
     }
 
-    // ── Automation ─────────────────────────────────────────────────────────────────────────────
+    // ── Delivery and logs ─────────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Everything the Automation page renders below the Scheduled sync / Actions runner forms:
-     * the sync records themselves, and the Event log with its stats. Both directions this page
-     * covers are inbound (a scheduled fetch, or a runner-triggered pull) — there is no more
-     * settings/trigger-rule config to return here since Event delivery and Outbound triggers
-     * were removed in 3.0.0.
-     */
-    private Object handleGetAutomation(RequestContext req, HttpServletResponse resp) {
+    /** The Logs tab: the last events, and how many fired and failed since the gateway started. */
+    private Object handleGetEvents(RequestContext req, HttpServletResponse resp) {
         try {
-            JsonArray syncs = new JsonArray();
-            for (GitSyncRecord s : GitSyncRecord.listAll()) {
-                JsonObject so = new JsonObject();
-                so.addProperty("project", s.getProject());
-                so.addProperty("enabled", s.isEnabled());
-                so.addProperty("remoteName", s.getRemoteName());
-                so.addProperty("branch", s.getBranch());
-                so.addProperty("intervalSeconds", s.getIntervalSeconds());
-                so.addProperty("ignitionUser", s.getIgnitionUser());
-                so.addProperty("mode", s.getMode());
-                syncs.add(so);
-            }
-
             JsonArray log = new JsonArray();
             for (GitEvent e : GitEvents.recent()) {
                 JsonObject eo = new JsonObject();
@@ -1243,14 +1226,12 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 eo.addProperty("timestamp", e.timestamp());
                 log.add(eo);
             }
-
             GitEvents.Stats stats = GitEvents.stats();
             JsonObject so = new JsonObject();
             so.addProperty("fired", stats.fired());
             so.addProperty("failures", stats.failures());
 
             JsonObject o = new JsonObject();
-            o.add("syncs", syncs);
             o.add("log", log);
             o.add("stats", so);
             return o.toString();
@@ -1259,7 +1240,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         }
     }
 
-    private Object handleClearAutomationLog(RequestContext req, HttpServletResponse resp) {
+    private Object handleClearEvents(RequestContext req, HttpServletResponse resp) {
         try {
             GitEvents.clearLog();
             JsonObject o = new JsonObject();
@@ -1270,116 +1251,96 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         }
     }
 
-    private Object handleSaveSync(RequestContext req, HttpServletResponse resp) {
+    /** off, runner-release, runner-repo, sync-pull or sync-replace — the one answer per project. */
+    private static String deliveryOf(GitRunnerRecord runner, GitSyncRecord sync, String project) {
+        String mode = runner.chosenMode(project);
+        if (GitRunnerRecord.MODE_RELEASE.equals(mode)) {
+            return "runner-release";
+        }
+        if (GitRunnerRecord.MODE_REPO.equals(mode)) {
+            return "runner-repo";
+        }
+        if (sync != null && sync.isEnabled()) {
+            return sync.isReplace() ? "sync-replace" : "sync-pull";
+        }
+        return "off";
+    }
+
+    /**
+     * Sets how a project receives changes. The runner's mode and the sync record are written
+     * together so they can never both claim the project: the runner delivers only to a project
+     * whose mode is set, and the scheduler only runs an enabled sync record.
+     */
+    private Object handleSaveDelivery(RequestContext req, HttpServletResponse resp) {
         try {
             JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
             String project = optString(body, "project");
+            String delivery = optString(body, "delivery");
             if (project == null || project.isBlank()) {
                 throw new RuntimeException("A project name is required.");
             }
-            GitSyncRecord cfg = GitSyncRecord.findByProject(project);
-            if (cfg == null) {
-                cfg = new GitSyncRecord();
-                cfg.setProject(project);
+            if (!List.of("off", "runner-release", "runner-repo", "sync-pull", "sync-replace")
+                    .contains(delivery)) {
+                throw new RuntimeException("Unknown delivery '" + delivery + "'.");
             }
-            cfg.setEnabled(optBool(body, "enabled"));
-            cfg.setRemoteName(optString(body, "remoteName"));
-            cfg.setBranch(optString(body, "branch"));
-            cfg.setIntervalSeconds((int) optLong(body, "intervalSeconds"));
-            cfg.setMode(optString(body, "mode"));
-            // Sync runs unattended, so it authenticates as a named user's stored credential
-            // rather than borrowing whoever happens to be in a Designer. Default to the admin
-            // configuring it, who demonstrably has one.
-            String owner = optString(body, "ignitionUser");
-            cfg.setIgnitionUser(owner == null || owner.isBlank() ? req.getActor() : owner);
-            cfg.save();
+
+            boolean pulls = delivery.startsWith("sync-") || delivery.equals("runner-repo");
+            if (pulls && GitProjectManager.listProjectStatus().stream().noneMatch(p ->
+                    p.name().equals(project) && p.remoteUrl() != null && !p.remoteUrl().isBlank())) {
+                throw new RuntimeException("'" + project + "' has no remote to pull from; set one first.");
+            }
+
+            GitRunnerRecord runner = GitRunnerRecord.get();
+            switch (delivery) {
+                case "runner-release" -> runner.setMode(project, GitRunnerRecord.MODE_RELEASE);
+                case "runner-repo" -> runner.setMode(project, GitRunnerRecord.MODE_REPO);
+                default -> runner.clearMode(project);
+            }
+            runner.save();
+
+            // The sync record also carries the branch and credential a runner repo update pulls
+            // with, so it is kept (disabled) rather than deleted when the timer is not wanted.
+            GitSyncRecord sync = GitSyncRecord.findByProject(project);
+            if (sync == null && pulls) {
+                sync = new GitSyncRecord();
+                sync.setProject(project);
+            }
+            if (sync != null) {
+                sync.setEnabled(delivery.startsWith("sync-"));
+                if (pulls) {
+                    sync.setMode(delivery.equals("sync-replace")
+                            ? GitSyncRecord.MODE_REPLACE : GitSyncRecord.MODE_PULL);
+                    sync.setBranch(optString(body, "branch"));
+                    if (body.has("intervalSeconds")) {
+                        sync.setIntervalSeconds((int) optLong(body, "intervalSeconds"));
+                    }
+                    if (body.has("remoteName")) {
+                        sync.setRemoteName(optString(body, "remoteName"));
+                    }
+                    // Unattended, so it authenticates as a named user's stored credential rather
+                    // than whoever is in a Designer. Default to the admin saving it.
+                    String owner = optString(body, "ignitionUser");
+                    sync.setIgnitionUser(owner == null || owner.isBlank() ? req.getActor() : owner);
+                }
+                sync.save();
+            }
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
+            o.addProperty("delivery", delivery);
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);
         }
     }
 
+    /** Runner access, on the Credentials tab: whether it is on, and whether a token exists. */
     private Object handleGetRunner(RequestContext req, HttpServletResponse resp) {
         try {
             GitRunnerRecord cfg = GitRunnerRecord.get();
             JsonObject o = new JsonObject();
             o.addProperty("enabled", cfg.isEnabled());
-            // Never the token itself. It is shown once, when it is generated, and after that the
-            // browser can only learn whether one exists.
+            // Never the token itself: it is shown once, when generated.
             o.addProperty("hasToken", cfg.hasToken());
-
-            // The address as the runner reaches this gateway, typed on the page for the check
-            // command only. The gateway stores none: where deploys go belongs to the workflow.
-            String gatewayUrl = req.getParameter("gatewayUrl");
-
-            // Whether a runner already reaches this gateway, so the page can stop asking for an
-            // install that is demonstrably done. In memory, so it is empty after a restart.
-            JsonObject seen = new JsonObject();
-            seen.addProperty("at", RunnerAuth.lastCallAt());
-            seen.addProperty("kind", RunnerAuth.lastCallKind());
-            o.add("runnerSeen", seen);
-
-            // Nothing is chosen for the caller. With no project named the check command carries a
-            // placeholder: it reads as an example, and a real project name nobody picked would be
-            // copied into other people's workflows.
-            String project = req.getParameter("project");
-            String remoteUrl = null;
-            boolean known = false;
-            JsonArray projects = new JsonArray();
-            for (GitProjectManager.ProjectStatus ps : GitProjectManager.listProjectStatus()) {
-                boolean hasRemote = ps.remoteUrl() != null && !ps.remoteUrl().isBlank();
-                JsonObject p = new JsonObject();
-                p.addProperty("name", ps.name());
-                p.addProperty("hasRemote", hasRemote);
-                // The chosen mode, empty when nobody has chosen. Listing the default here
-                // made every project look configured.
-                String pm = cfg.chosenMode(ps.name());
-                p.addProperty("mode", pm == null ? "" : pm);
-                projects.add(p);
-                if (ps.name().equals(project)) {
-                    known = true;
-                    remoteUrl = hasRemote ? ps.remoteUrl() : null;
-                }
-            }
-            if (!known) {
-                project = null;
-            }
-            String mode = project == null ? GitRunnerRecord.MODE_RELEASE : cfg.getMode(project);
-            boolean release = GitRunnerRecord.MODE_RELEASE.equals(mode);
-
-            o.add("projects", projects);
-            o.addProperty("project", project == null ? "" : project);
-            o.addProperty("mode", mode);
-            // What was actually chosen, empty when nobody has. `mode` carries the default, which
-            // the page must not present as a decision: a radio showing Release when nothing is
-            // stored looks settled, and clicking the option already shown fires no change, so the
-            // setting cannot be reached at all.
-            String chosenMode = project == null ? null : cfg.chosenMode(project);
-            o.addProperty("chosenMode", chosenMode == null ? "" : chosenMode);
-            o.addProperty("hasRemote", remoteUrl != null);
-            o.addProperty("testCommand", release
-                    ? RunnerSetup.releaseTestCommand(project, gatewayUrl)
-                    : RunnerSetup.testCommand(project, gatewayUrl));
-            o.addProperty("testCommandWindows", release
-                    ? RunnerSetup.releaseTestCommandWindows(project, gatewayUrl)
-                    : RunnerSetup.testCommandWindows(project, gatewayUrl));
-
-            // What the repository already deploys with. Adding a second workflow beside an
-            // existing one is the wrong answer far more often than it is the right one.
-            WorkflowScan.Result scan = WorkflowScan.scan(project);
-            JsonObject workflows = new JsonObject();
-            workflows.addProperty("detectable", scan.detectable());
-            JsonArray list = new JsonArray();
-            for (WorkflowScan.Workflow w : scan.workflows()) {
-                JsonObject wo = new JsonObject();
-                wo.addProperty("path", w.path());
-                wo.addProperty("callsGateway", w.callsGateway());
-                list.add(wo);
-            }
-            workflows.add("list", list);
-            o.add("workflows", workflows);
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);
@@ -1392,9 +1353,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             GitRunnerRecord cfg = GitRunnerRecord.get();
             if (body.has("enabled")) {
                 cfg.setEnabled(body.get("enabled").getAsBoolean());
-            }
-            if (body.has("project") && body.has("mode")) {
-                cfg.setMode(optString(body, "project"), optString(body, "mode"));
             }
             // Whoever configures the runner is the fallback credential owner for repo updates.
             cfg.setIgnitionUser(req.getActor());

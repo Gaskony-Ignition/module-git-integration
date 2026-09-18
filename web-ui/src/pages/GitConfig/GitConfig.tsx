@@ -16,20 +16,20 @@ import RemoteSync from "./RemoteSync";
 import HistoryList from "./HistoryList";
 import Projects from "./Projects";
 import Credentials from "./Credentials";
-import Automation from "./Automation";
+import Logs from "./Logs";
 import ExcludedFiles from "./ExcludedFiles";
 import "./_styles.scss";
 
-type Tab = "history" | "excluded" | "projects" | "credentials" | "automation";
+type Tab = "history" | "excluded" | "projects" | "credentials" | "logs";
 
 // Credentials sit on the far right because they are set up once; Projects answers the question
 // people arrive with, which is whether a given project is in git at all.
 const TABS: [Tab, string][] = [
-  ["history", "History"],
-  ["excluded", "Excluded files"],
+  ["history", "Gateway History"],
+  ["excluded", "Git Ignore"],
   ["projects", "Projects"],
   ["credentials", "Credentials"],
-  ["automation", "Automation"],
+  ["logs", "Logs"],
 ];
 
 const GitConfig = () => {
@@ -141,7 +141,7 @@ const GitConfig = () => {
         ) : tab === "credentials" ? (
           <Credentials />
         ) : (
-          <Automation />
+          <Logs />
         )}
       </>
     );

@@ -92,18 +92,19 @@ No Vision client scope.
   apostrophes, `"parent": ""`, reordered `files`), so git sees those files
   modified with identical content. Count changes through `IgnitionReformat`,
   never raw `Status`, or Pull refuses for ever.
-- **Automation only pulls in; it never pushes.** Polling, not a webhook:
-  GitHub cannot reach most gateways. Read `docs/AUTOMATION.md` before
-  rebuilding an event bus or a webhook receiver.
+- **Delivery is opt-in per project and only pulls in.** Off refuses the
+  runner; `POST /delivery` keeps the runner mode and sync record exclusive.
+  Polling, not a webhook: GitHub cannot reach most gateways. Read
+  `docs/AUTOMATION.md` first.
+- **Drawers render in a portal outside `.gitcfg`**, so their body needs the
+  `gitcfg` class or every `--gitcfg-*` token is undefined (`SettingsDrawer`).
 - **A release replaces the project folder but carries `.git` and
   `global-props/data.bin` across**, or it destroys the repository and the
   gateway's project properties.
 - **Runner routes read the raw query string**, never `getParameter`: Jetty
   would parse a large non-zip body as a form and 500.
-- **The check command never carries an unchosen project's name**, and the
-  gateway stores no address of its own (removed in 3.4.0): where deploys go
-  belongs to the workflow or whatever starts it, and a saved copy here was
-  mistaken for it. The page passes the typed address to the GET for the check.
+- **The gateway stores no runner address** (removed 3.4.0): where deploys go
+  belongs to the workflow, and a saved copy was mistaken for it.
 - **Styles: colour and weight from the platform tokens** (`--neutral-*`,
   `--primary`, `--success`, `--error`, `--warning-dark` for amber text);
   type, spacing, radius and the mono stack from the `--gitcfg-*` block at the

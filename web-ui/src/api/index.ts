@@ -51,7 +51,7 @@ const baseApi = createApi({
     "tree",
     "ignore",
     "projects",
-    "automation",
+    "events",
     "runner",
   ],
   endpoints: () => ({}),

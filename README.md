@@ -18,8 +18,8 @@ what the gateway-config repository actually versions (so a repo never silently
 fills with SQLite databases and log files), and answering from the gateway
 itself which projects are in git at all.
 
-It also stops git being a thing you only do by hand. A branch can come back
-down onto the gateway on a schedule, or the moment it moves on GitHub, without
+It also stops git being a thing you only do by hand. A release or a branch can
+come down onto the gateway on a schedule, or the moment it is published, without
 anyone opening a Designer.
 
 ## What it looks like
@@ -31,52 +31,28 @@ deleted resource has no tree node of its own to mark.
 
 ![Change badges in the Designer's Project Browser](docs/images/project-browser-badges.png)
 
-The gateway's Versioning page decides what config-as-code covers. The tree is
-rooted at `config/`, because that is the only thing the repository versions, and
-a ticked row is a versioned one. Rows struck through are excluded, with the
-`.gitignore` rule that excluded them shown on the right.
+The gateway's Versioning page decides what config-as-code covers. The **Git
+Ignore** tree is rooted at `config/`, because that is the only thing the
+repository versions, and a ticked row is a versioned one. Rows struck through
+are excluded, with the `.gitignore` rule that excluded them shown on the right.
 
-![The Excluded files tree on the gateway Versioning page](docs/images/excluded-files.png)
+![The Git Ignore tree on the gateway Versioning page](docs/images/excluded-files.png)
 
-Which projects are under version control is answerable from the gateway, without
-opening a Designer and without knowing where to look. Unversioned projects are
-listed too — "not in git" and "not on this gateway" are otherwise
-indistinguishable — and any of them can be initialised or given a remote here.
+The **Projects** tab lists every project on the gateway — unversioned ones too,
+since "not in git" and "not on this gateway" otherwise look the same — and how
+changes reach each one. **Edit** opens a drawer with the project's repository
+and its delivery.
 
-![The Projects tab listing every project and its git state](docs/images/versioning-projects.png)
+![The Projects tab: each project's repository, delivery and state](docs/images/versioning-projects.png)
 
-Automation brings changes onto this gateway — it never pushes. Scheduled sync
-fetches each project's remote on a timer and, when the tracked branch moves,
-either fast-forwards the project or replaces it whole, as a release does; the
-Actions runner lets a GitHub workflow install a release or
-pull the branch, with nothing reaching in. The event log below records every
-commit, push, pull, config auto-commit, sync and release, successes and failures
-alike — including an unattended one that refused or failed, and why.
+![A project's drawer: repository, then delivery](docs/images/versioning-project-drawer.png)
 
-![The Automation tab, with its event log](docs/images/versioning-automation.png)
+**Credentials** holds what the gateway authenticates with: to repositories, and
+from a GitHub Actions runner. **Logs** lists every commit, push, pull, sync and
+release since the gateway started, including an unattended one that failed, and
+why.
 
-A release does not need a person at the gateway. A GitHub Actions self-hosted
-runner on the host connects out to GitHub and is handed workflow jobs over that
-same connection, so a workflow can hand this gateway a release — or ask it to
-pull a branch — with nothing reaching in. Each project picks **Release** (a zip
-replaces the whole project, applied without a restart) or **Repo updates** (pull
-the branch). The tab holds the gateway's side — accept runner requests, the
-token, each project's delivery — and lists what GitHub's side
-needs: a runner with a label of its own, and a workflow that calls the gateway.
-It reports what is already in place (when a runner last called, which workflows
-the repository has) and gives a check to run from the runner machine.
-
-![The Actions runner tab: the gateway's settings, every project and its delivery, and what is already in place](docs/images/versioning-runner.png)
-
-Push or pull is a real choice, and the tab beside it makes it rather than
-implying one. git-sync — something polling the repository and writing the files
-down — is the pull model, and this module is already that when a project is set
-to Repo updates or given a scheduled sync. A runner is the push model, and the
-difference that usually decides it is that only push can build, gate, or report
-back. The same tab says which combinations need git credentials on the gateway:
-a release needs none at all.
-
-![The Which should I use? tab, comparing push against pull and listing which delivery modes need credentials](docs/images/versioning-automation-help.png)
+![The Logs tab](docs/images/versioning-logs.png)
 
 ## What it does
 
@@ -87,30 +63,26 @@ resources are badged in the Project Browser.
 
 **On the gateway** — versions `config/` as code, commits automatically when a
 config resource changes, shows history and per-commit diffs, restores a previous
-commit, and pushes to a remote. The Excluded files tree edits `.gitignore`
-directly: ticking a tracked path also untracks it, and rules you wrote by hand
-are never rewritten. Project repositories, the credentials they authenticate
-with, and the automation below are all managed from the same page.
+commit, and pushes to a remote. **Git Ignore** edits `.gitignore` directly:
+ticking a tracked path also untracks it, and rules you wrote by hand are never
+rewritten.
 
-**Automation** — pulls changes into this gateway; it never pushes. **Scheduled
-sync** fetches each project's remote on a timer and, when the tracked branch
-moves, brings the project up to it and requests a project scan — polling rather
-than a webhook, because GitHub cannot reach most gateways. **Pull** fast-forwards
-and refuses when the working tree is dirty rather than discarding someone's
-unsaved work. **Replace** makes the project match the branch exactly — dropped
-files go, a rollback is followed, the gateway's project properties stay — so a
-branch of built releases can deliver a release with no runner. For
-push-time delivery, the **Actions runner** tab generates the setup for a GitHub
-Actions self-hosted runner and opens two token-authenticated routes for it: one
-installs a release zip, replacing the project while keeping its git repository
-and project properties; the other pulls the branch. The module generates the
-configuration but never installs or runs the runner itself. Either tab's
-activity, plus every commit, push and pull from the Designer and every config
-auto-commit, lands in the **Event log** below both.
+**Delivery** — each project has one, chosen on the Projects tab. It only ever
+brings changes in; nothing is pushed.
 
-This build adds the gateway-side Versioning page, change badges, and inbound
-automation on top of upstream 2.1.0 — see [CHANGELOG.md](CHANGELOG.md) for the
-full list.
+| Delivery | What happens |
+| --- | --- |
+| Off (default) | Nothing. A runner delivery for it is refused. |
+| Runner — release | A GitHub workflow uploads a release zip; the project is replaced by it, keeping its git repository and project properties, with no restart. |
+| Runner — repo updates | A workflow asks the gateway to pull the branch. |
+| Sync — pull | The gateway fetches on a timer and fast-forwards; refused while anyone has local changes. |
+| Sync — replace | The gateway fetches on a timer and makes the project match the branch exactly, rollbacks included — pointed at a branch of built releases, it installs releases with no runner. |
+
+Runner deliveries need **Credentials → Runner access** switched on and a token.
+Repo updates and sync need the project to have a remote and a credential.
+
+This build adds the gateway-side Versioning page, change badges, and delivery on
+top of upstream 2.1.0 — see [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ## How to use it
 
@@ -122,40 +94,47 @@ bar, and either clone a remote or initialise locally. Commit from the **Commit**
 tab beside the Project Browser.
 
 Gateway config versioning: **Platform → System → Versioning → Initialize
-versioning**. Adjust what is covered under **Excluded files**.
+versioning**. Adjust what is covered under **Git Ignore**.
 
-Automation: **Platform → System → Versioning → Automation**. On **Scheduled
-sync**, press *Set up* for a project, choose Pull or Replace, a branch and an
-interval, then
-*Sync now* — the result appears in the Event log below.
+A project's delivery: **Versioning → Projects → Edit**, choose the delivery,
+Save. A project must exist on the gateway first — for its first release, create
+it empty under **Platform → Projects**.
 
-Push-time delivery: **Automation → Actions runner**.
+Runner delivery, once per gateway:
 
-1. Tick *Accept requests from a runner*, and Save. With the token below, this is
-   the whole of what the gateway acts on.
-2. Generate a token and save it in GitHub as the secret `IGNITION_SYNC_TOKEN` —
-   a repository secret, or an organisation secret if the plan allows it. **Keep
-   the value.** It is one token per gateway, shown once; every repository that
-   deploys here holds a copy of it, and generating a new one immediately stops
-   the old one working.
-3. Choose the project and **Release** or **Repo updates**. The gateway holds the
-   project to that choice and refuses the other route.
-4. Have a GitHub self-hosted runner on a machine that can reach this gateway,
-   with a label no other runner carries. GitHub's *New self-hosted runner* page
-   gives the commands; one runner per machine serves every repository it is
-   registered for. The tab says when a runner last called.
-5. Have a workflow call the gateway: its `runs-on` names that label, it
-   names the address the runner reaches this gateway on (for a runner on the
-   same Docker host, `http://localhost:` and the published port), and it
-   sends the token to `/data/git-config/runner-release` (Release) or
-   `/data/git-config/runner-sync` (Repo updates). Nothing happens until one
-   does. The tab lists the repository's workflows and which already call.
-6. Type that address beside the check at the bottom of the tab and run the test
-   command from the runner machine before relying on it.
+1. **Credentials → Runner access → Edit**: tick *Accept deliveries from a
+   runner* and *Generate a token*, Save. Copy the token — it is shown once, and
+   a new one stops the old one working. Save it as an Actions secret in every
+   repository that deploys here.
+2. A GitHub self-hosted runner on a machine that can reach the gateway, with a
+   label no other runner carries.
+3. A workflow whose `runs-on` names that label and which sends the token to the
+   gateway, at the address the runner reaches it on (for a runner on the same
+   Docker host, `http://localhost:` and the published port).
 
-*Which should I use?* on the same tab compares this with the pull model
-(Scheduled sync), and says which modes need git credentials on the gateway —
-Release needs none at all.
+Check the runner can reach the gateway before relying on it. With no zip, a
+correct address and token answer 400 "no release zip"; 401 is a wrong token,
+404 the runner switched off, 409 a project not set to Runner — release:
+
+```bash
+curl -sS -X POST -H 'Authorization: Bearer <token>' \
+  "http://<gateway>/data/git-config/runner-release?project=<project>"
+```
+
+```powershell
+try { Invoke-RestMethod -Method Post -Headers @{ Authorization = "Bearer <token>" } `
+  -Uri "http://<gateway>/data/git-config/runner-release?project=<project>" }
+catch { $_.Exception.Response.StatusCode.value__ }
+```
+
+A repo update is `POST /data/git-config/runner-sync` with the body
+`{"project": "<name>"}`.
+
+**Push or pull?** A runner (push) can build, gate and report success back to
+GitHub, and a release needs no git credentials on the gateway. Sync (pull) needs
+no machine beside the gateway, but the gateway needs a credential and a route to
+the git host, and whoever moved the branch learns nothing about whether it was
+applied — check Logs.
 
 To build from source you need `gradle.properties` with the signing block —
 copy it from `gradle.template.properties` and fill in the keystore details:

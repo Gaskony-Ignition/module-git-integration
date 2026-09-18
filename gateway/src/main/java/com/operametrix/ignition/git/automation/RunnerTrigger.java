@@ -3,6 +3,7 @@ package com.operametrix.ignition.git.automation;
 import com.inductiveautomation.ignition.common.gson.Gson;
 import com.inductiveautomation.ignition.common.gson.JsonObject;
 import com.inductiveautomation.ignition.gateway.dataroutes.RequestContext;
+import com.operametrix.ignition.git.managers.GitManager;
 import com.operametrix.ignition.git.managers.GitProjectManager;
 import com.operametrix.ignition.git.records.GitProjectsConfigRecord;
 import com.operametrix.ignition.git.records.GitRemoteCredentialsRecord;
@@ -13,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 /**
  * The route a runner calls in repo-updates mode: pull the named project's branch now.
@@ -35,7 +37,7 @@ public final class RunnerTrigger {
     }
 
     public static Object handle(RequestContext req, HttpServletResponse resp) {
-        String rejected = RunnerAuth.reject(req, resp, "sync");
+        String rejected = RunnerAuth.reject(req, resp);
         if (rejected != null) {
             return rejected;
         }
@@ -60,13 +62,12 @@ public final class RunnerTrigger {
             return "{\"error\":\"no project named\"}";
         }
 
-        // The mirror of the guard in ReleaseReceiver: a project set to receive releases is
-        // replaced wholesale by them, so pulling into it would fight the next release rather
-        // than add to it. Unset accepts either route, as it always has.
-        if (GitRunnerRecord.MODE_RELEASE.equals(GitRunnerRecord.get().chosenMode(project))) {
+        String refused = refuse(project, GitRunnerRecord.MODE_REPO);
+        if (refused != null) {
             resp.setStatus(HttpServletResponse.SC_CONFLICT);
-            return "{\"error\":\"'" + project + "' is set to receive releases, not repo updates."
-                    + " Change its delivery on the Actions runner tab, or call /runner-release.\"}";
+            JsonObject o = new JsonObject();
+            o.addProperty("error", refused);
+            return o.toString();
         }
 
         // A Scheduled sync record, when one exists, says which branch and credential to use.
@@ -132,5 +133,27 @@ public final class RunnerTrigger {
         s.setBranch(branch == null || branch.contains("(detached)") ? "" : branch);
         s.setIgnitionUser(user);
         return s;
+    }
+
+    /**
+     * Why the runner may not deliver to this project by {@code mode}, or null when it may. Both
+     * runner routes share it: delivery is opt-in, so the project must exist here and be set to
+     * exactly this delivery on the Projects tab.
+     */
+    static String refuse(String project, String mode) {
+        if (!project.matches("[A-Za-z0-9_-]+")) {
+            return "not a project name: letters, digits, _ and - only";
+        }
+        if (!Files.isRegularFile(
+                GitManager.getProjectFolderPath(project).resolve("project.json"))) {
+            return "there is no project '" + project + "' on this gateway; create it, then set its"
+                    + " delivery on the Projects tab";
+        }
+        if (!mode.equals(GitRunnerRecord.get().chosenMode(project))) {
+            return "'" + project + "' is not set to runner "
+                    + (GitRunnerRecord.MODE_RELEASE.equals(mode) ? "release" : "repo updates")
+                    + " on this gateway (Projects tab, Delivery)";
+        }
+        return null;
     }
 }

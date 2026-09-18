@@ -87,13 +87,27 @@ export interface ProjectStatus {
   error?: string | null;
   // The image-store folder this project versions. Empty (the default) means it versions none.
   imagePrefix?: string;
-  // What brings changes into this project, so the Projects tab can answer it without sending
-  // anyone to the Automation tab. `runnerMode` is "" when nobody has chosen one, which is a
-  // third state: the routes then accept either delivery.
-  runnerEnabled?: boolean;
-  runnerMode?: "release" | "repo" | "";
-  syncEnabled?: boolean;
-  syncIntervalSeconds?: number;
+  // How changes reach this project. "off" refuses the runner and runs no sync.
+  delivery: Delivery;
+  // False when the runner is switched off or has no token: a runner delivery then delivers nothing.
+  runnerEnabled: boolean;
+  // Sync settings, also used by a runner repo update.
+  syncBranch: string;
+  syncIntervalSeconds: number;
+  syncUser: string;
+}
+export type Delivery =
+  | "off"
+  | "runner-release"
+  | "runner-repo"
+  | "sync-pull"
+  | "sync-replace";
+export interface DeliveryReq {
+  project: string;
+  delivery: Delivery;
+  branch?: string;
+  intervalSeconds?: number;
+  ignitionUser?: string;
 }
 export interface ProjectsResp {
   projects: ProjectStatus[];
@@ -156,55 +170,9 @@ export interface IgnoreEditReq {
   text?: string;
 }
 
-export interface SyncSetting {
-  project: string;
-  enabled: boolean;
-  remoteName: string;
-  branch: string;
-  intervalSeconds: number;
-  ignitionUser: string;
-  // "pull": fast-forward, refused while anyone has local edits. "replace": the project is made
-  // to match the branch exactly, as a release replaces it — edits overwritten, rollbacks followed.
-  mode: "pull" | "replace";
-}
-export interface RunnerProject {
-  name: string;
-  hasRemote: boolean;
-  // "release": a release zip replaces the project. "repo": the gateway pulls the branch.
-  // "" when nobody has chosen, and both routes are then accepted.
-  mode: "release" | "repo" | "";
-}
-// A workflow file already in the project's repository. `callsGateway` is true when its text
-// mentions a runner route, so the page can say "this repo already deploys through the module"
-// instead of asking for a second workflow beside the one that does.
-export interface RunnerWorkflow {
-  path: string;
-  callsGateway: boolean;
-}
-export interface RunnerWorkflows {
-  // False when there is no working tree to look in — a release-mode project need not be a
-  // repository here at all, and "cannot check" is a different answer from "none".
-  detectable: boolean;
-  list: RunnerWorkflow[];
-}
 export interface RunnerConfig {
   enabled: boolean;
   hasToken: boolean;
-  projects: RunnerProject[];
-  // Empty until one is chosen; the check command then carries a placeholder.
-  project: string;
-  // What the routes would do today, default included.
-  mode: "release" | "repo";
-  // What somebody actually chose; "" when nobody has, and the routes then accept either. The
-  // radio must show this, not `mode`, or a default reads as a decision.
-  chosenMode: "release" | "repo" | "";
-  hasRemote: boolean;
-  // Epoch millis of the last authenticated runner call, 0 if none since the gateway started.
-  runnerSeen: { at: number; kind: string };
-  workflows: RunnerWorkflows;
-  testCommand: string;
-  // PowerShell form: Windows PowerShell 5.1 aliases curl to Invoke-WebRequest.
-  testCommandWindows: string;
 }
 export interface EventLogEntry {
   type: string;
@@ -219,8 +187,7 @@ export interface EventLogEntry {
   fileCount: number;
   timestamp: string;
 }
-export interface AutomationResp {
-  syncs: SyncSetting[];
+export interface EventsResp {
   log: EventLogEntry[];
   stats: {
     fired: number;
@@ -314,9 +281,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
       }
     >({
       query: (body) => ({ url: `${BASE}/project-init`, method: "POST", body }),
-      // The Runner tab lists every project and gates Repo updates on having a remote, so
-      // both of those go stale when a project gains a repository or a remote.
-      invalidatesTags: ["projects", "runner"],
+      invalidatesTags: ["projects"],
     }),
     setProjectRemote: builder.mutation<
       unknown,
@@ -327,9 +292,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      // The Runner tab lists every project and gates Repo updates on having a remote, so
-      // both of those go stale when a project gains a repository or a remote.
-      invalidatesTags: ["projects", "runner"],
+      invalidatesTags: ["projects"],
     }),
     snapshotProjectImages: builder.mutation<unknown, { project: string }>({
       query: (body) => ({
@@ -386,57 +349,34 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: () => ({ url: `${BASE}/deinit`, method: "POST", body: {} }),
       invalidatesTags: ["status", "history", "remote"],
     }),
-    getAutomation: builder.query<AutomationResp, void>({
-      query: () => `${BASE}/automation`,
-      providesTags: ["automation"],
+    getEvents: builder.query<EventsResp, void>({
+      query: () => `${BASE}/events`,
+      providesTags: ["events"],
     }),
-    clearAutomationLog: builder.mutation<unknown, void>({
-      query: () => ({
-        url: `${BASE}/automation-clear`,
-        method: "POST",
-        body: {},
-      }),
-      invalidatesTags: ["automation"],
+    clearEvents: builder.mutation<unknown, void>({
+      query: () => ({ url: `${BASE}/events-clear`, method: "POST", body: {} }),
+      invalidatesTags: ["events"],
     }),
-    saveSync: builder.mutation<unknown, SyncSetting>({
-      query: (body) => ({ url: `${BASE}/sync`, method: "POST", body }),
-      invalidatesTags: ["automation", "projects"],
+    saveDelivery: builder.mutation<unknown, DeliveryReq>({
+      query: (body) => ({ url: `${BASE}/delivery`, method: "POST", body }),
+      invalidatesTags: ["projects"],
     }),
     syncNow: builder.mutation<{ result: string }, { project: string }>({
       query: (body) => ({ url: `${BASE}/sync-now`, method: "POST", body }),
-      invalidatesTags: ["automation", "projects"],
+      invalidatesTags: ["events", "projects"],
     }),
-    // `gatewayUrl` only fills in the generated check command; the gateway stores no address.
-    getRunner: builder.query<
-      RunnerConfig,
-      { project?: string; gatewayUrl?: string }
-    >({
-      query: (args) => {
-        const q = new URLSearchParams();
-        Object.entries(args || {}).forEach(([k, v]) => {
-          if (v) q.set(k, String(v));
-        });
-        const s = q.toString();
-        return s ? `${BASE}/runner?${s}` : `${BASE}/runner`;
-      },
+    getRunner: builder.query<RunnerConfig, void>({
+      query: () => `${BASE}/runner`,
       providesTags: ["runner"],
     }),
-    // The response carries the new token exactly once, when generateToken is set. There is no
-    // endpoint that reads it back — a lost token is replaced, not recovered.
+    // The response carries a new token exactly once, when generateToken is set; nothing reads it
+    // back — a lost token is replaced, not recovered.
     saveRunner: builder.mutation<
       { hasToken: boolean; token?: string },
-      {
-        enabled?: boolean;
-        project?: string;
-        mode?: "release" | "repo";
-        generateToken?: boolean;
-        clearToken?: boolean;
-      }
+      { enabled?: boolean; generateToken?: boolean }
     >({
       query: (body) => ({ url: `${BASE}/runner`, method: "POST", body }),
-      // "projects" too: the Projects tab reports each project's delivery, so a change here makes
-      // its cached copy wrong. Without this it kept serving the old answer until a full page
-      // reload — switching tabs is not a remount, and the cache had not been invalidated.
+      // "projects" too: a runner delivery shows as inactive while the runner is off.
       invalidatesTags: ["runner", "projects"],
     }),
     setProjectCredential: builder.mutation<
@@ -485,9 +425,9 @@ export const {
   useGetTreeQuery,
   useGetIgnoreQuery,
   useSaveIgnoreMutation,
-  useGetAutomationQuery,
-  useClearAutomationLogMutation,
-  useSaveSyncMutation,
+  useGetEventsQuery,
+  useClearEventsMutation,
+  useSaveDeliveryMutation,
   useSyncNowMutation,
   useGetRunnerQuery,
   useSaveRunnerMutation,

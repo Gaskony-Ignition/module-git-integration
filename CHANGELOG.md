@@ -3,6 +3,24 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.5.0] - 2026-09-18
+
+### Changed
+- **Delivery is set per project, on the Projects tab, and is opt-in.** Each project has one
+  delivery — Off, Runner release, Runner repo updates, Sync pull or Sync replace — chosen in its
+  drawer with Save. **Off refuses the runner**: a release or repo update for a project not set to
+  it, or for a project that does not exist on the gateway, is answered 409. Before, the tick box
+  and token let a workflow install any project name it sent, including creating new ones.
+- **Upgrading keeps existing deliveries working:** once, projects the runner could already
+  deliver to (runner on, no choice made, no sync) are set to Runner release.
+- **The Automation tab is gone.** Runner access (the tick box and token) is a section of
+  Credentials; the event log is the Logs tab. The runner test command and the push-or-pull
+  comparison are in the README. History is now **Gateway History**, Excluded files **Git Ignore**.
+- Every edit opens a side drawer with Save and Cancel; nothing saves on a click.
+
+### Removed
+- The runner setup checklist, the workflow scan and "runner last called".
+
 ## [3.4.2] - 2026-09-18
 
 ### Fixed

@@ -116,6 +116,19 @@
   width: 100%;
 }
 
+// A section within a tab: its h4 and its buttons on one line.
+.gitcfg-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gitcfg-space-4);
+  margin: var(--gitcfg-space-5) 0 var(--gitcfg-space-2);
+
+  h4 {
+    margin: 0;
+  }
+}
+
 // One button row. `.is-end` right-aligns it, as a form footer.
 .gitcfg-actions {
   display: flex;
@@ -253,9 +266,8 @@ ul.gitcfg-hint {
   }
 }
 
-// --- Tab bars: the page's tabs, and the sub-tabs inside a tab ----------------------------
-.gitcfg-tabs,
-.gitcfg-subtabs {
+// --- Tab bar -------------------------------------------------------------------------------
+.gitcfg-tabs {
   display: flex;
   border-bottom: var(--gitcfg-border);
 
@@ -285,18 +297,7 @@ ul.gitcfg-hint {
   }
 }
 
-// Sub-tabs, not more top-level tabs: Scheduled sync and the Actions runner are one subject
-// (both pull changes in), and the event log below serves both.
-.gitcfg-subtabs {
-  gap: var(--gitcfg-space-1);
-  margin: var(--gitcfg-space-3) 0 var(--gitcfg-space-4);
-
-  button {
-    padding: 0.4rem var(--gitcfg-space-3);
-  }
-}
-
-// --- Excluded files tree -----------------------------------------------------------------
+// --- Git Ignore tree -----------------------------------------------------------------
 .gitcfg-tree {
   @include gitcfg-surface;
   // The tree scrolls inside its own box so the page header and the Save button stay put while a
@@ -385,19 +386,6 @@ ul.gitcfg-hint {
 }
 
 // --- Forms -----------------------------------------------------------------------------
-.gitcfg-cred-form {
-  @include gitcfg-surface;
-  padding: var(--gitcfg-space-4) 1.25rem;
-  margin-bottom: var(--gitcfg-space-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--gitcfg-space-3);
-
-  h4 {
-    margin: 0;
-  }
-}
-
 .gitcfg-cred-row {
   display: flex;
   gap: var(--gitcfg-space-5);
@@ -427,18 +415,6 @@ ul.gitcfg-hint {
 
   input {
     margin: 0;
-  }
-}
-
-// Two fields that belong together read as one row until the drawer gets narrow.
-.gitcfg-auto-pair {
-  display: flex;
-  gap: var(--gitcfg-space-3);
-  flex-wrap: wrap;
-
-  > * {
-    flex: 1 1 16rem;
-    min-width: 0;
   }
 }
 
@@ -502,25 +478,7 @@ ul.gitcfg-hint {
   text-overflow: ellipsis;
 }
 
-// --- Automation --------------------------------------------------------------------------
-.gitcfg-auto-stats {
-  display: flex;
-  gap: var(--gitcfg-space-3);
-  font-size: var(--gitcfg-text-sm);
-  color: var(--neutral-60);
-  white-space: nowrap;
-
-  .is-bad {
-    color: var(--error);
-  }
-}
-
-.gitcfg-auto-log {
-  margin-top: var(--gitcfg-space-5);
-  border-top: var(--gitcfg-border);
-  padding-top: var(--gitcfg-space-3);
-}
-
+// --- Runner token --------------------------------------------------------------------------
 // Copyable blocks scroll rather than wrap — a wrapped command is one a reader cannot trust they
 // copied whole.
 .gitcfg-snippet {
@@ -569,37 +527,5 @@ ul.gitcfg-hint {
 
   strong {
     color: var(--warning-dark);
-  }
-}
-
-// The OS picker for the check command: sub-tabs sitting tight on the snippet they switch.
-.gitcfg-os {
-  margin: var(--gitcfg-space-2) 0 var(--gitcfg-space-3);
-
-  .gitcfg-subtabs {
-    margin: 0 0 0.35rem;
-  }
-}
-
-// A cross-reference that reads as prose rather than as another button to press.
-.gitcfg-linkish {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: var(--primary);
-  cursor: pointer;
-  text-decoration: underline;
-}
-
-.gitcfg-help {
-  max-width: 60rem;
-
-  table {
-    margin-bottom: var(--gitcfg-space-3);
-  }
-
-  td:first-child {
-    white-space: nowrap;
   }
 }

@@ -6,11 +6,14 @@ import {
   AddCredentialReq,
   useAddCredentialMutation,
   useGetCredentialsQuery,
+  useGetRunnerQuery,
   useGetSecretProvidersQuery,
   useRemoveCredentialMutation,
+  useSaveRunnerMutation,
 } from "./GitConfig.service";
 import { errorToast } from "./errors";
 import { selectValue } from "./selectValue";
+import SettingsDrawer from "./SettingsDrawer";
 
 // Credentials are per Ignition user and are what a project repository authenticates with. They
 // could only be created from the Designer's setup wizard, which puts them behind the thing they
@@ -22,9 +25,31 @@ type Mode = "inline" | "reference";
 const Credentials = () => {
   const { data, isFetching } = useGetCredentialsQuery();
   const { data: providers } = useGetSecretProvidersQuery();
-  const [add, { isLoading: adding }] = useAddCredentialMutation();
+  const [add] = useAddCredentialMutation();
   const [remove] = useRemoveCredentialMutation();
+  const { data: runner } = useGetRunnerQuery();
+  const [saveRunner] = useSaveRunnerMutation();
   const toasts = useToastNotifications();
+
+  // Runner access: the gateway-wide switch and token the runner authenticates with.
+  const [runnerOpen, setRunnerOpen] = React.useState(false);
+  const [accept, setAccept] = React.useState(false);
+  const [newToken, setNewToken] = React.useState(false);
+  // Shown once after it is generated; the gateway cannot return it again.
+  const [issued, setIssued] = React.useState<string | null>(null);
+  const openRunner = () => {
+    setAccept(runner?.enabled ?? false);
+    setNewToken(!runner?.hasToken);
+    setRunnerOpen(true);
+  };
+  const submitRunner = async () => {
+    const res = await saveRunner({
+      enabled: accept,
+      generateToken: newToken,
+    }).unwrap();
+    if (res.token) setIssued(res.token);
+    toasts.notifySuccess("Runner access saved");
+  };
 
   const [open, setOpen] = React.useState(false);
   const [kind, setKind] = React.useState<Kind>("SSH");
@@ -62,7 +87,7 @@ const Credentials = () => {
           ? password !== ""
           : providerName !== "" && secretName !== "");
 
-  const save = () => {
+  const save = async () => {
     let body: AddCredentialReq;
     if (kind === "SSH") {
       body =
@@ -94,16 +119,10 @@ const Credentials = () => {
               secretName,
             };
     }
-    add(body)
-      .unwrap()
-      .then(() => {
-        // The secret is cleared from component state the moment it is stored, so a left-open
-        // form is not a copy of the key sitting in the browser.
-        reset();
-        setOpen(false);
-        toasts.notifySuccess("Credential saved");
-      })
-      .catch(errorToast(toasts, "Could not save the credential"));
+    await add(body).unwrap();
+    // Cleared the moment it is stored, so the closed drawer holds no copy of the secret.
+    reset();
+    toasts.notifySuccess("Credential saved");
   };
 
   const del = (type: Kind, id: number, label: string) => {
@@ -121,21 +140,30 @@ const Credentials = () => {
         <div>
           <h3>Credentials</h3>
           <p>
-            SSH keys and HTTPS credentials for the repositories this gateway
-            authenticates with. They belong to your Ignition user, and a project
-            repository picks one when its remote is set — so create them here
-            first, then set the remote from the Designer or the Projects tab.
+            What this gateway authenticates with: to repositories, and from a
+            runner.
           </p>
         </div>
+      </div>
+
+      <div className="gitcfg-section-head">
+        <h4>Repositories</h4>
         <div className="gitcfg-actions">
-          <Button colorClass="primary" onClick={() => setOpen(!open)}>
-            {open ? "Cancel" : "Add credential"}
+          <Button colorClass="primary" onClick={() => setOpen(true)}>
+            Add credential
           </Button>
         </div>
       </div>
 
-      {open ? (
-        <div className="gitcfg-cred-form">
+      <SettingsDrawer
+        open={open}
+        title="Add credential"
+        onClose={() => setOpen(false)}
+        onSave={save}
+        saveDisabled={!ready}
+        errorTitle="Could not save the credential"
+      >
+        <>
           {/*
             Radio is a radio GROUP: it takes a `radios` array and maps over it. Used as a single
             radio with `label`/`checked` it reads `radios.map` on undefined and takes the whole
@@ -242,25 +270,14 @@ const Credentials = () => {
               />
             </>
           )}
-
-          <div className="gitcfg-actions is-end">
-            <Button
-              colorClass="primary"
-              disabled={!ready || adding}
-              onClick={save}
-            >
-              {adding ? "Saving…" : "Save credential"}
-            </Button>
-          </div>
-        </div>
-      ) : null}
+        </>
+      </SettingsDrawer>
 
       {isFetching ? (
         <Loading isLoading={true} />
       ) : rows.length === 0 ? (
         <p className="gitcfg-empty">
-          No credentials yet. A local-only repository needs none; add one when a
-          project has to reach a remote.
+          None yet. Needed only when a project pulls from a remote.
         </p>
       ) : (
         <div className="gitcfg-table-scroll">
@@ -291,8 +308,90 @@ const Credentials = () => {
           </table>
         </div>
       )}
+
+      <div className="gitcfg-section-head">
+        <h4>Runner access</h4>
+        <div className="gitcfg-actions">
+          <Button colorClass="secondary" onClick={openRunner}>
+            Edit
+          </Button>
+        </div>
+      </div>
+      <p className="gitcfg-hint">
+        {runner?.enabled ? (
+          <span className="gitcfg-ok">Accepting runner deliveries</span>
+        ) : (
+          <span className="gitcfg-off">Off</span>
+        )}
+        {" · "}
+        {runner?.hasToken ? "token set" : "no token"}
+      </p>
+      {issued ? (
+        <div className="gitcfg-token-once">
+          <strong>Copy this token now — it is not shown again.</strong>
+          <Snippet text={issued} />
+        </div>
+      ) : null}
+
+      <SettingsDrawer
+        open={runnerOpen}
+        title="Runner access"
+        onClose={() => setRunnerOpen(false)}
+        onSave={submitRunner}
+        errorTitle="Could not save runner access"
+      >
+        <label className="gitcfg-check">
+          <input
+            type="checkbox"
+            checked={accept}
+            onChange={(e) => setAccept(e.target.checked)}
+          />
+          <span>Accept deliveries from a runner</span>
+        </label>
+        <label className="gitcfg-check">
+          <input
+            type="checkbox"
+            checked={newToken}
+            onChange={(e) => setNewToken(e.target.checked)}
+          />
+          <span>
+            {runner?.hasToken
+              ? "Generate a new token — the current one stops working"
+              : "Generate a token"}
+          </span>
+        </label>
+        <p className="gitcfg-hint">
+          Each project still needs a runner delivery on the Projects tab.
+        </p>
+      </SettingsDrawer>
     </div>
   );
 };
 
 export default Credentials;
+
+/** The token, with a copy button: retyping one is how it breaks. */
+function Snippet({ text }: { text: string }) {
+  const toasts = useToastNotifications();
+  return (
+    <div className="gitcfg-snippet">
+      <div className="gitcfg-snippet-bar">
+        <span>Runner token</span>
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard
+              ?.writeText(text)
+              .then(() => toasts.notifySuccess("Copied"))
+              .catch(() =>
+                toasts.notifyError("Could not copy — select the text instead")
+              );
+          }}
+        >
+          Copy
+        </button>
+      </div>
+      <pre>{text}</pre>
+    </div>
+  );
+}

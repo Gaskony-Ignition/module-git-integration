@@ -16,6 +16,7 @@ import com.operametrix.ignition.git.GatewayHook;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.List;
 
 /**
  * Gateway-level singleton holding the GitHub Actions runner configuration.
@@ -49,9 +50,13 @@ public class GitRunnerRecord {
      * a resource saved by an earlier version decodes with that key ignored. {@code gatewayUrl}
      * went the same way in 3.4.0: it only filled in the check command, and a saved copy on the
      * gateway was mistaken for the address deploys use.
+     *
+     * <p>{@code optIn} arrived in 3.5.0, when delivery became opt-in: a project with no mode is
+     * refused. A record saved earlier decodes it as false, which is what triggers the one-time
+     * {@link #migrateToOptIn} so projects already receiving releases keep receiving them.
      */
     public record Config(boolean enabled, SecretConfig token, String ignitionUser,
-                         String modes) {}
+                         String modes, boolean optIn) {}
 
     public static final ResourceType TYPE = new ResourceType(MODULE_ID, "git-runner");
 
@@ -77,6 +82,8 @@ public class GitRunnerRecord {
     private SecretConfig token;
     private String ignitionUser = "";
     private JsonObject modes = new JsonObject();
+    // True for anything created from 3.5.0 on; only a record saved earlier starts false.
+    private boolean optIn = true;
 
     public GitRunnerRecord() {
     }
@@ -85,6 +92,7 @@ public class GitRunnerRecord {
         this.enabled = c.enabled();
         this.token = c.token();
         this.ignitionUser = c.ignitionUser() == null ? "" : c.ignitionUser();
+        this.optIn = c.optIn();
         try {
             JsonObject m = c.modes() == null || c.modes().isBlank()
                     ? null : new Gson().fromJson(c.modes(), JsonObject.class);
@@ -130,19 +138,10 @@ public class GitRunnerRecord {
         this.ignitionUser = v == null ? "" : v.trim();
     }
 
-    /** The project's delivery mode; a project nobody has chosen for receives releases. */
-    public String getMode(String project) {
-        String m = chosenMode(project);
-        return m == null ? MODE_RELEASE : m;
-    }
-
     /**
-     * The mode somebody actually chose for this project, or null if nobody has.
-     *
-     * <p>The routes enforce the choice — a release upload to a project set to Repo updates is
-     * refused rather than silently doing the other thing — and this is what keeps that from
-     * breaking an install upgraded from a version with no modes at all. Unset means "either",
-     * which is exactly how those gateways behave today; enforcement begins when a choice is made.
+     * The runner delivery enabled for this project — {@link #MODE_RELEASE} or {@link #MODE_REPO} —
+     * or null when the runner may not deliver to it at all. Delivery is opt-in: the routes refuse a
+     * project with no mode.
      */
     public String chosenMode(String project) {
         if (project == null || !modes.has(project)) {
@@ -157,6 +156,39 @@ public class GitRunnerRecord {
             return;
         }
         modes.addProperty(project, MODE_REPO.equals(mode) ? MODE_REPO : MODE_RELEASE);
+    }
+
+    public void clearMode(String project) {
+        if (project != null) {
+            modes.remove(project);
+        }
+    }
+
+    /**
+     * Once, on a record saved before 3.5.0: projects the runner could already deliver to — every
+     * project with no mode, while the runner was on — are set to Release, so upgrading does not
+     * make the next deploy fail. Projects with a scheduled sync are left alone. Afterwards
+     * {@code optIn} is true, so turning a project Off later is never undone.
+     */
+    public static void migrateToOptIn(List<String> projects) {
+        Handler h = handler;
+        if (h == null || h.findResource(NAME).isEmpty()) {
+            return;
+        }
+        GitRunnerRecord r = get();
+        if (r.optIn) {
+            return;
+        }
+        if (r.enabled) {
+            for (String p : projects) {
+                GitSyncRecord sync = GitSyncRecord.findByProject(p);
+                if (r.chosenMode(p) == null && (sync == null || !sync.isEnabled())) {
+                    r.setMode(p, MODE_RELEASE);
+                }
+            }
+        }
+        r.optIn = true;
+        r.save();
     }
 
     /** Generates a new token, stores it encrypted, and returns the plaintext for one-time display. */
@@ -208,7 +240,7 @@ public class GitRunnerRecord {
 
     public void save() {
         try {
-            Config c = new Config(enabled, token, getIgnitionUser(), modes.toString());
+            Config c = new Config(enabled, token, getIgnitionUser(), modes.toString(), optIn);
             if (handler.findResource(NAME).isPresent()) {
                 handler.modify(NAME, c).join();
             } else {

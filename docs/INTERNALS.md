@@ -9,7 +9,7 @@ instructions and gotchas; this file is the lookup material it links to.
 Mounted in `GatewayHook.mountRouteHandlers`, under `/data/git-config/…`, not
 the RPC interface. Reads require `PermissionType.READ`, mutations `WRITE`,
 and mutations need an `X-CSRF-Token` fetched from `/csrf`. The one exception
-is `POST /runner-sync` — see Automation below.
+are the two runner routes — see Delivery below.
 
 | Area | Method + path |
 | --- | --- |
@@ -17,10 +17,10 @@ is `POST /runner-sync` — see Automation below.
 | Config-as-code | `POST /restore`, `/init`, `/deinit`, `/remote`, `/remote-remove`, `/remote-test`, `/push`, `/ignore`, `/update-from-remote` |
 | Projects & credentials | `GET /projects`, `/credentials` |
 | Projects & credentials | `POST /project-init`, `/project-remote`, `/project-credential`, `/project-images`, `/project-snapshot-images`, `/credentials`, `/credential-remove` |
-| Automation | `GET /automation`, `/runner` |
-| Automation | `POST /automation-clear`, `/sync`, `/sync-now`, `/runner`, `/runner-sync`, `/runner-release` |
+| Delivery & logs | `GET /events`, `/runner` |
+| Delivery & logs | `POST /delivery`, `/sync-now`, `/events-clear`, `/runner`, `/runner-sync`, `/runner-release` |
 
-`POST /runner-sync` is the one route with no permission check and no CSRF
+`POST /runner-sync` and `/runner-release` are the routes with no permission check and no CSRF
 token — a GitHub Actions workflow step has neither a gateway session nor a
 way to obtain one. It authenticates itself instead: `AccessControlStrategy.OPEN_ROUTE`,
 an `Authorization: Bearer` token compared with `MessageDigest.isEqual`, a
@@ -40,8 +40,8 @@ DTO façade over a `NamedResourceHandler` whose config is a nested Java
 | `GitRemoteCredentialsRecord` | Per (project, user, remote) `SshKeyId`/`HttpsCredentialId` FK. |
 | `GitUserSshKeyRecord` | User-level SSH key; secret is a `SecretConfig` (embedded-encrypted or Secret-Provider reference). Shared across projects. |
 | `GitConfigRemoteRecord` | Gateway-level singleton: the data-dir config repo's remote (URI, branch, credential FK). Manual push only. |
-| `GitSyncRecord` | Per-project scheduled inbound sync: remote, branch, interval, authenticating user. |
-| `GitRunnerRecord` | Gateway-level singleton: runner route on/off, bearer token (`SecretConfig`). Stores no address: the runner's is the workflow's. |
+| `GitSyncRecord` | Per-project sync: enabled, Pull/Replace, remote, branch, interval, authenticating user. Kept disabled for a runner repo update's branch and credential. |
+| `GitRunnerRecord` | Gateway-level singleton: runner on/off, bearer token (`SecretConfig`), per-project runner mode (release/repo — absent is Off), and `optIn` (the 3.5.0 migration has run). |
 | `GitUserHttpsCredentialRecord` | User-level HTTPS credential (host pattern, username, encrypted password). `HostPattern` is a picker label only — auth resolves via the FK, never a pattern match. |
 
 A one-time `records.legacy.GitLegacyImporter` migrates the old SimpleORM
@@ -56,9 +56,10 @@ deletes the resource types left over from removed features, both idempotent.
 | `DataDirGitManager` | The data-directory (config-as-code) repo: init, status, auto-commit, restore, push, remote. Serialised by one static `DATA_DIR_LOCK`. |
 | `ConfigAutoCommitter` | Listens for config changes and commits them; the only live notification surface (per-resource listeners on the config collection are never called). |
 | `GitProjectManager` / `GitTagManager` / `GitThemeManager` / `GitImageManager` | Per-project resource import, and gateway-resource snapshot (tags/themes/images) into the project tree. |
-| `SyncScheduler` | Per-project scheduled fetch + fast-forward; refuses a dirty tree or an unborn repo. |
-| `RunnerSetup` / `RunnerTrigger` | Generate the check command that proves a runner can reach the gateway; handle the authenticated pull request from the runner. |
-| `GitEvents` | Synchronous, log-only ring buffer (50 entries) behind the Automation event log; never throws or blocks the operation that fired it. |
+| `SyncScheduler` | Per-project scheduled fetch, then fast-forward (Pull) or reset to the branch (Replace). |
+| `RunnerAuth` / `RunnerTrigger` / `ReleaseReceiver` | Runner token check; the opt-in guard (`RunnerTrigger.refuse`); the repo-update and release routes. |
+| `IgnitionReformat` | Counts local changes by parsed JSON content, ignoring Ignition's rewrite of imported files. |
+| `GitEvents` | Synchronous, log-only ring buffer (50 entries) behind the Logs tab; never throws or blocks the operation that fired it. |
 
 ## Designer popups
 

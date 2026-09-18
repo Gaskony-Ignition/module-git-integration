@@ -69,7 +69,7 @@ public final class ReleaseReceiver {
     }
 
     public static Object handle(RequestContext req, HttpServletResponse resp) {
-        String rejected = RunnerAuth.reject(req, resp, "release");
+        String rejected = RunnerAuth.reject(req, resp);
         if (rejected != null) {
             return rejected;
         }
@@ -84,14 +84,12 @@ public final class ReleaseReceiver {
             resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             return error("name the project with ?project=, letters, digits, _ and - only");
         }
-        // A project deliberately set to Repo updates must not be replaced wholesale by a release.
-        // Refusing loudly beats installing it anyway: a workflow aimed at the wrong route would
-        // otherwise overwrite a project someone is pulling into, and nothing would say so. A
-        // project nobody has chosen for accepts either route, as it always has.
-        if (GitRunnerRecord.MODE_REPO.equals(GitRunnerRecord.get().chosenMode(project))) {
+        // Opt-in: only a project someone set to Runner release, and that exists here, may be
+        // replaced. A token alone once let a workflow create or overwrite any project it named.
+        String refused = RunnerTrigger.refuse(project, GitRunnerRecord.MODE_RELEASE);
+        if (refused != null) {
             resp.setStatus(HttpServletResponse.SC_CONFLICT);
-            return error("'" + project + "' is set to receive repo updates, not releases."
-                    + " Change its delivery on the Actions runner tab, or call /runner-sync.");
+            return error(refused);
         }
         if (!SyncScheduler.acquire(project)) {
             resp.setStatus(HttpServletResponse.SC_CONFLICT);
