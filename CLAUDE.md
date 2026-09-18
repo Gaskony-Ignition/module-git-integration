@@ -92,6 +92,10 @@ on Vision clients.
   blanks the page. `SelectInput` needs `values` (not `options`), and its
   `onChange` hands back MUI's event, not the value — sweep every form in a
   browser before releasing.
+- **Ignition rewrites the JSON it imports** (no final newline, escaped
+  apostrophes, `"parent": ""`, reordered `files`), so git sees those files
+  modified with identical content. Count changes through `IgnitionReformat`,
+  never raw `Status`, or Pull refuses for ever.
 - **Automation only pulls in; it never pushes.** Polling, not a webhook:
   GitHub cannot reach most gateways. Read `docs/AUTOMATION.md` before
   rebuilding an event bus or a webhook receiver.
