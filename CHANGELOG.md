@@ -3,6 +3,18 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.4.2] - 2026-09-18
+
+### Fixed
+- **Ignition's own reformatting no longer counts as local changes.** Importing a project makes
+  the gateway rewrite every `project.json` and `resource.json` in its own format — no final
+  newline, an apostrophe escaped, `"parent": ""` added, a resource's file list reordered — with
+  identical content. A repository written by anything but Ignition then showed every such file
+  modified straight after a clone or sync: the Projects tab reported dozens of uncommitted
+  changes, Replace reported overwriting them, and **Pull refused every sync from then on**. A
+  modified JSON file whose parsed content equals the commit's is now not a change, and Pull
+  restores those files before it merges.
+
 ## [3.4.1] - 2026-09-18
 
 ### Added

@@ -105,9 +105,8 @@ public class GitProjectManager {
                 remoteName = remotes.contains("origin") ? "origin" : remotes.iterator().next();
                 remoteUrl = git.getRepository().getConfig().getString("remote", remoteName, "url");
             }
-            var st = git.status().call();
-            int changes = st.getUntracked().size() + st.getModified().size() + st.getChanged().size()
-                    + st.getAdded().size() + st.getMissing().size() + st.getRemoved().size();
+            // Ignition's rewrite of files it imported is not an edit; see IgnitionReformat.
+            int changes = IgnitionReformat.realChanges(git.getRepository(), git.status().call()).size();
             return new ProjectStatus(name, title, true, branch, remoteName, remoteUrl, changes, null);
         } catch (Exception e) {
             logger.warn("Could not read the git state of project '" + name + "'", e);

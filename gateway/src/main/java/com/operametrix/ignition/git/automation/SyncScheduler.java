@@ -3,6 +3,7 @@ package com.operametrix.ignition.git.automation;
 import com.operametrix.ignition.git.GatewayHook;
 import com.operametrix.ignition.git.managers.GitManager;
 import com.operametrix.ignition.git.managers.GitProjectManager;
+import com.operametrix.ignition.git.managers.IgnitionReformat;
 import com.operametrix.ignition.git.records.GitSyncRecord;
 import org.eclipse.jgit.api.CreateBranchCommand;
 import org.eclipse.jgit.api.FetchCommand;
@@ -27,7 +28,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -169,12 +169,19 @@ public final class SyncScheduler {
             // was chosen to be authoritative, like a release, so it goes ahead and says so.
             if (!replace) {
                 Status status = git.status().call();
-                if (!status.isClean()) {
-                    String note = "local changes present (" + status.getUncommittedChanges().size()
+                Set<String> edits = IgnitionReformat.realChanges(repo, status);
+                if (!edits.isEmpty()) {
+                    String note = "local changes present (" + edits.size()
                             + " uncommitted); not pulling";
                     GitEvents.fire(GitEvent.of(GitEvent.SYNC).project(project).user(user)
                             .branch(branch).remote(remoteName).failure(note));
                     return note;
+                }
+                // What is left is Ignition's rewrite of files it imported, identical in content.
+                // Restore HEAD's bytes so the checkout and merge below see a clean tree.
+                Set<String> reformatted = IgnitionReformat.reformatted(repo, status);
+                if (!reformatted.isEmpty()) {
+                    git.checkout().addPaths(new ArrayList<>(reformatted)).call();
                 }
             }
 
@@ -278,8 +285,7 @@ public final class SyncScheduler {
         byte[] keptProps = Files.isRegularFile(props) ? Files.readAllBytes(props) : null;
 
         Status status = git.status().call();
-        Set<String> overwritten = new TreeSet<>(status.getUncommittedChanges());
-        overwritten.addAll(status.getUntracked());
+        Set<String> overwritten = IgnitionReformat.realChanges(repo, status);
         overwritten.remove(ReleaseReceiver.GLOBAL_PROPS);
 
         // Clean first so the checkout cannot trip over an edit, then move the branch itself —
