@@ -23,8 +23,7 @@ rm -rf build/moduleContent && ./gradlew build   # -> build/GitIntegration-<ver>.
 ```
 
 Clear `build/moduleContent` first: after a version bump it keeps the previous
-version's jars and the `.modl` ships both. A `clean build` can drop
-`certificates.p7b`. Prettier violations fail webpack — run
+version's jars and the `.modl` ships both. Prettier violations fail webpack — run
 `node_modules/.bin/prettier --write "src/**/*.{ts,tsx}"` in `web-ui/`.
 
 No automated tests: install the `.modl` and exercise the Designer and the
