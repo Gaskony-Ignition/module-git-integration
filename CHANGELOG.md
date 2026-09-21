@@ -3,6 +3,28 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.8.0] - 2026-09-21
+
+### Changed
+- **`.gitignore` is the only thing deciding what the config repository versions.** The module also
+  staged a hard-coded scope of `config/`, so a data-root file nothing ignored — `gateway.xml`,
+  `ignition.conf`, `modules.json` — was silently never committed, and the tree had to hide it.
+  Staging is now plain git. Upgrading adds explicit rules for those paths, so **the committed set
+  does not change**; tick any of them on the Git Ignore tab to start versioning it.
+- **The Git Ignore tree shows the whole data directory**, rooted where the repository is, with
+  `config/` expanded. Every row can be ticked.
+- **No more strikethrough.** A path that is not versioned is unticked and greyed, with its reason
+  on the right.
+- **Saving on the Git Ignore tab commits straight away.** The auto-committer only listens for
+  config *resource* changes, so a `.gitignore` edit used to sit uncommitted until something else
+  happened to commit.
+
+### Fixed
+- **A fine-grained token's scope is no longer guessed from `GET /user/repos`.** That endpoint
+  returns every public repository the account can see plus the granted private ones, so a token
+  scoped to one repository was reported as fifteen. The row now reports only what GitHub will
+  vouch for, and **Reaches** carries the measured truth.
+
 ## [3.7.0] - 2026-09-21
 
 ### Changed

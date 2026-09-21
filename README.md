@@ -32,11 +32,14 @@ deleted resource has no tree node of its own to mark.
 ![Change badges in the Designer's Project Browser](docs/images/project-browser-badges.png)
 
 The gateway's Versioning page decides what config-as-code covers, and carries
-the module's version under its title. The **Git Ignore** tree is rooted at
-`config/`, because that is the only thing the repository versions. A ticked row
-is versioned; a struck-through one is not, and says why on the right — its own
-`.gitignore` line, an inherited rule, or its parent folder. A legend above the
-tree spells the marks out.
+the module's version under its title. The **Git Ignore** tree shows the whole
+data directory, because that is what the repository sits in: a ticked row is
+versioned, an unticked one is greyed and says why on the right — its own
+`.gitignore` line, an inherited rule, or its parent folder. `.gitignore` is the
+only thing that decides, so anything listed can be ticked on. Runtime state —
+databases, logs, caches, and the per-project folders, which have their own
+repositories — is excluded by default, as are gateway files that are specific to
+one machine (`ignition.conf`, `modules.json`, `commissioning.json`).
 
 ![The Git Ignore tree on the gateway Versioning page](docs/images/excluded-files.png)
 
@@ -54,8 +57,9 @@ from a GitHub Actions runner. Each repository credential shows when its token
 expires, what it is allowed to touch, and which projects it can read or push —
 asked of the host on save, daily and on **Check**, since a token carries none of
 it. **Scope** answers a different question from **Reaches**: a classic token
-reaches every repository its account can, and is flagged for it, while a
-fine-grained one reports the repositories it was granted. A project whose
+reaches every repository its account can, and is flagged for it. GitHub will not
+report a fine-grained token's grants, so that row says so rather than guessing —
+**Reaches** is measured, not claimed. A project whose
 credential has expired, is refused, or cannot read its remote says so on the
 Projects tab, as does one expiring within 14 days. **Edit** replaces a token in
 place, so the projects using it stay linked.

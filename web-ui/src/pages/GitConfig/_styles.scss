@@ -373,9 +373,10 @@ ul.gitcfg-hint {
   cursor: default;
   white-space: nowrap;
 
-  &.is-excluded {
+  // Not versioned: greyed, with its checkbox unticked. A strikethrough read as "deleted" and
+  // made half the tree look broken.
+  &.is-muted {
     color: var(--neutral-60);
-    text-decoration: line-through;
   }
 }
 

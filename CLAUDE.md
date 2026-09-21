@@ -49,35 +49,33 @@ No Vision client scope.
   Java-serialization adapter.** The default serializer has no `Dataset`
   support, so without it every `Dataset`-returning RPC round-trips empty with
   no error.
-- **After any gateway-side project mutation (pull, checkout, init,
-  snapshot), the Designer must call `GitBaseAction.pullProjectFromGateway()`.**
-  It discards stale local edits via `DesignableProject.discardChanges`, then
-  reflectively calls `IgnitionDesigner.updateProject()`; without it gateway
-  changes never show.
-- **The config-as-code repo is rooted at the data directory**, with
-  `projects/` excluded from its `.gitignore` so the per-project repos are
-  never nested inside it.
+- **After any gateway-side project mutation (pull, checkout, init, snapshot),
+  the Designer must call `GitBaseAction.pullProjectFromGateway()`** — it
+  discards stale edits via `DesignableProject.discardChanges`, then reflectively
+  calls `IgnitionDesigner.updateProject()`, or gateway changes never show.
+- **The config-as-code repo is rooted at the data directory and `.gitignore` is
+  the only thing deciding what it versions** (3.8.0 — never reintroduce a
+  staging scope; a file nothing ignored was silently never committed).
+  `projects/` is excluded, so the per-project repos are never nested inside it.
 - **`ConfigAutoCommitter` (a `ResourceCollectionListener`) is the only live
-  config-change notification** — per-resource listeners are never notified.
-  Events within 2s coalesce into one commit; `commitLeftovers()` sweeps
-  changes made while the gateway was offline.
+  config-change notification** — per-resource listeners are never notified, and
+  a plain file write (`.gitignore`) is not one either, so that path commits for
+  itself. Events within 2s coalesce; `commitLeftovers()` sweeps offline changes.
 - **Restore resets the working tree to the target commit and keeps HEAD on the
   branch** (unlike the detaching checkout), then applies it via a settings
   rescan.
-- **`GITIGNORE_LINES` must ignore the SQLite sidecars `*-wal`/`*-shm`.**
-  Without them `initRepo`'s `git add .` races the tag value store and dies
-  with `FileNotFoundException`, so init never completes on a live gateway.
-- **Excluded-files tree semantics**: excluding a tracked path also runs
+- **`GITIGNORE_LINES` must ignore the SQLite sidecars `*-wal`/`*-shm`**, or
+  `git add .` races the tag value store and dies with `FileNotFoundException`,
+  so init never completes on a live gateway.
+- **Git Ignore tree semantics**: excluding a tracked path also runs
   `git rm --cached`; re-including under a glob appends a negation rather than
-  editing the glob (deleting `**/logs` to recover one file versions a
-  gigabyte); nothing under an excluded directory can be re-included, so that
-  row is read-only; a folder's tick is its children's roll-up, since a rule
-  can exclude a directory's contents but not the directory.
+  editing it (deleting `**/logs` to recover one file versions a gigabyte);
+  nothing under an excluded directory can be re-included, so that row is
+  read-only; a folder's tick is its children's roll-up, since a rule can
+  exclude a directory's contents but not the directory. Saving commits.
 - **Change badges are drawn by a `DotBorder`, not `addBadge`.** The tree's
   cell-renderer delegate stops painting added badges after the session's first
   commit; a border sidesteps it. Don't simplify this back.
-- **`PerspectiveNavNode`/`VisionModuleNode` report no resource path**, so a
-  change under them badges from the first resource-backed folder down.
 - **The platform's `TextInput`/`SelectInput`/`TextArea` render their `label`
   prop into an invisible legend.** Import the wrapped versions from
   `web-ui/src/pages/GitConfig/fields.tsx`, not from `../../webui`.
@@ -102,8 +100,6 @@ No Vision client scope.
   gateway's project properties.
 - **Runner routes read the raw query string**, never `getParameter`: Jetty
   would parse a large non-zip body as a form and 500.
-- **The gateway stores no runner address** (removed 3.4.0): where deploys go
-  belongs to the workflow.
 - **Styles: colour and weight from the platform tokens** (`--neutral-*`,
   `--primary`, `--success`, `--error`, `--warning-dark` for amber text);
   type, spacing, radius and the mono stack from the `--gitcfg-*` block at the

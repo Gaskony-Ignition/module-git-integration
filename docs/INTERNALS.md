@@ -53,7 +53,7 @@ deletes the resource types left over from removed features, both idempotent.
 | Class | Responsibility |
 | --- | --- |
 | `GitManager` | Core JGit operations: clone, fetch, pull, push, commit/amend, status, branch, checkout, diff, history, discard, revert, remote list. Every remote op requires an explicit credential FK — there is no other auth path. |
-| `DataDirGitManager` | The data-directory (config-as-code) repo: init, status, auto-commit, restore, push, remote. Serialised by one static `DATA_DIR_LOCK`. |
+| `DataDirGitManager` (3.8.0: no staging scope — `.gitignore` alone decides; `widenScopeOnce` adds the data-root rules to an older repository, guarded by the `.git-module-scope-widened` marker) | The data-directory (config-as-code) repo: init, status, auto-commit, restore, push, remote. Serialised by one static `DATA_DIR_LOCK`. |
 | `ConfigAutoCommitter` | Listens for config changes and commits them; the only live notification surface (per-resource listeners on the config collection are never called). |
 | `GitProjectManager` / `GitTagManager` / `GitThemeManager` / `GitImageManager` | Per-project resource import, and gateway-resource snapshot (tags/themes/images) into the project tree. |
 | `SyncScheduler` | Per-project scheduled fetch, then fast-forward (Pull) or reset to the branch (Replace). |

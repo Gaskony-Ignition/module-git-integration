@@ -152,6 +152,23 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     + " project's delivery on the Projects tab.", e);
         }
 
+        // 3.8.0 lets .gitignore alone decide what the config repository versions. Paths the old
+        // hard-coded scope skipped are added to the ignore file once, so the wider staging commits
+        // nothing new.
+        try {
+            List<String> added = DataDirGitManager.widenScopeOnce();
+            if (!added.isEmpty()) {
+                logger.info("Added {} data-root rules to .gitignore so widening the config"
+                        + " repository commits nothing new.", added.size());
+                GitEvents.fire(GitEvent.of("ignore").config()
+                        .message("Data-root paths added to .gitignore — the repository now"
+                                + " versions everything it does not exclude")
+                        .files(added).success());
+            }
+        } catch (Exception e) {
+            logger.error("Could not widen the config repository's scope; check the Git Ignore tab.", e);
+        }
+
         // Scheduled sync. Inert until a project has a sync record configured, so starting it
         // unconditionally costs one idle thread and keeps the wiring in one place.
         SyncScheduler.start();
@@ -1097,6 +1114,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                         stringList(body, "exclude"), stringList(body, "include"));
                 out.addProperty("untracked", untracked);
             }
+            // A .gitignore write is a plain file change, so ConfigAutoCommitter — which listens for
+            // config RESOURCE changes — never sees it. Without this the edit sat uncommitted until
+            // something else happened to commit, and a newly included file showed as "not yet
+            // committed" indefinitely.
+            DataDirGitManager.commitAllIfDirty("Updated .gitignore");
             out.addProperty("success", true);
             return out.toString();
         } catch (Exception e) {

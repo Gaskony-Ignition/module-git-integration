@@ -53,20 +53,16 @@ const FileIcon = () => (
  * loads a level at a time — a data directory carries history, logs and caches, and the biggest
  * directories in it are exactly the excluded ones.
  */
-// The repo covers config/ and nothing else, so the tree is rooted there rather than at the data
-// dir, which would otherwise bury the one versioned folder among dozens of rows of runtime state.
-const CONFIG_ROOT = "config";
+// Rooted at the data directory, so the tree is the gateway's real shape rather than the one folder
+// the repository happens to commit. Everything outside config/ is listed but cannot be ticked: the
+// repository only ever stages config/, so a tick there would promise a commit that never comes.
+const TREE_ROOT = "";
 
 const Row = ({ entry, depth, pending, onToggle }: RowProps) => {
-  // The top level of config/ is opened for you, since collapsed it is four folder names and no
-  // structure. Excluded folders stay shut — nothing under one can be re-included, so expanding
-  // them only adds greyed-out rows — and so do
-  // ones too large to have been summarised.
+  // config/ is opened for you: it is the only folder the repository commits, and collapsed it
+  // hides the whole point of the page. Everything else starts shut.
   const [open, setOpen] = React.useState(
-    depth === 0 &&
-      entry.directory &&
-      !entry.excluded &&
-      entry.childState !== "UNKNOWN"
+    depth === 0 && entry.path === "config"
   );
   const box = React.useRef<HTMLInputElement>(null);
 
@@ -93,9 +89,8 @@ const Row = ({ entry, depth, pending, onToggle }: RowProps) => {
     }
   }, [mixed]);
 
-  // Every struck-through row says why it is struck through. Showing the rule only when it was
-  // inherited left a row excluded by its own line looking arbitrary — half the tree with no reason
-  // given at all.
+  // Every unticked row says why. Showing the rule only when it was inherited left a row excluded
+  // by its own line looking arbitrary — half the tree with no reason given at all.
   const reason = locked
     ? "excluded with its parent"
     : entry.excluded && !entry.ownRule && entry.rule
@@ -144,7 +139,7 @@ const Row = ({ entry, depth, pending, onToggle }: RowProps) => {
           {entry.directory ? <FolderIcon /> : <FileIcon />}
         </span>
         <span
-          className={`gitcfg-tree-name${versioned ? "" : " is-excluded"}`}
+          className={`gitcfg-tree-name${versioned ? "" : " is-muted"}`}
           onClick={() => entry.directory && setOpen(!open)}
         >
           {entry.name}
@@ -287,20 +282,21 @@ const ExcludedFiles = () => {
         <div>
           <h3>Git Ignore</h3>
           <p>
-            What the config repository versions. Only <code>config/</code> is
-            versioned, so that is what the tree shows — the rest of the data
-            directory is runtime state. Everything unticked is listed in{" "}
-            <code>.gitignore</code>.
+            Everything in the gateway data directory. Ticked paths are versioned
+            in the config repository; unticked ones are listed in{" "}
+            <code>.gitignore</code>. Runtime state — databases, logs, caches and
+            the per-project folders — is excluded by default, and project
+            resources are versioned by their own repositories.
           </p>
           <ul className="gitcfg-legend">
             <li>
               <strong>Ticked</strong> — versioned.
             </li>
             <li>
-              <span className="gitcfg-tree-name is-excluded">
-                Struck through
+              <span className="gitcfg-tree-name is-muted">
+                Grey and unticked
               </span>{" "}
-              — not versioned, with the reason on the right.
+              — not versioned; the reason is on the right.
             </li>
             <li>
               <strong>Partly ticked</strong> — a folder with some of what is
@@ -349,7 +345,7 @@ const ExcludedFiles = () => {
       ) : (
         <div className="gitcfg-tree">
           <Children
-            path={CONFIG_ROOT}
+            path={TREE_ROOT}
             depth={0}
             pending={pending}
             onToggle={onToggle}

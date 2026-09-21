@@ -60,7 +60,6 @@ public class DataDirGitManager {
     private static final Object DATA_DIR_LOCK = new Object();
 
     /** Config-as-code lives under {@code config/}; the {@code .gitignore} sits at the repo root. */
-    private static final String[] SCOPE = { "config", ".gitignore" };
 
     /** Based on Inductive Automation's version-control-guide template, plus {@code projects/}. */
     private static final List<String> GITIGNORE_LINES = List.of(
@@ -100,8 +99,26 @@ public class DataDirGitManager {
             "projects/",
             "",
             "# Module-internal state at the data-dir root (not config), never versioned",
-            ".git-module-legacy-migrated"
+            ".git-module-legacy-migrated",
+            ".git-module-scope-widened",
+            "",
+            "# Data-root files the module refused to stage before 3.8.0. Listed explicitly so",
+            "# widening the repository to plain git semantics commits nothing new — tick any of",
+            "# them on the Git Ignore tab to start versioning it. Anchored: the data root only.",
+            "/gateway.xml",
+            "/gateway.xml_clean",
+            "/ignition.conf",
+            "/logback.xml",
+            "/log4j.properties",
+            "/commissioning.json",
+            "/redundancy.xml",
+            "/modules.json",
+            "/email-profiles/",
+            "/.context.tmp"
     );
+
+    /** Written once the data-root rules above have been added to an older repository's ignore file. */
+    private static final String WIDENED_MARKER = ".git-module-scope-widened";
 
     /** A single uncommitted config change. {@code type} ∈ ADDED | MODIFIED | DELETED | UNTRACKED. */
     public record ConfigChange(String path, String type) {}
@@ -152,7 +169,7 @@ public class DataDirGitManager {
     }
 
     /**
-     * Porcelain list of uncommitted config changes, scoped to {@link #SCOPE} (JGit honors
+     * Porcelain list of uncommitted config changes (JGit honors
      * {@code .gitignore}, so db/logs/keystore/projects never appear). JSON key-ordering-only
      * changes are suppressed via {@link GitManager#filterJsonOrderingChanges}.
      */
@@ -197,25 +214,58 @@ public class DataDirGitManager {
     }
 
     /**
-     * Stage the same paths {@link #scopedStatus} reports, so what gets committed is exactly what the
-     * page listed as changed. Staging "." instead committed anything outside {@code config/} that a
-     * .gitignore edit happened to re-include — silently, since the change list never showed it.
-     * {@code update} stages deletions of tracked files; the first pass adds new and modified ones.
+     * Stage everything the repository covers. JGit honours {@code .gitignore}, so that file is the
+     * only thing deciding what is versioned — the module used to stage a hard-coded scope as well,
+     * which meant a data-root file nothing ignored was still never committed, and the tree had to
+     * hide it. {@code update} stages deletions of tracked files; the first pass adds the rest.
      */
     private static void stageScope(Git git, boolean update) throws Exception {
-        var add = git.add().setUpdate(update);
-        for (String path : SCOPE) {
-            add = add.addFilepattern(path);
-        }
-        add.call();
+        git.add().setUpdate(update).addFilepattern(".").call();
     }
 
     private static Status scopedStatus(Git git) throws Exception {
-        var status = git.status();
-        for (String path : SCOPE) {
-            status = status.addPath(path);
+        return git.status().call();
+    }
+
+    /**
+     * Once, on a repository initialised before 3.8.0: add the data-root rules above, so widening
+     * the staging scope commits nothing that was not already committed. The marker file stops it
+     * running twice — otherwise a path the user deliberately ticked on would be re-ignored at the
+     * next restart.
+     *
+     * @return the rules added, empty when there was nothing to do
+     */
+    public static List<String> widenScopeOnce() {
+        synchronized (DATA_DIR_LOCK) {
+            if (!isInitialized() || Files.exists(dataDir().resolve(WIDENED_MARKER))) {
+                return List.of();
+            }
+            List<String> added = new ArrayList<>();
+            try {
+                Path gitignore = dataDir().resolve(".gitignore");
+                List<String> lines = Files.exists(gitignore)
+                        ? new ArrayList<>(Files.readAllLines(gitignore)) : new ArrayList<>();
+                for (String rule : GITIGNORE_LINES) {
+                    if (rule.isBlank() || rule.startsWith("#")) {
+                        continue;
+                    }
+                    if (lines.stream().noneMatch(l -> l.trim().equals(rule))) {
+                        appendManaged(lines, rule);
+                        added.add(rule);
+                    }
+                }
+                if (!added.isEmpty()) {
+                    writeIgnoreFile(String.join("\n", lines));
+                }
+                Files.writeString(dataDir().resolve(WIDENED_MARKER),
+                        "Data-root ignore rules added when this repository was widened to plain"
+                                + " git semantics (Git Integration 3.8.0).\n");
+            } catch (Exception e) {
+                logger.error("Could not widen the config repository's scope", e);
+                throw new RuntimeException(e);
+            }
+            return added;
         }
-        return status.call();
     }
 
     /**

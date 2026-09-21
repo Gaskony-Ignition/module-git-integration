@@ -228,14 +228,24 @@ public final class CredentialCheck {
     }
 
     /**
-     * A fine-grained token names the repositories it was granted. {@code /installation/repositories}
-     * answers for the token itself and says whether the grant is every repository or a list; older
-     * hosts refuse it, so a page of {@code /user/repos} is the fallback.
+     * A fine-grained token names the repositories it was granted, if GitHub will say so:
+     * {@code /installation/repositories} answers for the token itself and states whether the grant
+     * is every repository or a list.
+     *
+     * <p>There is deliberately no {@code /user/repos} fallback. That endpoint returns every public
+     * repository the account can see plus the granted private ones, so a token scoped to one
+     * repository reported fifteen — a number that is wrong is worse than no number. **Reaches**
+     * carries the measured truth instead.
      */
     private static Scope fineGrainedScope(String token) {
         try {
-            HttpResponse<String> r = send(API + "/installation/repositories?per_page=100", token);
-            if (r.statusCode() == 200) {
+            for (String url : new String[] {
+                    API + "/installation/repositories?per_page=100",
+                    API + "/user/installations/repositories?per_page=100" }) {
+                HttpResponse<String> r = send(url, token);
+                if (r.statusCode() != 200) {
+                    continue;
+                }
                 JsonObject body = new Gson().fromJson(r.body(), JsonObject.class);
                 List<String> repos = names(body == null ? null
                         : body.getAsJsonArray("repositories"));
@@ -246,17 +256,10 @@ public final class CredentialCheck {
                 return new Scope("fine-grained", all
                         ? "All repositories of " + owner(repos) : count(total), repos);
             }
-            HttpResponse<String> own = send(API + "/user/repos?per_page=100", token);
-            if (own.statusCode() == 200) {
-                List<String> repos = names(new Gson().fromJson(own.body(), JsonArray.class));
-                return new Scope("fine-grained",
-                        count(repos.size()) + (repos.size() == 100 ? "+" : ""), repos);
-            }
-            return new Scope("fine-grained", "Could not list the repositories it may touch",
-                    List.of());
+            return new Scope("fine-grained", "GitHub does not report its grants", List.of());
         } catch (Exception e) {
-            return new Scope("fine-grained", "Could not list the repositories it may touch — "
-                    + reason(e), List.of());
+            return new Scope("fine-grained", "GitHub does not report its grants — " + reason(e),
+                    List.of());
         }
     }
 
