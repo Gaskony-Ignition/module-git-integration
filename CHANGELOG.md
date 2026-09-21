@@ -3,6 +3,22 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.9.2] - 2026-09-21
+
+### Added
+- **Navigation for the Git Ignore tree.** A search box finds a file or folder anywhere under the
+  data directory (a walk, capped, that says so when it stops early); **Jump to** opens one
+  top-level folder on its own; **Show excluded** hides everything that is not versioned; and
+  **Expand** / **Collapse** open three levels of versioned folders or shut them all. Expand skips
+  excluded folders, so it never fetches `logs/` or `db/`.
+
+### Changed
+- **Credentials has its own Last checked column.** It was squeezed under the expiry date, where it
+  read as part of it. It shows the date too once the check is older than today.
+- **The Git Ignore explanation is a term/meaning grid**, not four legend entries flowed into one
+  line that read as a sentence.
+- **Table action buttons are spaced.** Check, Edit and Remove were touching.
+
 ## [3.8.0] - 2026-09-21
 
 ### Changed

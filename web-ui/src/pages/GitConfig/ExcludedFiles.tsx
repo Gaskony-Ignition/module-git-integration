@@ -1,24 +1,43 @@
 import React from "react";
 import { Button, Loading, TextArea, useToastNotifications } from "../../webui";
+import { SelectInput, TextInput } from "./fields";
 import {
   TreeEntry,
   useGetTreeQuery,
   useGetIgnoreQuery,
   useSaveIgnoreMutation,
+  useSearchTreeQuery,
 } from "./GitConfig.service";
 import { errorToast } from "./errors";
+import { selectValue } from "./selectValue";
 
 // A tick means "versioned". Pending edits are held here and sent as ONE request on Save, so a
 // session of ticking produces a single .gitignore write and a single auto-commit rather than one
 // per checkbox.
 type Pending = Map<string, boolean>; // path -> versioned?
 
-interface RowProps {
-  entry: TreeEntry;
-  depth: number;
+// Which folders are open, the filter, and the pending ticks — shared through context rather than
+// threaded down every level, because the tree is recursive and Expand/Collapse reach all of it.
+interface TreeState {
   pending: Pending;
   onToggle: (entry: TreeEntry, versioned: boolean) => void;
+  open: Set<string>;
+  setFolder: (path: string, open: boolean) => void;
+  openMany: (paths: string[]) => void;
+  showExcluded: boolean;
+  // Bumped by Expand. Each level opens its own folders once per bump, and the newly mounted
+  // children do the same, so one click cascades down to EXPAND_DEPTH.
+  expandGen: number;
 }
+
+const Ctx = React.createContext<TreeState>(null as unknown as TreeState);
+
+// How deep Expand goes. Every folder it opens is a request, and a data directory is deep — three
+// levels is enough to see the shape of config/ without fetching the whole gateway.
+const EXPAND_DEPTH = 3;
+
+// Below this a search matches most of the directory and is slower than scrolling.
+const MIN_QUERY = 2;
 
 const Chevron = ({ open }: { open: boolean }) => (
   <svg
@@ -48,22 +67,21 @@ const FileIcon = () => (
   </svg>
 );
 
-/**
- * One row plus, when expanded, its children. Each expanded folder runs its own query, so the tree
- * loads a level at a time — a data directory carries history, logs and caches, and the biggest
- * directories in it are exactly the excluded ones.
- */
-// Rooted at the data directory, so the tree is the gateway's real shape rather than the one folder
-// the repository happens to commit. Everything outside config/ is listed but cannot be ticked: the
-// repository only ever stages config/, so a tick there would promise a commit that never comes.
+// Rooted at the data directory: .gitignore alone decides what is versioned, so the tree is the
+// gateway's real shape and every row can be ticked.
 const TREE_ROOT = "";
 
-const Row = ({ entry, depth, pending, onToggle }: RowProps) => {
-  // config/ is opened for you: it is the only folder the repository commits, and collapsed it
-  // hides the whole point of the page. Everything else starts shut.
-  const [open, setOpen] = React.useState(
-    depth === 0 && entry.path === "config"
-  );
+interface RowProps {
+  entry: TreeEntry;
+  depth: number;
+  // Search results are a flat list: the row shows the full path and never expands.
+  flat?: boolean;
+}
+
+/** One row plus, when expanded, its children. */
+const Row = ({ entry, depth, flat }: RowProps) => {
+  const { pending, onToggle, open, setFolder } = React.useContext(Ctx);
+  const isOpen = !flat && open.has(entry.path);
   const box = React.useRef<HTMLInputElement>(null);
 
   const pendingState = pending.get(entry.path);
@@ -115,17 +133,16 @@ const Row = ({ entry, depth, pending, onToggle }: RowProps) => {
     ? "Versioned"
     : "Not yet versioned";
 
+  const toggleOpen = () => entry.directory && setFolder(entry.path, !isOpen);
+
   return (
     <>
       <div
         className={`gitcfg-tree-row${locked ? " is-locked" : ""}`}
         style={{ paddingLeft: `${depth * 1.25 + 0.5}rem` }}
       >
-        <span
-          className="gitcfg-tree-twisty"
-          onClick={() => entry.directory && setOpen(!open)}
-        >
-          {entry.directory ? <Chevron open={open} /> : null}
+        <span className="gitcfg-tree-twisty" onClick={toggleOpen}>
+          {entry.directory && !flat ? <Chevron open={isOpen} /> : null}
         </span>
         <input
           type="checkbox"
@@ -140,9 +157,9 @@ const Row = ({ entry, depth, pending, onToggle }: RowProps) => {
         </span>
         <span
           className={`gitcfg-tree-name${versioned ? "" : " is-muted"}`}
-          onClick={() => entry.directory && setOpen(!open)}
+          onClick={toggleOpen}
         >
-          {entry.name}
+          {flat ? entry.path : entry.name}
         </span>
         {reason ? (
           <span className="gitcfg-tree-rule" title={hint}>
@@ -153,72 +170,94 @@ const Row = ({ entry, depth, pending, onToggle }: RowProps) => {
           <span className="gitcfg-tree-rule">not yet committed</span>
         ) : null}
       </div>
-      {open ? (
-        <Children
-          path={entry.path}
-          depth={depth + 1}
-          pending={pending}
-          onToggle={onToggle}
-        />
-      ) : null}
+      {isOpen ? <Children path={entry.path} depth={depth + 1} /> : null}
     </>
   );
 };
 
-const Children = ({
-  path,
+const Note = ({
   depth,
-  pending,
-  onToggle,
+  error,
+  children,
 }: {
-  path: string;
   depth: number;
-  pending: Pending;
-  onToggle: (entry: TreeEntry, versioned: boolean) => void;
-}) => {
+  error?: boolean;
+  children: React.ReactNode;
+}) => (
+  <div
+    className={`gitcfg-tree-note${error ? " is-error" : ""}`}
+    style={{ paddingLeft: `${depth * 1.25 + 2.25}rem` }}
+  >
+    {children}
+  </div>
+);
+
+/**
+ * One directory level. Each expanded folder runs its own query, so the tree loads a level at a
+ * time — a data directory carries history, logs and caches, and the biggest directories in it are
+ * exactly the excluded ones.
+ */
+const Children = ({ path, depth }: { path: string; depth: number }) => {
+  const { showExcluded, expandGen, openMany } = React.useContext(Ctx);
   const { data, isFetching, error } = useGetTreeQuery(path);
-  if (isFetching) {
-    return (
-      <div
-        className="gitcfg-tree-note"
-        style={{ paddingLeft: `${depth * 1.25 + 2.25}rem` }}
-      >
-        Loading…
-      </div>
+
+  // Expand opens this level's folders, and each one that mounts repeats it — a cascade that stops
+  // at EXPAND_DEPTH. Excluded folders are skipped: logs/ and db/ are the large ones, and nothing
+  // in them can be re-included anyway.
+  React.useEffect(() => {
+    if (expandGen === 0 || !data || depth >= EXPAND_DEPTH) return;
+    openMany(
+      data.entries.filter((e) => e.directory && !e.excluded).map((e) => e.path)
     );
-  }
-  if (error) {
+  }, [expandGen, data, depth, openMany]);
+
+  if (isFetching) return <Note depth={depth}>Loading…</Note>;
+  if (error)
     return (
-      <div
-        className="gitcfg-tree-note is-error"
-        style={{ paddingLeft: `${depth * 1.25 + 2.25}rem` }}
-      >
+      <Note depth={depth} error>
         Could not read this folder
-      </div>
+      </Note>
     );
-  }
-  const entries = data ? data.entries : [];
-  if (!entries.length) {
-    return (
-      <div
-        className="gitcfg-tree-note"
-        style={{ paddingLeft: `${depth * 1.25 + 2.25}rem` }}
-      >
-        Empty folder
-      </div>
-    );
-  }
+
+  const all = data ? data.entries : [];
+  if (!all.length) return <Note depth={depth}>Empty folder</Note>;
+  const entries = showExcluded ? all : all.filter((e) => !e.excluded);
+  if (!entries.length)
+    return <Note depth={depth}>Nothing versioned in this folder</Note>;
   return (
     <>
       {entries.map((e) => (
-        <Row
-          key={e.path}
-          entry={e}
-          depth={depth}
-          pending={pending}
-          onToggle={onToggle}
-        />
+        <Row key={e.path} entry={e} depth={depth} />
       ))}
+    </>
+  );
+};
+
+/** Search results: a flat list of full paths, ticked the same way as the tree. */
+const SearchResults = ({ query }: { query: string }) => {
+  const { showExcluded } = React.useContext(Ctx);
+  const { data, isFetching, error } = useSearchTreeQuery(query);
+  if (isFetching) return <Note depth={0}>Searching…</Note>;
+  if (error)
+    return (
+      <Note depth={0} error>
+        Could not search
+      </Note>
+    );
+  const all = data ? data.entries : [];
+  const entries = showExcluded ? all : all.filter((e) => !e.excluded);
+  if (!entries.length) return <Note depth={0}>Nothing matches “{query}”</Note>;
+  return (
+    <>
+      {entries.map((e) => (
+        <Row key={e.path} entry={e} depth={0} flat />
+      ))}
+      {data && data.truncated ? (
+        <Note depth={0}>
+          Showing the first {all.length} matches — narrow the search to see the
+          rest.
+        </Note>
+      ) : null}
     </>
   );
 };
@@ -227,11 +266,44 @@ const ExcludedFiles = () => {
   const [pending, setPending] = React.useState<Pending>(new Map());
   const [source, setSource] = React.useState(false);
   const [draft, setDraft] = React.useState<string | null>(null);
+  // config/ is opened for you: collapsed, the page hides the folder it exists for.
+  const [open, setOpen] = React.useState<Set<string>>(new Set(["config"]));
+  const [showExcluded, setShowExcluded] = React.useState(true);
+  const [expandGen, setExpandGen] = React.useState(0);
+  const [typed, setTyped] = React.useState("");
+  const [query, setQuery] = React.useState("");
   const { data: ignore } = useGetIgnoreQuery();
+  const { data: root } = useGetTreeQuery(TREE_ROOT);
   const [save, { isLoading: saving }] = useSaveIgnoreMutation();
   const toasts = useToastNotifications();
 
-  const onToggle = (entry: TreeEntry, versioned: boolean) => {
+  // Debounced: every keystroke would otherwise walk the data directory.
+  React.useEffect(() => {
+    const t = setTimeout(() => setQuery(typed.trim()), 300);
+    return () => clearTimeout(t);
+  }, [typed]);
+
+  const setFolder = React.useCallback((path: string, isOpen: boolean) => {
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (isOpen) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  }, []);
+
+  const openMany = React.useCallback((paths: string[]) => {
+    setOpen((prev) => {
+      // Only a real change may set state here: this runs from an effect, and returning a new Set
+      // every time would re-render for ever.
+      if (paths.every((p) => prev.has(p))) return prev;
+      const next = new Set(prev);
+      paths.forEach((p) => next.add(p));
+      return next;
+    });
+  }, []);
+
+  const onToggle = React.useCallback((entry: TreeEntry, versioned: boolean) => {
     setPending((prev) => {
       const next = new Map(prev);
       // Ticking a row back to the state git is already in is not an edit — drop it, so Save
@@ -246,7 +318,7 @@ const ExcludedFiles = () => {
       }
       return next;
     });
-  };
+  }, []);
 
   const exclude: string[] = [];
   const include: string[] = [];
@@ -276,35 +348,56 @@ const ExcludedFiles = () => {
       .catch(errorToast(toasts, "Could not save exclusions"));
   };
 
+  const folders = (root ? root.entries : []).filter((e) => e.directory);
+  const searching = query.length >= MIN_QUERY;
+
+  const state: TreeState = {
+    pending,
+    onToggle,
+    open,
+    setFolder,
+    openMany,
+    showExcluded,
+    expandGen,
+  };
+
   return (
     <div>
       <div className="gitcfg-page-head">
         <div>
           <h3>Git Ignore</h3>
           <p>
-            Everything in the gateway data directory. Ticked paths are versioned
-            in the config repository; unticked ones are listed in{" "}
-            <code>.gitignore</code>. Runtime state — databases, logs, caches and
-            the per-project folders — is excluded by default, and project
-            resources are versioned by their own repositories.
+            Everything in the gateway data directory. Ticking a path versions it
+            in the config repository; unticking it adds a line to{" "}
+            <code>.gitignore</code>.
           </p>
+          <p>
+            Runtime state — databases, logs, caches and the per-project folders
+            — is excluded by default, and project resources are versioned by
+            their own repositories.
+          </p>
+          {/* A term/description grid, not a run-on line: four legend entries flowed inline read as
+              one sentence with stray bold in it. */}
           <ul className="gitcfg-legend">
             <li>
-              <strong>Ticked</strong> — versioned.
+              <span className="gitcfg-legend-term">Ticked</span>
+              <span>Versioned.</span>
             </li>
             <li>
-              <span className="gitcfg-tree-name is-muted">
-                Grey and unticked
-              </span>{" "}
-              — not versioned; the reason is on the right.
+              <span className="gitcfg-legend-term is-muted">
+                Unticked and grey
+              </span>
+              <span>
+                Not versioned — the reason is at the right of the row.
+              </span>
             </li>
             <li>
-              <strong>Partly ticked</strong> — a folder with some of what is
-              inside it excluded.
+              <span className="gitcfg-legend-term">Partly ticked</span>
+              <span>A folder with some of what is inside it excluded.</span>
             </li>
             <li>
-              <strong>not yet committed</strong> — versioned, but not in a
-              commit yet.
+              <span className="gitcfg-legend-term">not yet committed</span>
+              <span>Versioned, but not in a commit yet.</span>
             </li>
           </ul>
         </div>
@@ -343,14 +436,62 @@ const ExcludedFiles = () => {
           <Loading isLoading={true} />
         )
       ) : (
-        <div className="gitcfg-tree">
-          <Children
-            path={TREE_ROOT}
-            depth={0}
-            pending={pending}
-            onToggle={onToggle}
-          />
-        </div>
+        <Ctx.Provider value={state}>
+          <div className="gitcfg-tree-bar">
+            <TextInput
+              label="Search"
+              placeholder="Name of a file or folder"
+              value={typed}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setTyped(e.target.value)
+              }
+            />
+            <SelectInput
+              label="Jump to"
+              value=""
+              values={folders.map((f) => ({ label: f.name, value: f.path }))}
+              onChange={(e: unknown) => {
+                const path = selectValue(e);
+                if (!path) return;
+                setTyped("");
+                setQuery("");
+                setOpen(new Set([path]));
+              }}
+            />
+            <label className="gitcfg-check">
+              <input
+                type="checkbox"
+                checked={showExcluded}
+                onChange={(e) => setShowExcluded(e.target.checked)}
+              />
+              <span>Show excluded</span>
+            </label>
+            <div className="gitcfg-actions">
+              <Button
+                colorClass="secondary"
+                disabled={searching}
+                title={`Opens the versioned folders, ${EXPAND_DEPTH} levels deep`}
+                onClick={() => setExpandGen((g) => g + 1)}
+              >
+                Expand
+              </Button>
+              <Button
+                colorClass="secondary"
+                disabled={searching}
+                onClick={() => setOpen(new Set())}
+              >
+                Collapse
+              </Button>
+            </div>
+          </div>
+          <div className="gitcfg-tree">
+            {searching ? (
+              <SearchResults query={query} />
+            ) : (
+              <Children path={TREE_ROOT} depth={0} />
+            )}
+          </div>
+        </Ctx.Provider>
       )}
     </div>
   );

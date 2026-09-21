@@ -326,6 +326,7 @@ const Credentials = () => {
                 <th>Expires</th>
                 <th>Scope</th>
                 <th>Reaches</th>
+                <th>Last checked</th>
                 <th />
               </tr>
             </thead>
@@ -345,6 +346,7 @@ const Credentials = () => {
                   <td>{expiry(c)}</td>
                   <td>{scope(c)}</td>
                   <td>{reach(c)}</td>
+                  <td>{checked(c)}</td>
                   <td className="gitcfg-table-act">
                     <Button
                       colorClass="secondary"
@@ -449,33 +451,22 @@ const ddmmyyyy = (iso: string) => iso.split("-").reverse().join("/");
 
 const hhmm = (at: number) => new Date(at).toTimeString().slice(0, 5);
 
-// A GitHub token's expiry, with when it was last asked. Amber within 14 days, matching the
-// Projects tab's warning. A failure is shown in place of the date: "could not ask" and "nothing to
-// report" rendered as the same dash, which made a working check look broken.
+// A GitHub token's expiry. Amber within 14 days, matching the Projects tab's warning. A failure is
+// shown in place of the date: "could not ask" and "nothing to report" rendered as the same dash,
+// which made a working check look broken.
 function expiry(c: CredentialOption) {
   const k = c.check;
   if (!k) return <span className="gitcfg-off">Checking…</span>;
-  const when = (
-    <span className="gitcfg-reach">checked {hhmm(k.checkedAt)}</span>
-  );
-  const cell = (body: React.ReactNode) => (
-    <>
-      {body}
-      {when}
-    </>
-  );
   if (k.rejected)
-    return cell(
-      <span className="gitcfg-err">Rejected — expired or revoked</span>
-    );
+    return <span className="gitcfg-err">Rejected — expired or revoked</span>;
   if (k.error)
-    return cell(
+    return (
       <span className="gitcfg-err" title={k.error}>
         Could not check — {k.error}
       </span>
     );
   if (!k.expires)
-    return cell(
+    return (
       <span
         className="gitcfg-off"
         title="Only a GitHub token reports an expiry"
@@ -483,16 +474,30 @@ function expiry(c: CredentialOption) {
         —
       </span>
     );
-  if (k.expires === "never") return cell("No expiry");
+  if (k.expires === "never") return "No expiry";
   const days = Math.ceil(
     (new Date(`${k.expires}T00:00:00`).getTime() - Date.now()) / DAY
   );
   const text = `${ddmmyyyy(k.expires)} (${
     days <= 0 ? "expired" : `${days} ${days === 1 ? "day" : "days"}`
   })`;
-  if (days <= 0) return cell(<span className="gitcfg-err">{text}</span>);
-  if (days <= 14) return cell(<span className="gitcfg-dirty">{text}</span>);
-  return cell(text);
+  if (days <= 0) return <span className="gitcfg-err">{text}</span>;
+  if (days <= 14) return <span className="gitcfg-dirty">{text}</span>;
+  return text;
+}
+
+// When the host was last asked. The time alone is only honest on the day it happened — a daily
+// check that stopped running would otherwise read as this morning's.
+function checked(c: CredentialOption) {
+  const k = c.check;
+  if (!k) return <span className="gitcfg-off">—</span>;
+  const at = new Date(k.checkedAt);
+  const today = new Date().toDateString() === at.toDateString();
+  return today
+    ? hhmm(k.checkedAt)
+    : `${at.getDate().toString().padStart(2, "0")}/${(at.getMonth() + 1)
+        .toString()
+        .padStart(2, "0")} ${hhmm(k.checkedAt)}`;
 }
 
 // What the token is allowed to touch at all. A classic token reaches every repository its account

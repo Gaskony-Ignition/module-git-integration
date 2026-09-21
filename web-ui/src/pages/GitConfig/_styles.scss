@@ -198,15 +198,33 @@ ul.gitcfg-hint {
 }
 
 // What a tick, a struck-through row and the right-hand column mean, above the Git Ignore tree.
+// Two columns of term + meaning. Flowed inline the four entries wrapped into one long line that
+// read as a sentence, so the terms have their own column and the rows line up.
 .gitcfg-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--gitcfg-space-1) var(--gitcfg-space-4);
-  margin: 0 0 var(--gitcfg-space-2);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: var(--gitcfg-space-1) var(--gitcfg-space-5);
+  margin: var(--gitcfg-space-2) 0;
   padding: 0;
   list-style: none;
   color: var(--neutral-70);
   font-size: var(--gitcfg-text-sm);
+
+  li {
+    display: flex;
+    gap: var(--gitcfg-space-2);
+  }
+}
+
+.gitcfg-legend-term {
+  flex: 0 0 8.5rem;
+  font-weight: var(--font-weight-bold);
+  color: var(--neutral-90);
+
+  &.is-muted {
+    font-weight: inherit;
+    color: var(--neutral-50);
+  }
 }
 
 // The module version, under the page title on every tab.
@@ -317,13 +335,39 @@ ul.gitcfg-hint {
 }
 
 // --- Git Ignore tree -----------------------------------------------------------------
+// Search, jump-to, the excluded filter and Expand/Collapse, on one row above the tree.
+.gitcfg-tree-bar {
+  display: flex;
+  // The two fields carry a label above them, so bottom edges are what line up, not centres.
+  align-items: flex-end;
+  gap: var(--gitcfg-space-3);
+  margin-bottom: var(--gitcfg-space-2);
+
+  // The platform fields grow to their container otherwise, and two of them fill the row.
+  > .gitcfg-field {
+    flex: 0 0 16rem;
+    // The drawer margin would sit the fields 12px above everything else on the row.
+    margin-bottom: 0;
+  }
+
+  // Matched to the input height so the tick, the fields and the buttons share one bottom edge.
+  > .gitcfg-check {
+    height: 2rem;
+  }
+
+  // Expand/Collapse sit at the far end, away from the controls that change what is listed.
+  > .gitcfg-actions {
+    margin-left: auto;
+  }
+}
+
 .gitcfg-tree {
   @include gitcfg-surface;
   // The tree scrolls inside its own box so the page header and the Save button stay put while a
   // deep folder is being explored, but it is sized to its content. max-height keeps the scrolling
   // for a deep tree without a void under a shallow one; min-height stops a two-row tree
   // collapsing to a sliver.
-  max-height: calc(100vh - 21rem);
+  max-height: calc(100vh - 24rem);
   min-height: 12rem;
   overflow: auto;
   padding: var(--gitcfg-space-1) 0;
@@ -467,6 +511,12 @@ ul.gitcfg-hint {
   width: 1%;
   white-space: nowrap;
   padding-right: 0 !important;
+
+  // The platform buttons carry no margin of their own, so side by side they touch. A margin, not
+  // flex + gap: `display: flex` on a `td` drops it out of the table and the columns stop aligning.
+  > * + * {
+    margin-left: var(--gitcfg-space-2);
+  }
 }
 
 // Wide tables scroll in place rather than making the whole page scroll sideways at 1366px.

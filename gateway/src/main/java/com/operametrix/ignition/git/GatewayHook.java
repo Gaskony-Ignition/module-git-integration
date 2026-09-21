@@ -396,6 +396,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 .requirePermission(PermissionType.READ).nocache()
                 .handler(this::handleTree).mount();
 
+        routes.newRoute("/tree-search").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.READ).nocache()
+                .handler(this::handleTreeSearch).mount();
+
         routes.newRoute("/ignore").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.READ).nocache()
                 .handler(this::handleGetIgnore).mount();
@@ -1066,17 +1070,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             String path = req.getParameter("path");
             JsonArray arr = new JsonArray();
             for (DataDirGitManager.TreeEntry e : DataDirGitManager.listTree(path)) {
-                JsonObject o = new JsonObject();
-                o.addProperty("name", e.name());
-                o.addProperty("path", e.path());
-                o.addProperty("directory", e.directory());
-                o.addProperty("excluded", e.excluded());
-                o.addProperty("tracked", e.tracked());
-                o.addProperty("rule", e.rule());
-                o.addProperty("ownRule", e.ownRule());
-                o.addProperty("childState", e.childState());
-                o.addProperty("reincludable", e.reincludable());
-                arr.add(o);
+                arr.add(treeJson(e));
             }
             JsonObject out = new JsonObject();
             out.addProperty("path", path == null ? "" : path);
@@ -1085,6 +1079,37 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         } catch (Exception e) {
             return error(resp, e);
         }
+    }
+
+    private Object handleTreeSearch(RequestContext req, HttpServletResponse resp) {
+        try {
+            DataDirGitManager.SearchResult res =
+                    DataDirGitManager.searchTree(req.getParameter("q"));
+            JsonArray arr = new JsonArray();
+            for (DataDirGitManager.TreeEntry e : res.entries()) {
+                arr.add(treeJson(e));
+            }
+            JsonObject out = new JsonObject();
+            out.add("entries", arr);
+            out.addProperty("truncated", res.truncated());
+            return out.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    private static JsonObject treeJson(DataDirGitManager.TreeEntry e) {
+        JsonObject o = new JsonObject();
+        o.addProperty("name", e.name());
+        o.addProperty("path", e.path());
+        o.addProperty("directory", e.directory());
+        o.addProperty("excluded", e.excluded());
+        o.addProperty("tracked", e.tracked());
+        o.addProperty("rule", e.rule());
+        o.addProperty("ownRule", e.ownRule());
+        o.addProperty("childState", e.childState());
+        o.addProperty("reincludable", e.reincludable());
+        return o;
     }
 
     private Object handleGetIgnore(RequestContext req, HttpServletResponse resp) {

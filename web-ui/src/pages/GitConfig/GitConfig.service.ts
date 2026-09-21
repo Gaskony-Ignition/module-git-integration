@@ -193,6 +193,11 @@ export interface TreeResp {
   path: string;
   entries: TreeEntry[];
 }
+export interface TreeSearchResp {
+  entries: TreeEntry[];
+  // The walk hit its budget or the result cap — the list is a partial answer, and says so.
+  truncated: boolean;
+}
 export interface IgnoreResp {
   text: string;
 }
@@ -379,6 +384,10 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: (path) => `${BASE}/tree?path=${encodeURIComponent(path || "")}`,
       providesTags: ["tree"],
     }),
+    searchTree: builder.query<TreeSearchResp, string>({
+      query: (q) => `${BASE}/tree-search?q=${encodeURIComponent(q)}`,
+      providesTags: ["tree"],
+    }),
     getIgnore: builder.query<IgnoreResp, void>({
       query: () => `${BASE}/ignore`,
       providesTags: ["ignore"],
@@ -468,6 +477,7 @@ export const {
   useDeinitMutation,
   useUpdateFromRemoteMutation,
   useGetTreeQuery,
+  useSearchTreeQuery,
   useGetIgnoreQuery,
   useSaveIgnoreMutation,
   useGetEventsQuery,

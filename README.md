@@ -39,7 +39,10 @@ versioned, an unticked one is greyed and says why on the right — its own
 only thing that decides, so anything listed can be ticked on. Runtime state —
 databases, logs, caches, and the per-project folders, which have their own
 repositories — is excluded by default, as are gateway files that are specific to
-one machine (`ignition.conf`, `modules.json`, `commissioning.json`).
+one machine (`ignition.conf`, `modules.json`, `commissioning.json`). A data
+directory is deep, so the tree has a search that finds a file or folder anywhere
+in it, a jump to any top-level folder, a filter that hides everything excluded,
+and Expand/Collapse.
 
 ![The Git Ignore tree on the gateway Versioning page](docs/images/excluded-files.png)
 
@@ -79,11 +82,11 @@ and credentials, commit from a dockable panel with per-resource selection, amend
 the last commit, browse history and diffs, and push or pull. Uncommitted
 resources are badged in the Project Browser.
 
-**On the gateway** — versions `config/` as code, commits automatically when a
-config resource changes, shows history and per-commit diffs, restores a previous
-commit, and pushes to a remote. **Git Ignore** edits `.gitignore` directly:
-ticking a tracked path also untracks it, and rules you wrote by hand are never
-rewritten.
+**On the gateway** — versions the data directory as code, commits automatically
+when a config resource changes, shows history and per-commit diffs, restores a
+previous commit, and pushes to a remote. **Git Ignore** edits `.gitignore`
+directly: unticking a tracked path also untracks it, and rules you wrote by hand
+are never rewritten.
 
 **Delivery** — each project has one, chosen on the Projects tab. It only ever
 brings changes in; nothing is pushed.

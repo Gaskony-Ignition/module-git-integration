@@ -952,6 +952,91 @@ public class DataDirGitManager {
         }
     }
 
+    /**
+     * How many entries a search may look at. A data directory holds logs, caches and tag history,
+     * so an unbounded walk would hang the page on exactly the gateways that need this most.
+     */
+    private static final int SEARCH_BUDGET = 40000;
+
+    /** How many matches a search returns before it stops looking. */
+    private static final int SEARCH_LIMIT = 200;
+
+    /** Search results, and whether the walk gave up before it finished. */
+    public record SearchResult(List<TreeEntry> entries, boolean truncated) {}
+
+    /**
+     * Find every entry whose name contains {@code query}, anywhere under the data directory.
+     * Breadth-first, so a match near the root is found before the walk spends its budget deep in
+     * {@code logs/}. Both budgets report as {@code truncated} rather than silently returning a
+     * partial list that looks complete.
+     */
+    public static SearchResult searchTree(String query) {
+        String needle = query == null ? "" : query.trim().toLowerCase(java.util.Locale.ROOT);
+        if (needle.isEmpty()) {
+            return new SearchResult(List.of(), false);
+        }
+        synchronized (DATA_DIR_LOCK) {
+            List<TreeEntry> out = new ArrayList<>();
+            boolean truncated = false;
+            try (Git git = GitManager.getGit(dataDir())) {
+                Repository repo = git.getRepository();
+                List<FastIgnoreRule> rules = ignoreRules();
+                java.util.Deque<String> queue = new java.util.ArrayDeque<>();
+                queue.add("");
+                int seen = 0;
+                while (!queue.isEmpty()) {
+                    String base = queue.poll();
+                    Path dir = base.isEmpty() ? dataDir() : dataDir().resolve(base);
+                    if (!Files.isDirectory(dir)) {
+                        continue;
+                    }
+                    try (var stream = Files.list(dir)) {
+                        for (Path p : stream.sorted(DIR_FIRST).toList()) {
+                            String name = p.getFileName().toString();
+                            if (name.equals(".git")) {
+                                continue;
+                            }
+                            if (++seen > SEARCH_BUDGET) {
+                                truncated = true;
+                                queue.clear();
+                                break;
+                            }
+                            boolean isDir = Files.isDirectory(p);
+                            String path = base.isEmpty() ? name : base + "/" + name;
+                            if (isDir) {
+                                queue.add(path);
+                            }
+                            if (!name.toLowerCase(java.util.Locale.ROOT).contains(needle)) {
+                                continue;
+                            }
+                            if (out.size() >= SEARCH_LIMIT) {
+                                truncated = true;
+                                queue.clear();
+                                break;
+                            }
+                            Decision d = decide(rules, path, isDir);
+                            FastIgnoreRule own = matchRule(rules, path, isDir);
+                            out.add(new TreeEntry(name, path, isDir, d.excluded(),
+                                    isTracked(repo, path, isDir),
+                                    d.rule() == null ? null : d.rule().toString(),
+                                    own != null && own == d.rule() && isOwnLine(own, path, isDir),
+                                    // The roll-up is a per-directory walk of its own; a flat result
+                                    // list has no folder tick to roll up into.
+                                    isDir ? "UNKNOWN" : null,
+                                    !d.fromAncestor()));
+                        }
+                    } catch (IOException e) {
+                        logger.debug("Skipped an unreadable folder while searching: " + base, e);
+                    }
+                }
+            } catch (Exception e) {
+                logger.error("Error searching the config tree for '" + query + "'", e);
+                throw new RuntimeException(e);
+            }
+            return new SearchResult(out, truncated);
+        }
+    }
+
     /** Folders before files, then case-insensitive by name — the order a file browser uses. */
     private static final java.util.Comparator<Path> DIR_FIRST =
             java.util.Comparator.<Path, Boolean>comparing(p -> !Files.isDirectory(p))
