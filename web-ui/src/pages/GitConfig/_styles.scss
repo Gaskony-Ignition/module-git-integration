@@ -197,6 +197,25 @@ ul.gitcfg-hint {
   font-family: var(--gitcfg-font-mono);
 }
 
+// What a tick, a struck-through row and the right-hand column mean, above the Git Ignore tree.
+.gitcfg-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gitcfg-space-1) var(--gitcfg-space-4);
+  margin: 0 0 var(--gitcfg-space-2);
+  padding: 0;
+  list-style: none;
+  color: var(--neutral-70);
+  font-size: var(--gitcfg-text-sm);
+}
+
+// The module version, under the page title on every tab.
+.gitcfg-version {
+  margin: 0 0 var(--gitcfg-space-2);
+  color: var(--neutral-60);
+  font-size: var(--gitcfg-text-sm);
+}
+
 // Status words. One colour per meaning, used by every tab.
 .gitcfg-ok {
   color: var(--success);

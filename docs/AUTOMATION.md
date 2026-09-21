@@ -20,10 +20,17 @@ route. Now both runner routes refuse (409) a project that does not exist on the
 gateway or is not set to that exact delivery. A new project's first release
 therefore needs the project created empty first.
 
-Upgrading to 3.5.0 runs `GitRunnerRecord.migrateToOptIn` once: with the runner
-on, every project with no mode and no enabled sync is set to Runner — release,
-so existing deploys keep working. The record's `optIn` flag then stops it
-running again, so a project set to Off later stays Off.
+**Nothing but the drawer ever sets a delivery.** 3.5.0 tried to spare gateways a
+re-pick by giving Runner — release to every project the runner could already
+have delivered to. It read the data directory, so unversioned projects were
+included, and the result was a table where every row claimed a delivery nobody
+had chosen — the opposite of opt-in. A stored delivery cannot be told apart from
+a chosen one, so 3.7.0 clears them once
+(`GitRunnerRecord.clearAssignedDeliveries`, plus disabling every sync record) on
+any gateway holding a runner resource, which are the only ones that could have
+been assigned. The record's `cleared` flag stops it happening twice, and
+`chosenMode` now reads by value, so a key left behind by an older version is not
+a delivery either.
 
 ## The reachability problem
 

@@ -9,6 +9,8 @@ export interface StatusResp {
   initialized: boolean;
   dirty: boolean;
   changes: ConfigChange[];
+  // The installed module's version, e.g. "3.7.0". Shown under the page title.
+  version?: string;
 }
 export interface Commit {
   hash: string;
@@ -55,6 +57,14 @@ export interface CredentialCheck {
   expires?: string | null;
   // The host refused the token outright: expired or revoked.
   rejected: boolean;
+  // Why the host could not be asked. Shown in place of the expiry.
+  error?: string | null;
+  // What the token may touch at all, which is not the same as what this gateway uses it for.
+  scope?: {
+    kind: "classic" | "fine-grained";
+    summary: string;
+    repos: string[];
+  } | null;
   reach: {
     target: string;
     read: boolean;

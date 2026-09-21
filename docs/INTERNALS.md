@@ -13,7 +13,7 @@ are the two runner routes — see Delivery below.
 
 | Area | Method + path |
 | --- | --- |
-| Config-as-code | `GET /status`, `/history`, `/commit-files`, `/file-diff`, `/remote`, `/secret-providers`, `/tree`, `/ignore` |
+| Config-as-code | `GET /status` (also carries the module version, shown under the page title), `/history`, `/commit-files`, `/file-diff`, `/remote`, `/secret-providers`, `/tree`, `/ignore` |
 | Config-as-code | `POST /restore`, `/init`, `/deinit`, `/remote`, `/remote-remove`, `/remote-test`, `/push`, `/ignore`, `/update-from-remote` |
 | Projects & credentials | `GET /projects`, `/credentials` |
 | Projects & credentials | `POST /project-init`, `/project-remote`, `/project-credential`, `/project-images`, `/project-snapshot-images`, `/credentials`, `/credential-remove`, `/credential-check` |
@@ -57,7 +57,7 @@ deletes the resource types left over from removed features, both idempotent.
 | `ConfigAutoCommitter` | Listens for config changes and commits them; the only live notification surface (per-resource listeners on the config collection are never called). |
 | `GitProjectManager` / `GitTagManager` / `GitThemeManager` / `GitImageManager` | Per-project resource import, and gateway-resource snapshot (tags/themes/images) into the project tree. |
 | `SyncScheduler` | Per-project scheduled fetch, then fast-forward (Pull) or reset to the branch (Replace). |
-| `CredentialCheck` | Per credential: GitHub token expiry (the `github-authentication-token-expiration` header on `GET /user`; 401 = rejected), and for each remote using it, read (fetch advertisement) and push (receive-pack advertisement — refused there without write, so nothing is sent). In memory; startup + 30 s, daily, on add, on attach, on **Check**. |
+| `CredentialCheck` (3.7.0) | Per credential: GitHub token expiry (the `github-authentication-token-expiration` header on `GET /user`; 401 = rejected), and for each remote using it, read (fetch advertisement) and push (receive-pack advertisement — refused there without write, so nothing is sent). Scope: a classic token's `x-oauth-scopes` header (every repository its account can reach) or a fine-grained token's granted repositories. Every failure is kept and shown rather than logged at debug. In memory; startup + 30 s, daily, on add, on attach, on **Check**. |
 | `RunnerAuth` / `RunnerTrigger` / `ReleaseReceiver` | Runner token check; the opt-in guard (`RunnerTrigger.refuse`); the repo-update and release routes. |
 | `IgnitionReformat` | Counts local changes by parsed JSON content, ignoring Ignition's rewrite of imported files. |
 | `GitEvents` | Synchronous, log-only ring buffer (50 entries) behind the Logs tab; never throws or blocks the operation that fired it. |

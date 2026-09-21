@@ -117,6 +117,10 @@ const GitConfig = () => {
     // all, and the credentials any of it authenticates with.
     return (
       <>
+        {/* Which build this gateway runs — the first thing any bug report needs. */}
+        {data && data.version ? (
+          <p className="gitcfg-version">Git Integration {data.version}</p>
+        ) : null}
         <div className="gitcfg-tabs" role="tablist">
           {TABS.map(([key, label]) => (
             <button

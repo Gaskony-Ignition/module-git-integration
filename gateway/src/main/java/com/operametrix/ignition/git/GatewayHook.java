@@ -142,13 +142,14 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         syncHandler.startup();
         runnerHandler.startup();
 
-        // Delivery became opt-in in 3.5.0: once, keep projects the runner already delivered to.
+        // 3.5.0 handed Release to every project folder on a gateway whose runner was on. A stored
+        // delivery is indistinguishable from a chosen one, so 3.7.0 forgets them all once and never
+        // assigns another.
         try {
-            GitRunnerRecord.migrateToOptIn(GitProjectManager.listProjectStatus().stream()
-                    .map(GitProjectManager.ProjectStatus::name).toList());
+            clearAssignedDeliveries();
         } catch (Exception e) {
-            logger.error("Could not carry runner delivery over to opt-in; set each project's"
-                    + " delivery on the Projects tab.", e);
+            logger.error("Could not clear the deliveries an earlier version assigned; check each"
+                    + " project's delivery on the Projects tab.", e);
         }
 
         // Scheduled sync. Inert until a project has a sync record configured, so starting it
@@ -387,11 +388,68 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 .handler(this::handleSaveIgnore).mount();
     }
 
+    /**
+     * The installed module's version, as the release carries it. The build appends a timestamp so
+     * every build counts as an upgrade, and the platform renders that as
+     * {@code 3.7.0 (b2026092110)} — neither the build number nor a fourth segment means anything to
+     * a reader, so both are trimmed off.
+     */
+    private String moduleVersion() {
+        try {
+            String full = context.getModuleManager().getActiveModules().stream()
+                    .filter(m -> GitRunnerRecord.MODULE_ID.equals(m.getId()))
+                    .findFirst()
+                    .map(m -> m.getVersion().toString())
+                    .orElse("");
+            int space = full.indexOf(' ');
+            String number = space > 0 ? full.substring(0, space) : full;
+            String[] parts = number.split("\\.");
+            return parts.length > 3
+                    ? String.join(".", parts[0], parts[1], parts[2]) : number;
+        } catch (Exception e) {
+            logger.debug("Could not read the module version.", e);
+            return "";
+        }
+    }
+
+    /**
+     * The one-time 3.7.0 clear: every runner mode forgotten and every scheduled sync disabled, so
+     * no project delivers until somebody picks its delivery. Reported on the Logs tab as well as
+     * the gateway log — a gateway that quietly stopped deploying would be worse than the problem.
+     */
+    private void clearAssignedDeliveries() {
+        List<String> runnerModes = GitRunnerRecord.clearAssignedDeliveries();
+        if (runnerModes == null) {
+            return;
+        }
+        List<String> syncs = new ArrayList<>();
+        for (GitSyncRecord sync : GitSyncRecord.listEnabled()) {
+            sync.setEnabled(false);
+            sync.save();
+            syncs.add(sync.getProject());
+        }
+        List<String> all = new ArrayList<>(runnerModes);
+        all.addAll(syncs);
+        if (all.isEmpty()) {
+            return;
+        }
+        logger.info("Cleared the deliveries an earlier version assigned ({}). Each project is Off"
+                + " until its delivery is chosen on the Projects tab.", String.join(", ", all));
+        GitEvents.fire(GitEvent.of("delivery").config()
+                .message("Deliveries an earlier version assigned were cleared — choose each"
+                        + " project's delivery on the Projects tab")
+                .files(all)
+                .success());
+    }
+
     private Object handleStatus(RequestContext req, HttpServletResponse resp) {
         try {
             JsonObject o = new JsonObject();
             boolean init = DataDirGitManager.isInitialized();
             o.addProperty("initialized", init);
+            // Every tab is drawn after this call, so it is what puts the module's version on the
+            // page. Nothing else the UI fetches is both unconditional and uncached.
+            o.addProperty("version", moduleVersion());
             JsonArray changes = new JsonArray();
             boolean dirty = false;
             if (init) {
@@ -576,6 +634,16 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         o.addProperty("account", r.account());
         o.addProperty("expires", r.expires());
         o.addProperty("rejected", r.rejected());
+        o.addProperty("error", r.error());
+        if (r.scope() != null) {
+            JsonObject scope = new JsonObject();
+            scope.addProperty("kind", r.scope().kind());
+            scope.addProperty("summary", r.scope().summary());
+            JsonArray repos = new JsonArray();
+            r.scope().repos().forEach(repos::add);
+            scope.add("repos", repos);
+            o.add("scope", scope);
+        }
         JsonArray reach = new JsonArray();
         for (CredentialCheck.Reach x : r.reach()) {
             JsonObject t = new JsonObject();
@@ -1086,9 +1154,16 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         try {
             GitRunnerRecord runner = GitRunnerRecord.get();
             boolean runnerOn = runner.isEnabled() && runner.hasToken();
+            List<GitProjectManager.ProjectStatus> projects = GitProjectManager.listProjectStatus();
+            // A mode outliving its project would be inherited by the next project created under
+            // that name, which is a delivery nobody chose.
+            if (!runner.pruneMissing(projects.stream()
+                    .map(GitProjectManager.ProjectStatus::name).toList()).isEmpty()) {
+                runner.save();
+            }
 
             JsonArray arr = new JsonArray();
-            for (GitProjectManager.ProjectStatus p : GitProjectManager.listProjectStatus()) {
+            for (GitProjectManager.ProjectStatus p : projects) {
                 JsonObject o = new JsonObject();
                 o.addProperty("name", p.name());
                 o.addProperty("title", p.title());

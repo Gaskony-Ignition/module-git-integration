@@ -15,6 +15,7 @@ import com.operametrix.ignition.git.GatewayHook;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
@@ -52,11 +53,15 @@ public class GitRunnerRecord {
      * gateway was mistaken for the address deploys use.
      *
      * <p>{@code optIn} arrived in 3.5.0, when delivery became opt-in: a project with no mode is
-     * refused. A record saved earlier decodes it as false, which is what triggers the one-time
-     * {@link #migrateToOptIn} so projects already receiving releases keep receiving them.
+     * refused. It is kept only so a record saved by 3.5.0 or 3.6.0 still decodes; nothing reads it.
+     *
+     * <p>{@code cleared} arrived in 3.7.0. 3.5.0 upgraded gateways by giving every project folder
+     * Release, which set deliveries nobody had chosen — including on projects that were not even
+     * versioned. A record saved before 3.7.0 decodes it as false, which triggers the one-time
+     * {@link #clearAssignedDeliveries}; from then on a delivery only ever comes from the drawer.
      */
     public record Config(boolean enabled, SecretConfig token, String ignitionUser,
-                         String modes, boolean optIn) {}
+                         String modes, boolean optIn, boolean cleared) {}
 
     public static final ResourceType TYPE = new ResourceType(MODULE_ID, "git-runner");
 
@@ -82,8 +87,10 @@ public class GitRunnerRecord {
     private SecretConfig token;
     private String ignitionUser = "";
     private JsonObject modes = new JsonObject();
-    // True for anything created from 3.5.0 on; only a record saved earlier starts false.
+    // Kept so a 3.5.0/3.6.0 record still round-trips; nothing reads it.
     private boolean optIn = true;
+    // True for anything created from 3.7.0 on; only a record saved earlier starts false.
+    private boolean cleared = true;
 
     public GitRunnerRecord() {
     }
@@ -93,6 +100,7 @@ public class GitRunnerRecord {
         this.token = c.token();
         this.ignitionUser = c.ignitionUser() == null ? "" : c.ignitionUser();
         this.optIn = c.optIn();
+        this.cleared = c.cleared();
         try {
             JsonObject m = c.modes() == null || c.modes().isBlank()
                     ? null : new Gson().fromJson(c.modes(), JsonObject.class);
@@ -147,8 +155,14 @@ public class GitRunnerRecord {
         if (project == null || !modes.has(project)) {
             return null;
         }
+        // By value, not by presence: a key left by an older version, or one holding anything but
+        // the two modes, is not a choice anyone made, and a delivery nobody chose is the bug 3.7.0
+        // exists to fix.
         String m = modes.get(project).getAsString();
-        return MODE_REPO.equals(m) ? MODE_REPO : MODE_RELEASE;
+        if (MODE_REPO.equals(m)) {
+            return MODE_REPO;
+        }
+        return MODE_RELEASE.equals(m) ? MODE_RELEASE : null;
     }
 
     public void setMode(String project, String mode) {
@@ -165,30 +179,46 @@ public class GitRunnerRecord {
     }
 
     /**
-     * Once, on a record saved before 3.5.0: projects the runner could already deliver to — every
-     * project with no mode, while the runner was on — are set to Release, so upgrading does not
-     * make the next deploy fail. Projects with a scheduled sync are left alone. Afterwards
-     * {@code optIn} is true, so turning a project Off later is never undone.
+     * Drops every runner mode for a project the gateway no longer has. A name left behind by a
+     * deleted project would otherwise hand its delivery to whatever is created under that name next.
+     *
+     * @return the names dropped
      */
-    public static void migrateToOptIn(List<String> projects) {
-        Handler h = handler;
-        if (h == null || h.findResource(NAME).isEmpty()) {
-            return;
-        }
-        GitRunnerRecord r = get();
-        if (r.optIn) {
-            return;
-        }
-        if (r.enabled) {
-            for (String p : projects) {
-                GitSyncRecord sync = GitSyncRecord.findByProject(p);
-                if (r.chosenMode(p) == null && (sync == null || !sync.isEnabled())) {
-                    r.setMode(p, MODE_RELEASE);
-                }
+    public List<String> pruneMissing(List<String> projects) {
+        List<String> gone = new ArrayList<>();
+        for (String name : new ArrayList<>(modes.keySet())) {
+            if (!projects.contains(name)) {
+                modes.remove(name);
+                gone.add(name);
             }
         }
-        r.optIn = true;
+        return gone;
+    }
+
+    /**
+     * Once, on a record saved before 3.7.0: forget every runner mode, so no project carries a
+     * delivery nobody picked. 3.5.0's upgrade handed Release to every project folder on a gateway
+     * whose runner was on, and a stored mode is indistinguishable from a chosen one — so the only
+     * honest fix is to clear them and let each be chosen again. The caller disables the scheduled
+     * syncs for the same reason. Afterwards {@code cleared} is true and nothing is ever assigned
+     * again.
+     *
+     * @return the projects whose runner delivery was cleared, or null if there was nothing to do
+     */
+    public static List<String> clearAssignedDeliveries() {
+        Handler h = handler;
+        if (h == null || h.findResource(NAME).isEmpty()) {
+            return null;
+        }
+        GitRunnerRecord r = get();
+        if (r.cleared) {
+            return null;
+        }
+        List<String> had = new ArrayList<>(r.modes.keySet());
+        r.modes = new JsonObject();
+        r.cleared = true;
         r.save();
+        return had;
     }
 
     /** Generates a new token, stores it encrypted, and returns the plaintext for one-time display. */
@@ -240,7 +270,8 @@ public class GitRunnerRecord {
 
     public void save() {
         try {
-            Config c = new Config(enabled, token, getIgnitionUser(), modes.toString(), optIn);
+            Config c = new Config(enabled, token, getIgnitionUser(), modes.toString(), optIn,
+                    cleared);
             if (handler.findResource(NAME).isPresent()) {
                 handler.modify(NAME, c).join();
             } else {

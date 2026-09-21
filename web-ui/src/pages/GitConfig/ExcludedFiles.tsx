@@ -93,6 +93,19 @@ const Row = ({ entry, depth, pending, onToggle }: RowProps) => {
     }
   }, [mixed]);
 
+  // Every struck-through row says why it is struck through. Showing the rule only when it was
+  // inherited left a row excluded by its own line looking arbitrary — half the tree with no reason
+  // given at all.
+  const reason = locked
+    ? "excluded with its parent"
+    : entry.excluded && !entry.ownRule && entry.rule
+    ? `excluded by ${entry.rule}`
+    : entry.excluded
+    ? "excluded here"
+    : entry.directory && entry.childState === "EXCLUDED"
+    ? "everything inside is excluded"
+    : null;
+
   const hint = locked
     ? `Excluded with its parent folder (${entry.rule || "inherited rule"})`
     : entry.excluded && !entry.ownRule
@@ -136,9 +149,9 @@ const Row = ({ entry, depth, pending, onToggle }: RowProps) => {
         >
           {entry.name}
         </span>
-        {entry.excluded && !entry.ownRule && entry.rule ? (
+        {reason ? (
           <span className="gitcfg-tree-rule" title={hint}>
-            {entry.rule}
+            {reason}
           </span>
         ) : null}
         {selfVersioned && !entry.tracked ? (
@@ -196,7 +209,7 @@ const Children = ({
         className="gitcfg-tree-note"
         style={{ paddingLeft: `${depth * 1.25 + 2.25}rem` }}
       >
-        Empty
+        Empty folder
       </div>
     );
   }
@@ -272,13 +285,32 @@ const ExcludedFiles = () => {
     <div>
       <div className="gitcfg-page-head">
         <div>
-          <h3>Excluded files</h3>
+          <h3>Git Ignore</h3>
           <p>
-            Ticked folders and files are versioned. Everything else is listed in{" "}
-            <code>.gitignore</code> and left out of the config repository. Only{" "}
-            <code>config/</code> is versioned, so that is what the tree shows —
-            the rest of the data directory is runtime state.
+            What the config repository versions. Only <code>config/</code> is
+            versioned, so that is what the tree shows — the rest of the data
+            directory is runtime state. Everything unticked is listed in{" "}
+            <code>.gitignore</code>.
           </p>
+          <ul className="gitcfg-legend">
+            <li>
+              <strong>Ticked</strong> — versioned.
+            </li>
+            <li>
+              <span className="gitcfg-tree-name is-excluded">
+                Struck through
+              </span>{" "}
+              — not versioned, with the reason on the right.
+            </li>
+            <li>
+              <strong>Partly ticked</strong> — a folder with some of what is
+              inside it excluded.
+            </li>
+            <li>
+              <strong>not yet committed</strong> — versioned, but not in a
+              commit yet.
+            </li>
+          </ul>
         </div>
         <div className="gitcfg-actions">
           <Button

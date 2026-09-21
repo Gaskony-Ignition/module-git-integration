@@ -63,7 +63,7 @@ No Vision client scope.
   changes made while the gateway was offline.
 - **Restore resets the working tree to the target commit and keeps HEAD on the
   branch** (unlike the detaching checkout), then applies it via a settings
-  rescan — no restart.
+  rescan.
 - **`GITIGNORE_LINES` must ignore the SQLite sidecars `*-wal`/`*-shm`.**
   Without them `initRepo`'s `git add .` races the tag value store and dies
   with `FileNotFoundException`, so init never completes on a live gateway.
@@ -73,13 +73,11 @@ No Vision client scope.
   gigabyte); nothing under an excluded directory can be re-included, so that
   row is read-only; a folder's tick is its children's roll-up, since a rule
   can exclude a directory's contents but not the directory.
-- **Change badges are drawn by a `DotBorder`, not `addBadge`.** The badge list
-  belongs to the tree's cell-renderer delegate, which stops painting added
-  badges after the first commit of a session; a border sidesteps it entirely.
-  Don't simplify this back.
+- **Change badges are drawn by a `DotBorder`, not `addBadge`.** The tree's
+  cell-renderer delegate stops painting added badges after the session's first
+  commit; a border sidesteps it. Don't simplify this back.
 - **`PerspectiveNavNode`/`VisionModuleNode` report no resource path**, so a
-  change under them badges from the first resource-backed folder down, not
-  the module root.
+  change under them badges from the first resource-backed folder down.
 - **The platform's `TextInput`/`SelectInput`/`TextArea` render their `label`
   prop into an invisible legend.** Import the wrapped versions from
   `web-ui/src/pages/GitConfig/fields.tsx`, not from `../../webui`.
@@ -92,10 +90,11 @@ No Vision client scope.
   apostrophes, `"parent": ""`, reordered `files`), so git sees those files
   modified with identical content. Count changes through `IgnitionReformat`,
   never raw `Status`, or Pull refuses for ever.
-- **Delivery is opt-in per project and only pulls in.** Off refuses the
-  runner; `POST /delivery` keeps the runner mode and sync record exclusive.
-  Polling, not a webhook: GitHub cannot reach most gateways. Read
-  `docs/AUTOMATION.md` first.
+- **Delivery is opt-in per project, only pulls in, and is only ever set from
+  the Projects drawer** — 3.5.0 assigned one on upgrade and 3.7.0 clears that
+  once; never add a migration that writes a delivery. Off refuses the runner;
+  `POST /delivery` keeps the runner mode and sync record exclusive. Polling,
+  not a webhook: GitHub cannot reach most gateways. Read `docs/AUTOMATION.md`.
 - **Drawers render in a portal outside `.gitcfg`**, so their body needs the
   `gitcfg` class or every `--gitcfg-*` token is undefined (`SettingsDrawer`).
 - **A release replaces the project folder but carries `.git` and
@@ -104,7 +103,7 @@ No Vision client scope.
 - **Runner routes read the raw query string**, never `getParameter`: Jetty
   would parse a large non-zip body as a form and 500.
 - **The gateway stores no runner address** (removed 3.4.0): where deploys go
-  belongs to the workflow, and a saved copy was mistaken for it.
+  belongs to the workflow.
 - **Styles: colour and weight from the platform tokens** (`--neutral-*`,
   `--primary`, `--success`, `--error`, `--warning-dark` for amber text);
   type, spacing, radius and the mono stack from the `--gitcfg-*` block at the

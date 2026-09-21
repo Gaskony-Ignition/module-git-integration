@@ -1,6 +1,7 @@
 package com.operametrix.ignition.git.managers;
 
 import com.inductiveautomation.ignition.common.gson.Gson;
+import com.inductiveautomation.ignition.common.gson.JsonArray;
 import com.inductiveautomation.ignition.common.gson.JsonObject;
 import com.operametrix.ignition.git.SshTransportConfigCallback;
 import com.operametrix.ignition.git.records.GitConfigRemoteRecord;
@@ -35,12 +36,13 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * What each stored credential can still do: when a GitHub token expires, and whether it can read
- * and push each remote that uses it. A fine-grained token is opaque, so both are asked of the host
- * — the same host the token is sent to on every pull, so nothing new sees it.
+ * What each stored credential can still do: when a GitHub token expires, what it is allowed to
+ * touch, and whether it can read and push each remote that uses it. A token is opaque, so all of it
+ * is asked of the host — the same host the token is sent to on every pull, so nothing new sees it.
  *
- * <p>Results are held in memory: they are re-derived at startup, daily, and whenever a credential
- * is added or checked by hand.
+ * <p>Results are held in memory: they are re-derived at startup, daily, and whenever a credential is
+ * added or checked by hand. Every failure is kept and shown, because "could not ask" and "nothing to
+ * report" look identical otherwise, and a check that silently reports nothing looks broken.
  */
 public final class CredentialCheck {
 
@@ -50,17 +52,36 @@ public final class CredentialCheck {
     public record Reach(String target, boolean read, boolean push, String error) {}
 
     /**
+     * What the token is allowed to touch at all, which is not the same question as which of this
+     * gateway's projects use it. {@code kind} ∈ classic | fine-grained; {@code summary} is the line
+     * shown, {@code repos} the names behind it.
+     */
+    public record Scope(String kind, String summary, List<String> repos) {}
+
+    /**
      * {@code expires}: ISO date, {@code "never"}, or null when the host cannot say (SSH keys, hosts
      * other than GitHub). {@code rejected}: the host refused the token outright — expired or revoked.
+     * {@code error}: why the host could not be asked, shown in place of the expiry.
      */
     public record Result(long checkedAt, String account, String expires, boolean rejected,
-                         List<Reach> reach) {}
+                         String error, Scope scope, List<Reach> reach) {}
+
+    /** One remote to probe: a project name (or "gateway config"), its URL and local repository. */
+    private record Target(String name, String url, String repoDir, String error) {}
 
     /** The GitHub header carrying a personal access token's expiry, e.g. "2026-12-01 00:00:00 UTC". */
     private static final String EXPIRY_HEADER = "github-authentication-token-expiration";
 
+    /** Present only for a classic token, which is how the two kinds are told apart. */
+    private static final String SCOPES_HEADER = "x-oauth-scopes";
+
+    private static final String API = "https://api.github.com";
+
     /** Within this many days an expiry is flagged on the Projects tab too. */
     public static final int WARN_DAYS = 14;
+
+    /** Seconds. A dead host must not hold a request thread, or the Check button looks hung. */
+    private static final int NET_TIMEOUT = 10;
 
     private static final Map<String, Result> results = new ConcurrentHashMap<>();
     private static ScheduledExecutorService executor;
@@ -128,12 +149,10 @@ public final class CredentialCheck {
     /** Checks one credential now and keeps the result. */
     public static Result check(String type, long id) {
         boolean ssh = "SSH".equalsIgnoreCase(type);
-        String account = null;
-        String expires = null;
-        boolean rejected = false;
         String sshKey = null;
         String user = null;
         String password = null;
+        String host = null;
 
         if (ssh) {
             GitUserSshKeyRecord k = GitUserSshKeyRecord.findById(id);
@@ -150,97 +169,229 @@ public final class CredentialCheck {
             }
             user = c.getUserName();
             password = c.getPassword();
-            if (isGitHub(c.getHostPattern())) {
-                try {
-                    HttpResponse<String> r = HttpClient.newBuilder()
-                            .connectTimeout(Duration.ofSeconds(10)).build()
-                            .send(HttpRequest.newBuilder(URI.create("https://api.github.com/user"))
-                                    .timeout(Duration.ofSeconds(15))
-                                    .header("Authorization", "Bearer " + password)
-                                    .header("Accept", "application/vnd.github+json")
-                                    .header("User-Agent", "ignition-git-module")
-                                    .GET().build(), HttpResponse.BodyHandlers.ofString());
-                    if (r.statusCode() == 401) {
-                        rejected = true;
-                    } else if (r.statusCode() == 200) {
-                        JsonObject body = new Gson().fromJson(r.body(), JsonObject.class);
-                        account = body != null && body.has("login") ? body.get("login").getAsString() : null;
-                        Optional<String> h = r.headers().firstValue(EXPIRY_HEADER);
-                        expires = h.map(v -> v.trim().substring(0, Math.min(10, v.trim().length())))
-                                .orElse("never");
-                    }
-                } catch (Exception e) {
-                    logger.debug("Could not ask GitHub about credential {}.", id, e);
-                }
-            }
+            host = c.getHostPattern();
         }
 
+        List<Target> targets = targets(ssh, id);
         List<Reach> reach = new ArrayList<>();
-        for (Map.Entry<String, String[]> t : targets(ssh, id).entrySet()) {
-            reach.add(probe(t.getKey(), t.getValue()[0], Path.of(t.getValue()[1]), sshKey, user, password));
+        for (Target t : targets) {
+            reach.add(t.error() != null
+                    ? new Reach(t.name(), false, false, t.error())
+                    : probe(t, sshKey, user, password));
         }
-        Result result = new Result(System.currentTimeMillis(), account, expires, rejected, reach);
+
+        // The host field is a label the user typed, so a remote this credential actually reaches is
+        // the better evidence of who the host is.
+        boolean github = !ssh && (isGitHub(host)
+                || targets.stream().anyMatch(t -> isGitHub(t.url())));
+        Result result = github
+                ? askGitHub(password, reach)
+                : new Result(System.currentTimeMillis(), null, null, false, null, null, reach);
         results.put(key(type, id), result);
         return result;
     }
 
-    private static boolean isGitHub(String host) {
-        return host != null && host.trim().toLowerCase().matches("(.*[@/.])?github\\.com([/:].*)?");
+    /** Expiry, account and scope, straight from GitHub. Any failure comes back as {@code error}. */
+    private static Result askGitHub(String token, List<Reach> reach) {
+        long now = System.currentTimeMillis();
+        try {
+            HttpResponse<String> r = send(API + "/user", token);
+            if (r.statusCode() == 401) {
+                return new Result(now, null, null, true, null, null, reach);
+            }
+            if (r.statusCode() != 200) {
+                return new Result(now, null, null, false,
+                        "GitHub answered " + r.statusCode(), null, reach);
+            }
+            JsonObject body = new Gson().fromJson(r.body(), JsonObject.class);
+            String account = body != null && body.has("login")
+                    ? body.get("login").getAsString() : null;
+            String expires = r.headers().firstValue(EXPIRY_HEADER)
+                    .map(v -> v.trim().substring(0, Math.min(10, v.trim().length())))
+                    .orElse("never");
+            Optional<String> scopes = r.headers().firstValue(SCOPES_HEADER);
+            Scope scope = scopes.isPresent()
+                    ? classicScope(scopes.get()) : fineGrainedScope(token);
+            return new Result(now, account, expires, false, null, scope, reach);
+        } catch (Exception e) {
+            return new Result(now, null, null, false, reason(e), null, reach);
+        }
     }
 
-    /** Remotes that authenticate with this credential: target name to {url, local repository}. */
-    private static Map<String, String[]> targets(boolean ssh, long id) {
-        Map<String, String[]> out = new LinkedHashMap<>();
+    /** A classic token carries scopes and reaches every repository its account can. */
+    private static Scope classicScope(String header) {
+        String scopes = header.trim();
+        return new Scope("classic",
+                "Every repository this account can access"
+                        + (scopes.isEmpty() ? "" : " (" + scopes + ")"),
+                List.of());
+    }
+
+    /**
+     * A fine-grained token names the repositories it was granted. {@code /installation/repositories}
+     * answers for the token itself and says whether the grant is every repository or a list; older
+     * hosts refuse it, so a page of {@code /user/repos} is the fallback.
+     */
+    private static Scope fineGrainedScope(String token) {
+        try {
+            HttpResponse<String> r = send(API + "/installation/repositories?per_page=100", token);
+            if (r.statusCode() == 200) {
+                JsonObject body = new Gson().fromJson(r.body(), JsonObject.class);
+                List<String> repos = names(body == null ? null
+                        : body.getAsJsonArray("repositories"));
+                int total = body != null && body.has("total_count")
+                        ? body.get("total_count").getAsInt() : repos.size();
+                boolean all = body != null && body.has("repository_selection")
+                        && "all".equals(body.get("repository_selection").getAsString());
+                return new Scope("fine-grained", all
+                        ? "All repositories of " + owner(repos) : count(total), repos);
+            }
+            HttpResponse<String> own = send(API + "/user/repos?per_page=100", token);
+            if (own.statusCode() == 200) {
+                List<String> repos = names(new Gson().fromJson(own.body(), JsonArray.class));
+                return new Scope("fine-grained",
+                        count(repos.size()) + (repos.size() == 100 ? "+" : ""), repos);
+            }
+            return new Scope("fine-grained", "Could not list the repositories it may touch",
+                    List.of());
+        } catch (Exception e) {
+            return new Scope("fine-grained", "Could not list the repositories it may touch — "
+                    + reason(e), List.of());
+        }
+    }
+
+    private static String count(int n) {
+        return n + (n == 1 ? " repository" : " repositories");
+    }
+
+    /** The owner every granted repository shares, for "All repositories of <org>". */
+    private static String owner(List<String> repos) {
+        String first = repos.isEmpty() ? "" : repos.get(0);
+        int slash = first.indexOf('/');
+        String owner = slash > 0 ? first.substring(0, slash) : "";
+        boolean same = !owner.isEmpty() && repos.stream().allMatch(r -> r.startsWith(owner + "/"));
+        return same ? owner : "its owner";
+    }
+
+    private static List<String> names(JsonArray repos) {
+        List<String> out = new ArrayList<>();
+        if (repos == null) {
+            return out;
+        }
+        for (int i = 0; i < repos.size(); i++) {
+            JsonObject o = repos.get(i).getAsJsonObject();
+            if (o.has("full_name")) {
+                out.add(o.get("full_name").getAsString());
+            }
+        }
+        return out;
+    }
+
+    private static HttpResponse<String> send(String url, String token) throws Exception {
+        return HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(NET_TIMEOUT)).build()
+                .send(HttpRequest.newBuilder(URI.create(url))
+                        .timeout(Duration.ofSeconds(NET_TIMEOUT + 5))
+                        .header("Authorization", "Bearer " + token)
+                        .header("Accept", "application/vnd.github+json")
+                        .header("User-Agent", "ignition-git-module")
+                        .GET().build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    /** A message worth showing in a table cell: the cause's, since the wrapper's is often empty. */
+    private static String reason(Throwable e) {
+        Throwable t = e;
+        while (t.getMessage() == null && t.getCause() != null) {
+            t = t.getCause();
+        }
+        String m = t.getMessage();
+        return m == null || m.isBlank() ? t.getClass().getSimpleName() : m;
+    }
+
+    /** Whether a URL or host label points at github.com. */
+    private static boolean isGitHub(String value) {
+        if (value == null) {
+            return false;
+        }
+        String h = value.trim().toLowerCase();
+        int scheme = h.indexOf("://");
+        if (scheme >= 0) {
+            h = h.substring(scheme + 3);
+        }
+        int at = h.indexOf('@');
+        if (at >= 0) {
+            h = h.substring(at + 1);
+        }
+        int cut = h.length();
+        for (char c : new char[] {'/', ':'}) {
+            int i = h.indexOf(c);
+            if (i >= 0 && i < cut) {
+                cut = i;
+            }
+        }
+        h = h.substring(0, cut);
+        return h.equals("github.com") || h.endsWith(".github.com");
+    }
+
+    /** Remotes that authenticate with this credential. A broken link is reported, never skipped. */
+    private static List<Target> targets(boolean ssh, long id) {
+        Map<String, Target> out = new LinkedHashMap<>();
         List<GitRemoteCredentialsRecord> refs = ssh
                 ? GitRemoteCredentialsRecord.listBySshKeyId(id)
                 : GitRemoteCredentialsRecord.listByHttpsCredentialId(id);
         for (GitRemoteCredentialsRecord ref : refs) {
             GitProjectsConfigRecord project = GitProjectsConfigRecord.findById(ref.getProjectId());
-            if (project == null || out.containsKey(project.getProjectName())) {
+            if (project == null) {
+                continue;
+            }
+            String name = project.getProjectName();
+            if (out.containsKey(name)) {
                 continue;
             }
             try {
-                Path folder = GitManager.getProjectFolderPath(project.getProjectName());
+                Path folder = GitManager.getProjectFolderPath(name);
                 String url = GitManager.getRemoteUrl(folder, ref.getRemoteName());
-                if (url != null) {
-                    out.put(project.getProjectName(), new String[] {url, folder.toString()});
-                }
+                out.put(name, url == null
+                        ? new Target(name, null, null,
+                                "no remote named \"" + ref.getRemoteName() + "\" any more")
+                        : new Target(name, url, folder.toString(), null));
             } catch (Exception e) {
-                logger.debug("No remote to check for {}.", project.getProjectName(), e);
+                out.put(name, new Target(name, null, null, reason(e)));
             }
         }
         GitConfigRemoteRecord config = GitConfigRemoteRecord.get();
         if (config != null && (ssh ? config.getSshKeyId() : config.getHttpsCredentialId()) == id) {
-            out.put("gateway config", new String[] {config.getUri(), DataDirGitManager.dataDir().toString()});
+            out.put("gateway config", new Target("gateway config", config.getUri(),
+                    DataDirGitManager.dataDir().toString(), null));
         }
-        return out;
+        return new ArrayList<>(out.values());
     }
 
     /**
      * Read: fetch's ref advertisement. Push: receive-pack's — a host refuses a token without write
      * access there, before anything is sent, so nothing is pushed.
      */
-    private static Reach probe(String target, String url, Path repoDir, String sshKey, String user,
-                               String password) {
+    private static Reach probe(Target target, String sshKey, String user, String password) {
         boolean read = false;
-        try (Git git = Git.open(repoDir.toFile())) {
+        try (Git git = Git.open(Path.of(target.repoDir()).toFile())) {
             Repository repo = git.getRepository();
-            try (Transport t = open(repo, url, sshKey, user, password)) {
+            try (Transport t = open(repo, target.url(), sshKey, user, password)) {
                 t.openFetch().close();
                 read = true;
             }
-            try (Transport t = open(repo, url, sshKey, user, password);
+            try (Transport t = open(repo, target.url(), sshKey, user, password);
                  PushConnection c = t.openPush()) {
-                return new Reach(target, true, true, null);
+                return new Reach(target.name(), true, true, null);
             }
         } catch (Exception e) {
-            return new Reach(target, read, false, read ? null : e.getMessage());
+            return new Reach(target.name(), read, false, read ? null : reason(e));
         }
     }
 
     private static Transport open(Repository repo, String url, String sshKey, String user,
                                   String password) throws Exception {
         Transport t = Transport.open(repo, new URIish(url));
+        t.setTimeout(NET_TIMEOUT);
         if (sshKey != null) {
             new SshTransportConfigCallback(sshKey).configure(t);
         } else {

@@ -30,7 +30,10 @@ const Credentials = () => {
   const { data, isFetching } = useGetCredentialsQuery(undefined, {
     pollingInterval: pending ? 3000 : 0,
   });
-  const [check, { isLoading: checking }] = useCheckCredentialMutation();
+  const [check] = useCheckCredentialMutation();
+  // Which row is being checked — one shared isLoading disabled every button and told you nothing
+  // about which one was working.
+  const [checkingId, setCheckingId] = React.useState<string | null>(null);
   const { data: providers } = useGetSecretProvidersQuery();
   const [add] = useAddCredentialMutation();
   const [remove] = useRemoveCredentialMutation();
@@ -167,14 +170,11 @@ const Credentials = () => {
         <div>
           <h3>Credentials</h3>
           <p>
-            What this gateway authenticates with: to repositories, and from a
-            runner.
+            What this gateway authenticates with to repositories. Expiry and
+            scope are asked of the host when a credential is saved, daily, and
+            on Check.
           </p>
         </div>
-      </div>
-
-      <div className="gitcfg-section-head">
-        <h4>Repositories</h4>
         <div className="gitcfg-actions">
           <Button colorClass="primary" onClick={openAdd}>
             Add credential
@@ -324,6 +324,7 @@ const Credentials = () => {
                 <th>Type</th>
                 <th>Credential</th>
                 <th>Expires</th>
+                <th>Scope</th>
                 <th>Reaches</th>
                 <th />
               </tr>
@@ -342,18 +343,26 @@ const Credentials = () => {
                     ) : null}
                   </td>
                   <td>{expiry(c)}</td>
+                  <td>{scope(c)}</td>
                   <td>{reach(c)}</td>
                   <td className="gitcfg-table-act">
                     <Button
                       colorClass="secondary"
-                      disabled={checking}
-                      onClick={() =>
+                      disabled={checkingId !== null}
+                      onClick={() => {
+                        setCheckingId(`${c.type}-${c.id}`);
                         check({ type: c.type, id: c.id })
                           .unwrap()
+                          .then(() =>
+                            toasts.notifySuccess(`Checked ${c.label}`)
+                          )
                           .catch(errorToast(toasts, "Could not check it"))
-                      }
+                          .finally(() => setCheckingId(null));
+                      }}
                     >
-                      Check
+                      {checkingId === `${c.type}-${c.id}`
+                        ? "Checking…"
+                        : "Check"}
                     </Button>
                     <Button colorClass="secondary" onClick={() => openEdit(c)}>
                       Edit
@@ -438,37 +447,90 @@ const DAY = 86400000;
 /** DD/MM/YYYY from an ISO date. */
 const ddmmyyyy = (iso: string) => iso.split("-").reverse().join("/");
 
-// A GitHub token's expiry. Amber within 14 days, matching the Projects tab's warning.
+const hhmm = (at: number) => new Date(at).toTimeString().slice(0, 5);
+
+// A GitHub token's expiry, with when it was last asked. Amber within 14 days, matching the
+// Projects tab's warning. A failure is shown in place of the date: "could not ask" and "nothing to
+// report" rendered as the same dash, which made a working check look broken.
 function expiry(c: CredentialOption) {
   const k = c.check;
   if (!k) return <span className="gitcfg-off">Checking…</span>;
+  const when = (
+    <span className="gitcfg-reach">checked {hhmm(k.checkedAt)}</span>
+  );
+  const cell = (body: React.ReactNode) => (
+    <>
+      {body}
+      {when}
+    </>
+  );
   if (k.rejected)
-    return <span className="gitcfg-err">Rejected — expired or revoked</span>;
-  if (!k.expires) return <span className="gitcfg-off">—</span>;
-  if (k.expires === "never") return "No expiry";
+    return cell(
+      <span className="gitcfg-err">Rejected — expired or revoked</span>
+    );
+  if (k.error)
+    return cell(
+      <span className="gitcfg-err" title={k.error}>
+        Could not check — {k.error}
+      </span>
+    );
+  if (!k.expires)
+    return cell(
+      <span
+        className="gitcfg-off"
+        title="Only a GitHub token reports an expiry"
+      >
+        —
+      </span>
+    );
+  if (k.expires === "never") return cell("No expiry");
   const days = Math.ceil(
     (new Date(`${k.expires}T00:00:00`).getTime() - Date.now()) / DAY
   );
   const text = `${ddmmyyyy(k.expires)} (${
     days <= 0 ? "expired" : `${days} ${days === 1 ? "day" : "days"}`
   })`;
-  if (days <= 0) return <span className="gitcfg-err">{text}</span>;
-  if (days <= 14) return <span className="gitcfg-dirty">{text}</span>;
-  return text;
+  if (days <= 0) return cell(<span className="gitcfg-err">{text}</span>);
+  if (days <= 14) return cell(<span className="gitcfg-dirty">{text}</span>);
+  return cell(text);
+}
+
+// What the token is allowed to touch at all. A classic token reaches every repository its account
+// can, which is worth flagging beside one scoped to a single repo.
+function scope(c: CredentialOption) {
+  const s = c.check?.scope;
+  if (!s) return <span className="gitcfg-off">—</span>;
+  const label = s.kind === "classic" ? "Classic" : "Fine-grained";
+  return (
+    <span
+      className={s.kind === "classic" ? "gitcfg-dirty" : ""}
+      title={s.repos.length ? s.repos.join("\n") : undefined}
+    >
+      {label} — {s.summary}
+    </span>
+  );
 }
 
 // Each remote using the credential, and what it may do there.
 function reach(c: CredentialOption) {
   const k = c.check;
   if (!k) return null;
-  if (k.reach.length === 0) return <span className="gitcfg-off">Unused</span>;
+  if (k.reach.length === 0)
+    return <span className="gitcfg-off">No project uses this yet</span>;
   return k.reach.map((r) => (
     <span
       key={r.target}
       className={`gitcfg-reach ${r.read ? "" : "gitcfg-err"}`}
       title={r.error ?? undefined}
     >
-      {r.target}: {r.push ? "read, push" : r.read ? "read" : "no access"}
+      {r.target}:{" "}
+      {r.push
+        ? "read, push"
+        : r.read
+        ? "read"
+        : r.error
+        ? r.error
+        : "no access"}
     </span>
   ));
 }

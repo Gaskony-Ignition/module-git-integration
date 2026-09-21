@@ -31,10 +31,12 @@ deleted resource has no tree node of its own to mark.
 
 ![Change badges in the Designer's Project Browser](docs/images/project-browser-badges.png)
 
-The gateway's Versioning page decides what config-as-code covers. The **Git
-Ignore** tree is rooted at `config/`, because that is the only thing the
-repository versions, and a ticked row is a versioned one. Rows struck through
-are excluded, with the `.gitignore` rule that excluded them shown on the right.
+The gateway's Versioning page decides what config-as-code covers, and carries
+the module's version under its title. The **Git Ignore** tree is rooted at
+`config/`, because that is the only thing the repository versions. A ticked row
+is versioned; a struck-through one is not, and says why on the right — its own
+`.gitignore` line, an inherited rule, or its parent folder. A legend above the
+tree spells the marks out.
 
 ![The Git Ignore tree on the gateway Versioning page](docs/images/excluded-files.png)
 
@@ -49,11 +51,14 @@ and its delivery.
 
 **Credentials** holds what the gateway authenticates with: to repositories, and
 from a GitHub Actions runner. Each repository credential shows when its token
-expires and which projects it can read or push — asked of the host on save,
-daily and on **Check**, since a fine-grained token carries neither. A project
-whose credential has expired, is refused, or cannot read its remote says so on
-the Projects tab, as does one expiring within 14 days. **Edit** replaces a
-token in place, so the projects using it stay linked.
+expires, what it is allowed to touch, and which projects it can read or push —
+asked of the host on save, daily and on **Check**, since a token carries none of
+it. **Scope** answers a different question from **Reaches**: a classic token
+reaches every repository its account can, and is flagged for it, while a
+fine-grained one reports the repositories it was granted. A project whose
+credential has expired, is refused, or cannot read its remote says so on the
+Projects tab, as does one expiring within 14 days. **Edit** replaces a token in
+place, so the projects using it stay linked.
 
 ![The Credentials tab: expiry and reach per credential](docs/images/versioning-credentials.png)
 
@@ -89,6 +94,9 @@ brings changes in; nothing is pushed.
 
 Runner deliveries need **Credentials → Runner access** switched on and a token.
 Repo updates and sync need the project to have a remote and a credential.
+Nothing but that drawer ever sets a delivery: upgrading from 3.5.0 or 3.6.0
+clears the ones those versions assigned, so re-pick each project's delivery
+after the upgrade.
 
 This build adds the gateway-side Versioning page, change badges, and delivery on
 top of upstream 2.1.0 — see [CHANGELOG.md](CHANGELOG.md) for the full list.

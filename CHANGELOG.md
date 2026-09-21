@@ -3,6 +3,35 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.7.0] - 2026-09-21
+
+### Changed
+- **A delivery is only ever what someone chose.** 3.5.0's upgrade handed Runner — release to every
+  project folder on a gateway whose runner was on, including projects that were not versioned, so
+  the Projects tab showed a delivery for everything. Upgrading to 3.7.0 clears them once — every
+  runner mode forgotten, every scheduled sync disabled, reported in the gateway log and on the Logs
+  tab — and nothing is ever assigned again. Re-pick each project's delivery on the Projects tab
+  after upgrading. Gateways that never had runner access configured are left alone: nothing could
+  have been assigned on them.
+- **The Git Ignore tab says what it is showing.** A legend for the marks the tree uses, and every
+  struck-through row now gives its reason — "excluded here", "excluded by <rule>", "excluded with
+  its parent" or "everything inside is excluded". Before, a row excluded by its own `.gitignore`
+  line showed no reason at all. The heading matches the tab, and an empty folder says so.
+- **Credentials**: the "Repositories" sub-heading is gone, Add credential sits in the page head.
+
+### Added
+- **The module version is on the page**, under the title on every tab, so a screenshot says which
+  build a gateway runs.
+- **Credential scope.** Each GitHub credential says what its token may touch at all: a classic
+  token reports its scopes and is flagged as reaching every repository its account can, a
+  fine-grained token reports the repositories it was granted. That is a different question from
+  Reaches, which is what this gateway uses it for.
+- **The check reports failures.** A refused or unreachable host, a timeout or a broken remote is
+  shown in place of the expiry instead of the same dash that means "not asked", Check gives a
+  toast and a per-row spinner, the time of the last check is shown, and network calls time out
+  after 10 seconds. An unused credential reads "No project uses this yet" and its token is still
+  tested.
+
 ## [3.6.0] - 2026-09-18
 
 ### Added
