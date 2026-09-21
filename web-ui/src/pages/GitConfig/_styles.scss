@@ -53,7 +53,8 @@
     font-weight: var(--font-weight-bold);
   }
 
-  p {
+  p,
+  .gitcfg-page-desc {
     margin: 0;
     color: var(--neutral-70);
     line-height: 1.5;
@@ -198,32 +199,85 @@ ul.gitcfg-hint {
 }
 
 // What a tick, a struck-through row and the right-hand column mean, above the Git Ignore tree.
-// Two columns of term + meaning. Flowed inline the four entries wrapped into one long line that
-// read as a sentence, so the terms have their own column and the rows line up.
+// One quiet row under the tree, each entry showing the mark itself rather than naming it.
 .gitcfg-legend {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
-  gap: var(--gitcfg-space-1) var(--gitcfg-space-5);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gitcfg-space-1) var(--gitcfg-space-4);
+  // Its own breathing room at both ends — flush against the foot of the window it read as a
+  // cut-off row rather than a caption for the tree.
   margin: var(--gitcfg-space-2) 0;
   padding: 0;
   list-style: none;
-  color: var(--neutral-70);
+  color: var(--neutral-60);
   font-size: var(--gitcfg-text-sm);
 
   li {
     display: flex;
-    gap: var(--gitcfg-space-2);
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  input[type="checkbox"] {
+    margin: 0;
   }
 }
 
-.gitcfg-legend-term {
-  flex: 0 0 8.5rem;
-  font-weight: var(--font-weight-bold);
-  color: var(--neutral-90);
+// A question mark beside the page's one-line description; the detail lives in its popover.
+.gitcfg-help {
+  position: relative;
+  display: inline-block;
+  margin-left: var(--gitcfg-space-2);
+}
 
-  &.is-muted {
-    font-weight: inherit;
-    color: var(--neutral-50);
+.gitcfg-help-btn {
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border: 1px solid var(--neutral-40);
+  border-radius: 50%;
+  background: none;
+  color: var(--neutral-60);
+  font-size: var(--gitcfg-text-sm);
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+}
+
+.gitcfg-help-pop {
+  @include gitcfg-surface;
+  position: absolute;
+  z-index: 5;
+  top: 1.6rem;
+  left: 0;
+  display: block;
+  width: 30rem;
+  padding: var(--gitcfg-space-3);
+  background: var(--neutral-10);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 35%);
+  color: var(--neutral-70);
+  font-size: var(--gitcfg-text-md);
+  font-weight: normal;
+
+  strong {
+    color: var(--neutral-90);
+  }
+
+  p {
+    margin: var(--gitcfg-space-2) 0;
+  }
+
+  ul {
+    margin: 0;
+    padding-left: 1.1rem;
+  }
+
+  li {
+    margin-bottom: var(--gitcfg-space-1);
   }
 }
 
@@ -367,7 +421,10 @@ ul.gitcfg-hint {
   // deep folder is being explored, but it is sized to its content. max-height keeps the scrolling
   // for a deep tree without a void under a shallow one; min-height stops a two-row tree
   // collapsing to a sliver.
-  max-height: calc(100vh - 24rem);
+  // Sized against the window, but the window is not what the tree sits in: the platform's shell,
+  // this page's header, the toolbar and the legend all take their cut first. Measured on the
+  // 1366x640 laptop case — anything less than this scrolls the gateway's own content pane.
+  max-height: calc(100vh - 26rem);
   min-height: 12rem;
   overflow: auto;
   padding: var(--gitcfg-space-1) 0;
@@ -520,8 +577,33 @@ ul.gitcfg-hint {
 }
 
 // Wide tables scroll in place rather than making the whole page scroll sideways at 1366px.
+// Long content scrolls inside its own box so the gateway's content pane never does — the page
+// header, the tabs and the Save button stay put. Sized against the window rather than fixed, so a
+// bigger screen shows more rows instead of more empty space.
+@mixin gitcfg-scroll-pane {
+  max-height: calc(100vh - 20rem);
+  min-height: 12rem;
+  overflow-y: auto;
+}
+
 .gitcfg-table-scroll {
+  @include gitcfg-scroll-pane;
   overflow-x: auto;
+
+  // The column names have to survive the scroll, or a long table is unreadable halfway down.
+  th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--neutral-10);
+  }
+}
+
+// The platform DataGrid draws its own table; only its height is ours to bound. It needs more room
+// than a plain table: its search bar and row controls are drawn inside this box.
+.gitcfg-grid-scroll {
+  @include gitcfg-scroll-pane;
+  max-height: calc(100vh - 22rem);
 }
 
 .gitcfg-proj-name {

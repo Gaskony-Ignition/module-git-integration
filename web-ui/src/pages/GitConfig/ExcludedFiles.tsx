@@ -262,6 +262,110 @@ const SearchResults = ({ query }: { query: string }) => {
   );
 };
 
+/** A real checkbox in the indeterminate state — CSS cannot draw the platform's dash. */
+const PartlyBox = () => {
+  const box = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    if (box.current) box.current.indeterminate = true;
+  }, []);
+  return <input type="checkbox" ref={box} readOnly />;
+};
+
+/**
+ * Under the tree, not above it: the marks mean nothing until you have seen a row carrying them,
+ * and at the top the legend pushed the tree itself off a laptop screen.
+ */
+const Legend = () => (
+  <ul className="gitcfg-legend">
+    <li>
+      <input type="checkbox" checked readOnly /> Versioned
+    </li>
+    <li>
+      <input type="checkbox" readOnly /> Not versioned
+    </li>
+    <li>
+      <PartlyBox /> Partly versioned
+    </li>
+    <li>
+      <span className="gitcfg-tree-rule">not yet committed</span> — versioned,
+      not in a commit yet
+    </li>
+  </ul>
+);
+
+/**
+ * What is left out of the repository and why. Deliberately about kinds of file, not a list of
+ * names: the data directory's contents change with every Ignition release, and a list would be
+ * wrong within a version.
+ */
+const Help = () => {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLSpanElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+
+  return (
+    <span className="gitcfg-help" ref={ref}>
+      <button
+        type="button"
+        className="gitcfg-help-btn"
+        aria-label="What is not versioned by default"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        ?
+      </button>
+      {open ? (
+        <span className="gitcfg-help-pop">
+          <strong>What is not versioned by default</strong>
+          <p>
+            The repository sits in the gateway&rsquo;s data directory, which
+            holds a good deal more than configuration. Three kinds of thing are
+            left out of it:
+          </p>
+          <ul>
+            <li>
+              <strong>Runtime state</strong> — the gateway&rsquo;s internal
+              databases, logs, caches and temporary files. They change
+              constantly, and some are being written while git reads them.
+            </li>
+            <li>
+              <strong>Anything particular to one machine</strong> — its
+              identity, keys and certificates, and the record of what is
+              installed and licensed on it. Restoring those onto a different
+              gateway would break it.
+            </li>
+            <li>
+              <strong>The project folders</strong> — each project has its own
+              repository, set up on the Projects tab.
+            </li>
+          </ul>
+          <p>
+            Everything else is yours to choose. Ticking a row starts versioning
+            it; unticking one stops, and removes it from the repository without
+            deleting it from disk.
+          </p>
+        </span>
+      ) : null}
+    </span>
+  );
+};
+
 const ExcludedFiles = () => {
   const [pending, setPending] = React.useState<Pending>(new Map());
   const [source, setSource] = React.useState(false);
@@ -366,40 +470,13 @@ const ExcludedFiles = () => {
       <div className="gitcfg-page-head">
         <div>
           <h3>Git Ignore</h3>
-          <p>
-            Everything in the gateway data directory. Ticking a path versions it
-            in the config repository; unticking it adds a line to{" "}
-            <code>.gitignore</code>.
-          </p>
-          <p>
-            Runtime state — databases, logs, caches and the per-project folders
-            — is excluded by default, and project resources are versioned by
-            their own repositories.
-          </p>
-          {/* A term/description grid, not a run-on line: four legend entries flowed inline read as
-              one sentence with stray bold in it. */}
-          <ul className="gitcfg-legend">
-            <li>
-              <span className="gitcfg-legend-term">Ticked</span>
-              <span>Versioned.</span>
-            </li>
-            <li>
-              <span className="gitcfg-legend-term is-muted">
-                Unticked and grey
-              </span>
-              <span>
-                Not versioned — the reason is at the right of the row.
-              </span>
-            </li>
-            <li>
-              <span className="gitcfg-legend-term">Partly ticked</span>
-              <span>A folder with some of what is inside it excluded.</span>
-            </li>
-            <li>
-              <span className="gitcfg-legend-term">not yet committed</span>
-              <span>Versioned, but not in a commit yet.</span>
-            </li>
-          </ul>
+          {/* A div, not a <p>: the help popover contains paragraphs and a list, and a browser
+              hoists those out of a <p>, which tears the layout apart. */}
+          <div className="gitcfg-page-desc">
+            Ticking a path versions it in the config repository; unticking it
+            adds a line to <code>.gitignore</code>.
+            <Help />
+          </div>
         </div>
         <div className="gitcfg-actions">
           <Button
@@ -491,6 +568,7 @@ const ExcludedFiles = () => {
               <Children path={TREE_ROOT} depth={0} />
             )}
           </div>
+          <Legend />
         </Ctx.Provider>
       )}
     </div>

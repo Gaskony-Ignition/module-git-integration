@@ -3,7 +3,7 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
-## [3.9.2] - 2026-09-21
+## [3.9.7] - 2026-09-21
 
 ### Added
 - **Navigation for the Git Ignore tree.** A search box finds a file or folder anywhere under the
@@ -12,11 +12,20 @@ upstream's; everything below is this fork.
   **Expand** / **Collapse** open three levels of versioned folders or shut them all. Expand skips
   excluded folders, so it never fetches `logs/` or `db/`.
 
+- **A help button on Git Ignore** explains what is left out of the repository and why — runtime
+  state, anything particular to one machine, and the project folders. It describes kinds of file
+  rather than naming them, so an Ignition upgrade cannot make it wrong.
+
 ### Changed
 - **Credentials has its own Last checked column.** It was squeezed under the expiry date, where it
   read as part of it. It shows the date too once the check is older than today.
-- **The Git Ignore explanation is a term/meaning grid**, not four legend entries flowed into one
-  line that read as a sentence.
+- **The Git Ignore page leads with one line.** The legend moved under the tree and shows the marks
+  themselves — a tick, an empty box, a dash — instead of naming them, and the explanation moved
+  into the help button. The tree, not the prose, now fills the page.
+- **Long lists scroll in their own box, sized to the window.** Gateway History and Projects ran the
+  gateway's content pane off the bottom of a laptop screen; both now keep their page header and
+  actions in place, and a bigger screen gets more rows rather than more empty space. Table headers
+  stay put while the rows scroll.
 - **Table action buttons are spaced.** Check, Edit and Remove were touching.
 
 ## [3.8.0] - 2026-09-21

@@ -125,24 +125,27 @@ const HistoryList = () => {
           </p>
         </div>
       </div>
-      <DataGrid
-        id="git-config-history"
-        itemName="Commit"
-        columnDefs={COLUMNS}
-        data={commits}
-        uniqueDataKey="hash"
-        globalSearch
-        denseRows
-        // The grid's footer counts from paginationParams, not from data, and defaults it to
-        // zero — so it read "0 of 0 items" beside a full list. One page holds every commit
-        // loaded, so the footer carries no information and stays hidden.
-        paginationParams={pagination}
-        showPagination={false}
-        setTableQueryParams={setQuery}
-        rowExpand={rowExpand}
-        showMore={showMore}
-        noResultsText="No commits yet."
-      />
+      {/* Show more grows the list without limit, which pushed the whole page into a scroll. */}
+      <div className="gitcfg-grid-scroll">
+        <DataGrid
+          id="git-config-history"
+          itemName="Commit"
+          columnDefs={COLUMNS}
+          data={commits}
+          uniqueDataKey="hash"
+          globalSearch
+          denseRows
+          // The grid's footer counts from paginationParams, not from data, and defaults it to
+          // zero — so it read "0 of 0 items" beside a full list. One page holds every commit
+          // loaded, so the footer carries no information and stays hidden.
+          paginationParams={pagination}
+          showPagination={false}
+          setTableQueryParams={setQuery}
+          rowExpand={rowExpand}
+          showMore={showMore}
+          noResultsText="No commits yet."
+        />
+      </div>
       <Modal
         open={!!confirm}
         type="confirm"
