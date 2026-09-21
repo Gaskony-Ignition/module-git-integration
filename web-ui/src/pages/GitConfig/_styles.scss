@@ -218,8 +218,10 @@ ul.gitcfg-hint {
     gap: 0.4rem;
   }
 
+  // They are pictures of the tree's marks, not controls: clicking one ticked it.
   input[type="checkbox"] {
     margin: 0;
+    pointer-events: none;
   }
 }
 

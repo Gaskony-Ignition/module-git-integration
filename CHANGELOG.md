@@ -3,7 +3,7 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
-## [3.9.7] - 2026-09-21
+## [3.9.8] - 2026-09-21
 
 ### Added
 - **Navigation for the Git Ignore tree.** A search box finds a file or folder anywhere under the

@@ -262,13 +262,27 @@ const SearchResults = ({ query }: { query: string }) => {
   );
 };
 
-/** A real checkbox in the indeterminate state — CSS cannot draw the platform's dash. */
-const PartlyBox = () => {
+/**
+ * A checkbox drawn purely as a picture of one. `readOnly` does nothing to a checkbox — the box
+ * still ticks on click — so these are taken out of the tab order and out of the accessibility
+ * tree, and `.gitcfg-legend` refuses them pointer events. `disabled` would have done it, but it
+ * greys the box, and then the legend no longer looks like the rows it explains.
+ */
+const LegendBox = ({ state }: { state: "on" | "off" | "partly" }) => {
   const box = React.useRef<HTMLInputElement>(null);
   React.useEffect(() => {
-    if (box.current) box.current.indeterminate = true;
-  }, []);
-  return <input type="checkbox" ref={box} readOnly />;
+    if (box.current) box.current.indeterminate = state === "partly";
+  }, [state]);
+  return (
+    <input
+      type="checkbox"
+      ref={box}
+      checked={state === "on"}
+      readOnly
+      tabIndex={-1}
+      aria-hidden="true"
+    />
+  );
 };
 
 /**
@@ -278,13 +292,13 @@ const PartlyBox = () => {
 const Legend = () => (
   <ul className="gitcfg-legend">
     <li>
-      <input type="checkbox" checked readOnly /> Versioned
+      <LegendBox state="on" /> Versioned
     </li>
     <li>
-      <input type="checkbox" readOnly /> Not versioned
+      <LegendBox state="off" /> Not versioned
     </li>
     <li>
-      <PartlyBox /> Partly versioned
+      <LegendBox state="partly" /> Partly versioned
     </li>
     <li>
       <span className="gitcfg-tree-rule">not yet committed</span> — versioned,
