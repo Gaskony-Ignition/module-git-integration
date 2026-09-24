@@ -108,6 +108,11 @@ after the upgrade.
 This build adds the gateway-side Versioning page, change badges, and delivery on
 top of upstream 2.1.0 — see [CHANGELOG.md](CHANGELOG.md) for the full list.
 
+The Versioning page meets WCAG 2.1 AA, short of three platform controls with no
+naming prop of their own: the gateway's own header logo, the History table's
+page-size selector and row-expand button, and the raw `.gitignore` editor's
+resize handle.
+
 ## How to use it
 
 Install the signed `.modl` from the latest release through the gateway's
