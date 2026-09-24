@@ -7,6 +7,7 @@ import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.*;
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -85,11 +86,13 @@ public class InitRepoPopup extends JDialog {
         buttonPanel.setBorder(BorderFactory.createEmptyBorder(15, 20, 10, 20));
 
         JButton yesBtn = new JButton("Yes, clone from remote");
+        yesBtn.setMnemonic(KeyEvent.VK_Y);
         yesBtn.setBackground(new Color(71, 137, 199));
         yesBtn.setForeground(Color.WHITE);
         yesBtn.addActionListener(e -> showCard(CARD_REMOTE));
 
         JButton noBtn = new JButton("No, initialize locally");
+        noBtn.setMnemonic(KeyEvent.VK_N);
         noBtn.addActionListener(e -> showCard(CARD_LOCAL));
 
         buttonPanel.add(yesBtn);
@@ -100,6 +103,7 @@ public class InitRepoPopup extends JDialog {
         // Cancel at bottom
         JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 5));
         JButton cancelBtn = new JButton("Cancel");
+        cancelBtn.setMnemonic(KeyEvent.VK_C);
         cancelBtn.addActionListener(e -> dispose());
         bottomPanel.add(cancelBtn);
         panel.add(bottomPanel, BorderLayout.SOUTH);
@@ -156,6 +160,7 @@ public class InitRepoPopup extends JDialog {
         credentialDropdown.setPreferredSize(new Dimension(280, 25));
         credentialPanel.add(credentialDropdown);
         configureCredentialsButton = new JButton("Configure...");
+        configureCredentialsButton.setMnemonic(KeyEvent.VK_C);
         configureCredentialsButton.addActionListener(e -> onConfigureCredentials());
         credentialPanel.add(configureCredentialsButton);
         credentialPanel.setVisible(false);
@@ -172,14 +177,17 @@ public class InitRepoPopup extends JDialog {
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 5));
 
         JButton backBtn = new JButton("Back");
+        backBtn.setMnemonic(KeyEvent.VK_B);
         backBtn.addActionListener(e -> showCard(CARD_CHOOSE));
 
         JButton initBtn = new JButton("Initialize");
+        initBtn.setMnemonic(KeyEvent.VK_I);
         initBtn.setBackground(new Color(71, 137, 199));
         initBtn.setForeground(Color.WHITE);
         initBtn.addActionListener(e -> handleInitialize());
 
         JButton cancelBtn = new JButton("Cancel");
+        cancelBtn.setMnemonic(KeyEvent.VK_N);
         cancelBtn.addActionListener(e -> dispose());
 
         buttonPanel.add(backBtn);
@@ -207,14 +215,17 @@ public class InitRepoPopup extends JDialog {
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 5));
 
         JButton backBtn = new JButton("Back");
+        backBtn.setMnemonic(KeyEvent.VK_B);
         backBtn.addActionListener(e -> showCard(CARD_CHOOSE));
 
         JButton initBtn = new JButton("Initialize");
+        initBtn.setMnemonic(KeyEvent.VK_I);
         initBtn.setBackground(new Color(71, 137, 199));
         initBtn.setForeground(Color.WHITE);
         initBtn.addActionListener(e -> onLocalInitialize());
 
         JButton cancelBtn = new JButton("Cancel");
+        cancelBtn.setMnemonic(KeyEvent.VK_N);
         cancelBtn.addActionListener(e -> dispose());
 
         buttonPanel.add(backBtn);

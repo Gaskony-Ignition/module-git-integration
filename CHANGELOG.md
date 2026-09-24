@@ -3,6 +3,25 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.9.9] - 2026-09-25
+
+**Type:** PATCH — accessibility (WCAG 2.1 AA)
+
+### Changed
+- The Versioning page and its drawers now meet WCAG 2.1 AA: every field's visible
+  label is programmatically associated with its control (Search, Jump to,
+  Credentials and Project forms, the raw `.gitignore` editor); a visible focus
+  ring reaches every control, including the Configure Versioning and per-item
+  settings drawers; the Remote/Local and per-file-change chips, and the outlined
+  and link-styled buttons, now meet 4.5:1 text contrast; a locked row in the Git
+  Ignore tree dims its icon and checkbox rather than its already-legible text.
+  A handful of platform-drawn controls with no naming prop of their own (the
+  gateway's header logo, the History table's page-size selector and row-expand
+  button, the raw `.gitignore` editor's resize handle) are recorded as
+  exceptions in `a11y.json`.
+- The Designer's git popups gained keyboard mnemonics on their buttons, and the
+  status bar's branch button gained a tooltip.
+
 ## [3.9.8] - 2026-09-21
 
 ### Added

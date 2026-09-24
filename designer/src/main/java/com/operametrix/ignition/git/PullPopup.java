@@ -4,6 +4,7 @@ import com.inductiveautomation.ignition.designer.gui.CommonUI;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.KeyEvent;
 import java.util.List;
 
 public class PullPopup extends JDialog {
@@ -73,9 +74,11 @@ public class PullPopup extends JDialog {
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 5));
 
         JButton cancelBtn = new JButton("Cancel");
+        cancelBtn.setMnemonic(KeyEvent.VK_N);
         cancelBtn.addActionListener(e -> dispose());
 
         JButton pullBtn = new JButton("Pull and Import");
+        pullBtn.setMnemonic(KeyEvent.VK_P);
         pullBtn.setBackground(new Color(71, 137, 199));
         pullBtn.setForeground(Color.WHITE);
         pullBtn.addActionListener(e -> {

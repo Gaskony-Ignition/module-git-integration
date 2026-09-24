@@ -90,6 +90,7 @@ public class DesignerHook extends AbstractDesignerModuleHook {
             branchButton.setText("unknown");
         }
         branchButton.setFont(branchButton.getFont().deriveFont(Font.BOLD));
+        branchButton.setToolTipText("Manage Branches");
         styleStatusBarButton(branchButton);
         branchButton.addActionListener(e -> GitBaseAction.handleBranchAction());
         gitStatusBar.add(branchButton);

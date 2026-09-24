@@ -1,6 +1,6 @@
 import React from "react";
-import { Button, Loading, TextArea, useToastNotifications } from "../../webui";
-import { SelectInput, TextInput } from "./fields";
+import { Button, Loading, useToastNotifications } from "../../webui";
+import { SelectInput, TextArea, TextInput } from "./fields";
 import {
   TreeEntry,
   useGetTreeQuery,
@@ -516,6 +516,7 @@ const ExcludedFiles = () => {
       {source ? (
         ignore ? (
           <TextArea
+            label="Raw .gitignore"
             className="gitcfg-ignore-source"
             rows={24}
             value={draft !== null ? draft : ignore.text}

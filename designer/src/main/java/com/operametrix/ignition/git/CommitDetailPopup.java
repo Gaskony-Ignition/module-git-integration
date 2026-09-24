@@ -9,6 +9,7 @@ import javax.swing.*;
 import javax.swing.border.TitledBorder;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
@@ -146,9 +147,11 @@ public class CommitDetailPopup extends JDialog {
         // Bottom: checkout + revert buttons
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 5));
         JButton checkoutBtn = new JButton("Checkout");
+        checkoutBtn.setMnemonic(KeyEvent.VK_C);
         checkoutBtn.addActionListener(e -> onCheckoutRequested(commitHash, shortHash));
         buttonPanel.add(checkoutBtn);
         JButton revertBtn = new JButton("Revert Commit");
+        revertBtn.setMnemonic(KeyEvent.VK_R);
         revertBtn.addActionListener(e -> onRevertRequested(commitHash, shortHash, message));
         buttonPanel.add(revertBtn);
         main.add(buttonPanel, BorderLayout.SOUTH);

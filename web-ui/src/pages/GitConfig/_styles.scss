@@ -1,8 +1,31 @@
+// The platform Button's outlined (colorClass="secondary") and text (colorClass="link") variants
+// render --primary (#0c7bb3) text on a --primary-10 (#e8f4fa) fill, 4.17:1 -- under 4.5:1
+// (measured 8.3.8, resting state). --primary-70 is the platform's own next-darkest step on the
+// same token ramp (5.9:1 on --primary-10); Button takes no colour override, so this reaches past
+// it as the Chip rule above does.
+.MuiButton-outlinedPrimary,
+.MuiButton-textPrimary {
+  color: var(--primary-70);
+}
+
+// Visible focus ring on every control this page's JS mounts, including the Drawer/DrawerTemplate
+// chrome that renders in a portal outside `.gitcfg` (SettingsDrawer, ConfigDrawer) -- the platform
+// inputs and buttons suppress their own outline and draw nothing in its place. Unscoped so it
+// still reaches the drawer's header and footer buttons; only in scope while this bundle is
+// mounted, so it cannot bleed into other gateway pages. `!important`: MUI's OutlinedInput/Select
+// classes carry their own `:focus-visible{outline:0}` at higher specificity (measured 8.3.8 --
+// TextInput and SelectInput still showed no ring without it).
+:focus-visible {
+  outline: 2px solid var(--neutral-100) !important;
+  outline-offset: 1px;
+}
+
 // Colour and weight come from the platform's tokens (--neutral-10…100, --primary, --success,
 // --error, --warning, --font-weight-*), which the gateway shell defines at runtime. It defines no
 // type scale, spacing, radius or monospace stack, so those are declared once here and nowhere else.
 .gitcfg {
-  --gitcfg-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --gitcfg-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo,
+    monospace;
   --gitcfg-text-sm: 11px;
   --gitcfg-text-md: 13px;
   --gitcfg-text-lg: 15px;
@@ -449,9 +472,15 @@ ul.gitcfg-hint {
     cursor: pointer;
   }
 
+  // Excluded with its parent: git cannot re-include it, so the row is read-only. Dims the
+  // checkbox and icon only -- the row's already-muted text is --neutral-60 (5.0:1 on white), and
+  // compounding opacity on top of it fell to 2.2:1 (measured 8.3.8); a non-text decoration has no
+  // contrast floor of its own, so the icon can dim freely.
   &.is-locked {
-    // Excluded with its parent: git cannot re-include it, so the row is read-only.
-    opacity: 0.55;
+    input[type="checkbox"],
+    .gitcfg-tree-icon {
+      opacity: 0.55;
+    }
 
     input[type="checkbox"] {
       cursor: not-allowed;
@@ -675,6 +704,35 @@ ul.gitcfg-hint {
     font-family: var(--gitcfg-font-mono);
     font-size: var(--gitcfg-text-sm);
     line-height: 1.5;
+  }
+}
+
+// The platform Chip renders at 10px and every one of its four semantic colour pairs falls just
+// short of the 4.5:1 text minimum at that size (measured 8.3.8): info/alt #3272d9-on-#f0f5fc
+// 4.21:1, success #e1faeb-on-#038537 4.32:1, error #de1b1b-on-#faf0f0 4.39:1, warning-dark
+// #916a00-on-#fcf2e6 4.45:1 -- a platform default, not a colour this module chose. Chip exposes
+// no colour or size prop, so this reaches its own class the way `.gitcfg-danger-card` reaches the
+// platform Card's header; re-check after a web-ui package upgrade. `[data-component]` + the
+// semantic class it already renders (not the emotion hash) so no call site needs touching.
+// `!important`: Chip sets its own text colour via an inline style, which otherwise wins over any
+// external stylesheet regardless of selector specificity (measured 8.3.8).
+[data-component="web-ui.chip"] {
+  font-size: var(
+    --gitcfg-text-sm
+  ); // 11px floor (1.4.4 / this project's own minimum)
+
+  &.info,
+  &.alt {
+    color: #2557ad !important; // measured 6.3:1 on --info-10, same hue as --info
+  }
+  &.success {
+    color: var(--white) !important; // measured 4.76:1 on --success
+  }
+  &.error {
+    color: #c81616 !important; // measured 5.24:1 on --error-10, same hue as --error
+  }
+  &.warning {
+    color: #7d5c00 !important; // measured 5.58:1 on --warning-10, same hue as --warning-dark
   }
 }
 

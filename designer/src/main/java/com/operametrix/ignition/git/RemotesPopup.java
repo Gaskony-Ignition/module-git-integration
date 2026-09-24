@@ -9,6 +9,7 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
@@ -248,6 +249,7 @@ public class RemotesPopup extends JDialog {
         credentialDropdown.setPreferredSize(new Dimension(280, 25));
         credentialPanel.add(credentialDropdown);
         configureCredentialsButton = new JButton("Configure...");
+        configureCredentialsButton.setMnemonic(KeyEvent.VK_C);
         configureCredentialsButton.addActionListener(e -> onConfigureCredentials());
         credentialPanel.add(configureCredentialsButton);
         credentialPanel.setVisible(false);
@@ -264,9 +266,11 @@ public class RemotesPopup extends JDialog {
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 5));
 
         JButton backBtn = new JButton("Back");
+        backBtn.setMnemonic(KeyEvent.VK_B);
         backBtn.addActionListener(e -> showCard(CARD_LIST));
 
         JButton saveBtn = new JButton("Save");
+        saveBtn.setMnemonic(KeyEvent.VK_S);
         saveBtn.setBackground(new Color(71, 137, 199));
         saveBtn.setForeground(Color.WHITE);
         saveBtn.addActionListener(e -> handleSave());

@@ -16,6 +16,7 @@ import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableColumn;
 import javax.swing.text.StyleContext;
 import java.awt.*;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
@@ -101,6 +102,10 @@ public class CommitPopup extends JDialog {
         });
 
         cancelBtn.addActionListener(e -> this.dispose());
+
+        // Set here, not in $$$setupUI$$$ -- that method is regenerated from CommitPopup.form.
+        commitBtn.setMnemonic(KeyEvent.VK_C);
+        cancelBtn.setMnemonic(KeyEvent.VK_N);
 
         pack();
         CommonUI.centerComponent(this, parent);

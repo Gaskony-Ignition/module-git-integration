@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.KeyEvent;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -52,11 +53,13 @@ public class CreateBranchPopup extends JDialog {
 
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
         JButton createBtn = new JButton("Create");
+        createBtn.setMnemonic(KeyEvent.VK_C);
         createBtn.setBackground(new Color(71, 137, 199));
         createBtn.setForeground(Color.WHITE);
         createBtn.addActionListener(e -> handleCreate());
 
         JButton cancelBtn = new JButton("Cancel");
+        cancelBtn.setMnemonic(KeyEvent.VK_N);
         cancelBtn.addActionListener(e -> dispose());
 
         buttonPanel.add(createBtn);

@@ -4,6 +4,7 @@ import com.inductiveautomation.ignition.designer.gui.CommonUI;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.KeyEvent;
 import java.util.List;
 
 /**
@@ -46,9 +47,11 @@ public class FetchPopup extends JDialog {
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 5));
 
         JButton cancelBtn = new JButton("Cancel");
+        cancelBtn.setMnemonic(KeyEvent.VK_N);
         cancelBtn.addActionListener(e -> dispose());
 
         JButton fetchBtn = new JButton("Fetch");
+        fetchBtn.setMnemonic(KeyEvent.VK_F);
         fetchBtn.setBackground(new Color(71, 137, 199));
         fetchBtn.setForeground(Color.WHITE);
         fetchBtn.addActionListener(e -> {

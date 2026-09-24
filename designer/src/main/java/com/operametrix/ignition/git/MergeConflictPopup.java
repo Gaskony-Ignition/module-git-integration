@@ -9,6 +9,7 @@ import javax.swing.*;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
@@ -151,6 +152,7 @@ public class MergeConflictPopup extends JDialog {
         // Row 1: per-file actions
         JPanel perFileRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 3));
         JButton viewDiffBtn = new JButton("View Diff");
+        viewDiffBtn.setMnemonic(KeyEvent.VK_V);
         viewDiffBtn.addActionListener(e -> {
             int row = table.getSelectedRow();
             if (row >= 0) {
@@ -160,6 +162,7 @@ public class MergeConflictPopup extends JDialog {
         perFileRow.add(viewDiffBtn);
 
         JButton acceptOursBtn = new JButton("Accept Ours");
+        acceptOursBtn.setMnemonic(KeyEvent.VK_O);
         acceptOursBtn.addActionListener(e -> {
             int row = table.getSelectedRow();
             if (row >= 0) {
@@ -169,6 +172,7 @@ public class MergeConflictPopup extends JDialog {
         perFileRow.add(acceptOursBtn);
 
         JButton acceptTheirsBtn = new JButton("Accept Theirs");
+        acceptTheirsBtn.setMnemonic(KeyEvent.VK_H);
         acceptTheirsBtn.addActionListener(e -> {
             int row = table.getSelectedRow();
             if (row >= 0) {
@@ -182,20 +186,24 @@ public class MergeConflictPopup extends JDialog {
         JPanel globalRow = new JPanel(new BorderLayout());
         JPanel leftGlobal = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 3));
         JButton allOursBtn = new JButton("Accept All Ours");
+        allOursBtn.setMnemonic(KeyEvent.VK_L);
         allOursBtn.addActionListener(e -> onResolveAllConflicts("OURS"));
         leftGlobal.add(allOursBtn);
 
         JButton allTheirsBtn = new JButton("Accept All Theirs");
+        allTheirsBtn.setMnemonic(KeyEvent.VK_I);
         allTheirsBtn.addActionListener(e -> onResolveAllConflicts("THEIRS"));
         leftGlobal.add(allTheirsBtn);
         globalRow.add(leftGlobal, BorderLayout.WEST);
 
         JPanel rightGlobal = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 3));
         JButton abortBtn = new JButton("Abort Merge");
+        abortBtn.setMnemonic(KeyEvent.VK_A);
         abortBtn.addActionListener(e -> onAbortMerge());
         rightGlobal.add(abortBtn);
 
         completeMergeBtn = new JButton("Complete Merge");
+        completeMergeBtn.setMnemonic(KeyEvent.VK_C);
         completeMergeBtn.setEnabled(false);
         completeMergeBtn.addActionListener(e -> onCompleteMerge());
         rightGlobal.add(completeMergeBtn);
