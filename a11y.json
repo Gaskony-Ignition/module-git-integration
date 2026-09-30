@@ -1,0 +1,27 @@
+{
+  "gateway": "module-testing",
+  "web": ["http://192.168.153.128:8088/app/config-versioning"],
+  "login": true,
+  "exceptions": [
+    {
+      "rule": "image-alt",
+      "match": "<img",
+      "reason": "The gateway header logo is Ignition's own shell chrome, not this module's markup -- this page mounts inside the standard Platform nav and cannot alter it. This module renders no <img> of its own (icons are inline SVG)."
+    },
+    {
+      "rule": "aria-input-field-name",
+      "match": "git-config-history-view-count",
+      "reason": "The platform DataGrid's own page-size selector (History tab). DataGridTableProps (ignition-web-ui) exposes no label/aria-label prop for it -- verified against DataGrid.types.d.ts, 8.3.8."
+    },
+    {
+      "rule": "button-name",
+      "match": "expand-button",
+      "reason": "The platform DataGrid's per-row expand chevron (History tab). RowExpand/DataGridTableProps expose no prop to name it -- verified against DataGrid.types.d.ts, 8.3.8."
+    },
+    {
+      "rule": "button-name",
+      "match": "m5 8 3-3M1 8l7-7",
+      "reason": "The platform TextArea's own resize-handle button (bottom-right corner, both the Credentials drawer's Private key field and the Git Ignore raw-source editor). TextAreaProps exposes no prop to name it -- verified against TextArea.types.d.ts, 8.3.8; matched on its icon's SVG path since the wrapping class is an emotion hash."
+    }
+  ]
+}

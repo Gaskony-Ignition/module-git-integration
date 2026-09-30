@@ -1,0 +1,1436 @@
+package com.operametrix.ignition.git.managers;
+
+import com.operametrix.ignition.git.SshTransportConfigCallback;
+import com.operametrix.ignition.git.records.GitProjectsConfigRecord;
+import com.operametrix.ignition.git.records.GitRemoteCredentialsRecord;
+import com.operametrix.ignition.git.records.GitReposUsersRecord;
+import com.operametrix.ignition.git.records.GitUserHttpsCredentialRecord;
+import com.operametrix.ignition.git.records.GitUserSshKeyRecord;
+import com.inductiveautomation.ignition.common.gson.Gson;
+import com.inductiveautomation.ignition.common.gson.GsonBuilder;
+import com.inductiveautomation.ignition.common.gson.JsonArray;
+import com.inductiveautomation.ignition.common.gson.JsonElement;
+import com.inductiveautomation.ignition.common.gson.JsonObject;
+import com.inductiveautomation.ignition.common.resourcecollection.LastModification;
+import com.inductiveautomation.ignition.common.resourcecollection.Resource;
+import com.inductiveautomation.ignition.common.resourcecollection.ResourcePath;
+import com.inductiveautomation.ignition.common.resourcecollection.ResourceType;
+import com.inductiveautomation.ignition.common.util.DatasetBuilder;
+import com.inductiveautomation.ignition.common.util.LoggerEx;
+import org.apache.commons.io.FileUtils;
+import org.eclipse.jgit.api.*;
+import org.eclipse.jgit.lib.*;
+import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevTree;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.diff.DiffEntry;
+import org.eclipse.jgit.diff.DiffFormatter;
+import org.eclipse.jgit.treewalk.AbstractTreeIterator;
+import org.eclipse.jgit.treewalk.CanonicalTreeParser;
+import org.eclipse.jgit.treewalk.EmptyTreeIterator;
+import org.eclipse.jgit.transport.RefSpec;
+import org.eclipse.jgit.transport.RemoteConfig;
+import org.eclipse.jgit.transport.URIish;
+import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
+import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.treewalk.filter.PathFilter;
+import org.eclipse.jgit.util.io.DisabledOutputStream;
+import simpleorm.dataset.SQuery;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.Optional;
+
+
+import static com.operametrix.ignition.git.GatewayHook.getContext;
+
+public class GitManager {
+    private final static LoggerEx logger = LoggerEx.newBuilder().build(GitManager.class);
+
+    static public Git getGit(Path projectFolderPath) {
+        try {
+            // Build the repository directly rather than via Git.open(), which registers it in
+            // JGit's reference-counted RepositoryCache. Callers open+close a short-lived Git per
+            // operation; the cache's own lifecycle plus our explicit closes race to decrement the
+            // same shared repo past zero, spamming "close() called when useCnt is already zero".
+            // An uncached FileRepository (useCnt=1) is closed exactly once, cleanly.
+            Repository repo = new FileRepositoryBuilder()
+                    .setGitDir(projectFolderPath.resolve(".git").toFile())
+                    .setWorkTree(projectFolderPath.toFile())
+                    .build();
+            return new Git(repo);
+        } catch (IOException e) {
+            logger.error("Unable to retrieve Git repository", e);
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static Path getProjectFolderPath(String projectName) {
+        Path dataDir = getDataFolderPath();
+        return dataDir.resolve("projects").resolve(projectName);
+    }
+
+    public static Path getDataFolderPath() {
+        return getContext().getSystemManager().getDataDir().toPath();
+    }
+
+
+    public static void clearDirectory(Path folderPath) {
+        try {
+            if (folderPath.toFile().exists()) {
+                FileUtils.cleanDirectory(folderPath.toFile());
+            }
+        } catch (Exception e) {
+            logger.error(e.toString(), e);
+        }
+    }
+
+    /**
+     * Set authentication on a transport command. Every remote must have an
+     * explicit credential FK (SshKeyId / HttpsCredentialId) set via
+     * setRemoteCredentialRef on a GitRemoteCredentialsRecord; auth fails
+     * with a clear error if no FK is set or the referenced credential is gone.
+     *
+     * Auth type (SSH vs HTTPS) is determined from the remote's URL in .git/config.
+     */
+    public static void setAuthentication(TransportCommand<?, ?> command, String projectName,
+                                          String userName, String remoteName) throws Exception {
+        GitRemoteCredentialsRecord creds = getRemoteCredentialsRecord(projectName, userName, remoteName);
+        String url = getRemoteUrl(getProjectFolderPath(projectName), remoteName);
+        boolean isSsh = url != null && !url.toLowerCase().startsWith("http");
+
+        if (isSsh) {
+            String sshKey = resolveSshKey(creds);
+            if (sshKey == null || sshKey.isEmpty()) {
+                throw new Exception("No SSH credential assigned to remote '" + remoteName
+                        + "'. Open the Remotes popup and pick an SSH key for this remote.");
+            }
+            command.setTransportConfigCallback(new SshTransportConfigCallback(sshKey));
+        } else {
+            String[] httpsCreds = resolveHttpsCredentials(creds);
+            if (httpsCreds == null) {
+                throw new Exception("No HTTPS credential assigned to remote '" + remoteName
+                        + "'. Open the Remotes popup and pick an HTTPS credential for this remote.");
+            }
+            command.setCredentialsProvider(
+                    new UsernamePasswordCredentialsProvider(httpsCreds[0], httpsCreds[1]));
+        }
+    }
+
+    /**
+     * Auth from explicit credential ids — the data-dir config remote, which has no
+     * project/user context (auth type follows the URL scheme, like {@link #setAuthentication}).
+     */
+    public static void setAuthenticationFromIds(TransportCommand<?, ?> command, String url,
+                                                long sshKeyId, long httpsCredentialId) throws Exception {
+        boolean isSsh = url != null && !url.toLowerCase().startsWith("http");
+        if (isSsh) {
+            GitUserSshKeyRecord keyRecord = sshKeyId > 0 ? GitUserSshKeyRecord.findById(sshKeyId) : null;
+            if (keyRecord == null || keyRecord.getSSHKey() == null || keyRecord.getSSHKey().isEmpty()) {
+                throw new Exception("No SSH credential assigned to the config remote. Pick one in the Remote card.");
+            }
+            command.setTransportConfigCallback(new SshTransportConfigCallback(keyRecord.getSSHKey()));
+        } else {
+            GitUserHttpsCredentialRecord httpRecord =
+                    httpsCredentialId > 0 ? GitUserHttpsCredentialRecord.findById(httpsCredentialId) : null;
+            if (httpRecord == null) {
+                throw new Exception("No HTTPS credential assigned to the config remote. Pick one in the Remote card.");
+            }
+            command.setCredentialsProvider(
+                    new UsernamePasswordCredentialsProvider(httpRecord.getUserName(), httpRecord.getPassword()));
+        }
+    }
+
+    /**
+     * Auth from raw plaintext secrets — used to Test the config remote before it (or its
+     * credential) is persisted. Auth type follows the URL scheme.
+     */
+    public static void setAuthenticationRaw(TransportCommand<?, ?> command, String url,
+                                            String sshKeyPlaintext, String httpsUser,
+                                            String httpsPassword) throws Exception {
+        boolean isSsh = url != null && !url.toLowerCase().startsWith("http");
+        if (isSsh) {
+            if (sshKeyPlaintext == null || sshKeyPlaintext.isEmpty()) {
+                throw new Exception("A private key is required to test an SSH remote.");
+            }
+            command.setTransportConfigCallback(new SshTransportConfigCallback(sshKeyPlaintext));
+        } else {
+            command.setCredentialsProvider(new UsernamePasswordCredentialsProvider(
+                    httpsUser == null ? "" : httpsUser, httpsPassword == null ? "" : httpsPassword));
+        }
+    }
+
+    private static String resolveSshKey(GitRemoteCredentialsRecord creds) {
+        if (creds == null || creds.getSshKeyId() <= 0) {
+            return null;
+        }
+        GitUserSshKeyRecord keyRecord = GitUserSshKeyRecord.findById(creds.getSshKeyId());
+        return keyRecord == null ? null : keyRecord.getSSHKey();
+    }
+
+    /** @return [username, password] or null if no credentials found */
+    private static String[] resolveHttpsCredentials(GitRemoteCredentialsRecord creds) {
+        if (creds == null || creds.getHttpsCredentialId() <= 0) {
+            return null;
+        }
+        GitUserHttpsCredentialRecord httpRecord =
+                GitUserHttpsCredentialRecord.findById(creds.getHttpsCredentialId());
+        return httpRecord == null
+                ? null
+                : new String[]{httpRecord.getUserName(), httpRecord.getPassword()};
+    }
+
+
+    public static void setCommitAuthor(CommitCommand command, String projectName, String userName) {
+        try {
+            String email = resolveUserEmail(userName);
+            command.setAuthor(userName, email);
+        } catch (Exception e) {
+            logger.error("An error occurred while setting up commit author.", e);
+        }
+    }
+
+    /**
+     * Resolve a user's email address from Ignition's user source system.
+     * Searches all configured user sources for the given username and returns
+     * the first email found in the user's contact info.
+     *
+     * @return the email address, or empty string if not found
+     */
+    public static String resolveUserEmail(String userName) {
+        try {
+            List<com.inductiveautomation.ignition.gateway.user.UserSourceProfileRecord> profiles =
+                    getContext().getPersistenceInterface().query(
+                            new SQuery<>(com.inductiveautomation.ignition.gateway.user.UserSourceProfileRecord.META));
+            for (com.inductiveautomation.ignition.gateway.user.UserSourceProfileRecord profileRecord : profiles) {
+                try {
+                    com.inductiveautomation.ignition.gateway.user.UserSourceProfile profile =
+                            getContext().getUserSourceManager().getProfile(
+                                    profileRecord.getString(com.inductiveautomation.ignition.gateway.user.UserSourceProfileRecord.Name));
+                    if (profile == null) continue;
+                    com.inductiveautomation.ignition.common.user.User user =
+                            profile.getUser(userName).orElse(null);
+                    if (user != null) {
+                        for (com.inductiveautomation.ignition.common.user.ContactInfo contact
+                                : user.getContactInfo()) {
+                            if ("email".equalsIgnoreCase(contact.getContactType())) {
+                                String email = contact.getValue();
+                                if (email != null && !email.isEmpty()) {
+                                    return email;
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    // Skip this user source, try the next one
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Error resolving email for user: " + userName, e);
+        }
+        logger.warnf("No email found in user contact info for '%s'", userName);
+        return "";
+    }
+
+    public static GitProjectsConfigRecord getGitProjectConfigRecord(String projectName) throws Exception {
+        GitProjectsConfigRecord gitProjectsConfigRecord = GitProjectsConfigRecord.findByProjectName(projectName);
+
+        if (gitProjectsConfigRecord == null) {
+            throw new Exception("Git Project not configured.");
+        }
+
+        return gitProjectsConfigRecord;
+    }
+
+    public static GitReposUsersRecord getGitReposUserRecord(GitProjectsConfigRecord gitProjectsConfigRecord,
+                                                            String userName) throws Exception {
+        GitReposUsersRecord user = GitReposUsersRecord.findByProjectAndUser(
+                gitProjectsConfigRecord.getId(), userName);
+
+        if (user == null) {
+            throw new Exception("Git User not configured.");
+        }
+
+        return user;
+    }
+
+    public static int countOccurrences(Set<String> list, String prefix) {
+        int count = 0;
+        for (String str : list) {
+            if (str.startsWith(prefix)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public static void uncommittedChangesBuilder(String projectName,
+                                                 Set<String> updates,
+                                                 String type,
+                                                 List<String> changes,
+                                                 DatasetBuilder builder) {
+        for (String update : updates) {
+            String[] rowData = new String[4];
+            String actor = "unknown";
+            String timestamp = "";
+            String path = update;
+
+            if (hasActor(path)) {
+                String[] pathSplitted = update.split("/");
+                path = String.join("/", Arrays.copyOf(pathSplitted, pathSplitted.length - 1));
+
+                actor = getActor(projectName, path);
+                timestamp = getTimestamp(projectName, path);
+            }
+
+            rowData[0] = path;
+            rowData[1] = type;
+            if (!changes.contains(path)) {
+                rowData[2] = actor;
+                rowData[3] = timestamp;
+                changes.add(path);
+                builder.addRow((Object[]) rowData);
+            }
+        }
+    }
+
+    public static boolean hasActor(String resource) {
+        boolean hasActor = false;
+
+        if (resource.startsWith("ignition")) {
+            hasActor = Boolean.TRUE;
+        }
+
+        if (resource.startsWith("com.inductiveautomation.")) {
+            hasActor = Boolean.TRUE;
+        }
+
+        return hasActor;
+    }
+
+    public static String getTimestamp(String projectName, String path) {
+        Optional<Resource> resourceOpt = getContext().getProjectManager().getResource(projectName, getResourcePath(path));
+
+        if (resourceOpt.isPresent()) {
+            return LastModification.of(resourceOpt.get())
+                    .map(LastModification::timestamp)
+                    .map(date -> new SimpleDateFormat("yyyy-MM-dd HH:mm").format(date))
+                    .orElse("");
+        }
+
+        return "";
+    }
+
+    public static String getActor(String projectName, String path) {
+        Optional<Resource> resourceOpt = getContext().getProjectManager().getResource(projectName, getResourcePath(path));
+
+        if (resourceOpt.isPresent()) {
+            return LastModification.of(resourceOpt.get()).map(LastModification::actor).orElse("unknown");
+        }
+
+        return "unknown";
+    }
+
+    public static void cloneRepo(String projectName, String userName, String URI, String branchName) {
+        File projectDirFile = getProjectFolderPath(projectName).toFile();
+        if (projectDirFile.exists()) {
+            try (Git git = Git.init().setDirectory(projectDirFile).call()) {
+                disableSsl(git);
+
+                // GIT REMOTE ADD
+                URIish urIish = new URIish(URI);
+                git.remoteAdd()
+                        .setName(urIish.getHumanishName())
+                        .setUri(urIish).call();
+
+                //GIT FETCH
+                String remoteName = urIish.getHumanishName();
+                FetchCommand fetch = git.fetch()
+                        .setRemote(remoteName)
+                        .setRefSpecs(new RefSpec("refs/heads/" + branchName + ":refs/remotes/" + remoteName + "/" + branchName));
+
+                setAuthentication(fetch, projectName, userName, "origin");
+                fetch.call();
+
+                //GIT CHECKOUT
+                CheckoutCommand checkout = git.checkout()
+                        .setCreateBranch(true)
+                        .setName(branchName)
+                        .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
+                        .setStartPoint(urIish.getHumanishName() + "/" + branchName);
+                checkout.call();
+            } catch (Exception e) {
+                logger.error(e.toString());
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+
+    public static ResourcePath getResourcePath(String resourcePath) {
+        String moduleId = "";
+        String typeId = "";
+        String resource = "";
+        String[] paths = resourcePath.split("/");
+
+        if (paths.length > 0) moduleId = paths[0];
+        if (paths.length > 1) typeId = paths[1];
+        if (paths.length > 2) resource = resourcePath.replace(moduleId + "/" + typeId + "/", "");
+
+        return new ResourcePath(new ResourceType(moduleId, typeId), resource);
+    }
+
+    public static void disableSsl(Git git) throws IOException {
+        StoredConfig config = git.getRepository().getConfig();
+        config.setBoolean("http", null, "sslVerify", false);
+        config.save();
+    }
+
+    /**
+     * Filter out JSON files whose only differences are key ordering.
+     * Compares HEAD content with working tree content using Gson's semantic equality.
+     */
+    public static Set<String> filterJsonOrderingChanges(Repository repository, Path projectPath, Set<String> files) {
+        Set<String> filtered = new LinkedHashSet<>();
+        for (String filePath : files) {
+            if (!filePath.endsWith(".json")) {
+                filtered.add(filePath);
+                continue;
+            }
+            try {
+                String oldContent = "";
+                ObjectId headId = repository.resolve("HEAD");
+                if (headId != null) {
+                    try (RevWalk revWalk = new RevWalk(repository)) {
+                        RevCommit commit = revWalk.parseCommit(headId);
+                        try (TreeWalk treeWalk = new TreeWalk(repository)) {
+                            treeWalk.addTree(commit.getTree());
+                            treeWalk.setRecursive(true);
+                            treeWalk.setFilter(PathFilter.create(filePath));
+                            if (treeWalk.next()) {
+                                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                                try (ObjectReader reader = repository.newObjectReader()) {
+                                    reader.open(treeWalk.getObjectId(0)).copyTo(out);
+                                }
+                                oldContent = out.toString();
+                            }
+                        }
+                    }
+                }
+
+                Path workingFile = projectPath.resolve(filePath);
+                String newContent = "";
+                if (Files.exists(workingFile)) {
+                    newContent = new String(Files.readAllBytes(workingFile));
+                }
+
+                Gson gson = new Gson();
+                JsonElement oldJson = gson.fromJson(oldContent, JsonElement.class);
+                JsonElement newJson = gson.fromJson(newContent, JsonElement.class);
+                if (oldJson != null && oldJson.equals(newJson)) {
+                    continue;
+                }
+            } catch (Exception e) {
+                // If anything fails, include the file (safe default)
+            }
+            filtered.add(filePath);
+        }
+        return filtered;
+    }
+
+    private static final Set<String> METADATA_FILENAMES = new HashSet<>(Arrays.asList("resource.json", "thumbnail.png"));
+
+    /**
+     * Filter out metadata-only changes from a status set. A metadata file (resource.json,
+     * thumbnail.png) is suppressed when no sibling source file in the same Ignition resource
+     * directory also changed across any status category.
+     *
+     * @param allChangedFiles union of all status sets (for cross-category sibling detection)
+     * @param targetSet       the specific status set to filter
+     * @return a new set with metadata-only entries removed
+     */
+    public static Set<String> filterMetadataOnlyChanges(Set<String> allChangedFiles, Set<String> targetSet) {
+        // Group all changed files by parent directory (only for Ignition resource paths)
+        Map<String, List<String>> dirToFiles = new HashMap<>();
+        for (String file : allChangedFiles) {
+            if (!hasActor(file)) continue;
+            int lastSlash = file.lastIndexOf('/');
+            if (lastSlash < 0) continue;
+            String dir = file.substring(0, lastSlash);
+            String filename = file.substring(lastSlash + 1);
+            dirToFiles.computeIfAbsent(dir, k -> new ArrayList<>()).add(filename);
+        }
+
+        // Identify directories that have ONLY metadata files (no source files changed)
+        Set<String> metadataOnlyDirs = new HashSet<>();
+        for (Map.Entry<String, List<String>> entry : dirToFiles.entrySet()) {
+            boolean hasSourceFile = false;
+            for (String filename : entry.getValue()) {
+                if (!METADATA_FILENAMES.contains(filename)) {
+                    hasSourceFile = true;
+                    break;
+                }
+            }
+            if (!hasSourceFile) {
+                metadataOnlyDirs.add(entry.getKey());
+            }
+        }
+
+        // Remove metadata file paths from targetSet for metadata-only directories
+        Set<String> filtered = new LinkedHashSet<>();
+        for (String file : targetSet) {
+            if (hasActor(file)) {
+                int lastSlash = file.lastIndexOf('/');
+                if (lastSlash >= 0) {
+                    String dir = file.substring(0, lastSlash);
+                    String filename = file.substring(lastSlash + 1);
+                    if (metadataOnlyDirs.contains(dir) && METADATA_FILENAMES.contains(filename)) {
+                        continue;
+                    }
+                }
+            }
+            filtered.add(file);
+        }
+        return filtered;
+    }
+
+    /**
+     * Filter out metadata-only entries from a commit file list (format "CHANGE_TYPE:path").
+     * Suppresses resource.json/thumbnail.png entries when no sibling source file in the same
+     * resource directory also changed in the commit.
+     */
+    public static List<String> filterMetadataOnlyCommitFiles(List<String> files) {
+        // Parse paths and group by parent directory
+        Map<String, List<String>> dirToFilenames = new HashMap<>();
+        for (String entry : files) {
+            int colonIdx = entry.indexOf(':');
+            if (colonIdx < 0) continue;
+            String path = entry.substring(colonIdx + 1);
+            if (!hasActor(path)) continue;
+            int lastSlash = path.lastIndexOf('/');
+            if (lastSlash < 0) continue;
+            String dir = path.substring(0, lastSlash);
+            String filename = path.substring(lastSlash + 1);
+            dirToFilenames.computeIfAbsent(dir, k -> new ArrayList<>()).add(filename);
+        }
+
+        // Identify metadata-only directories
+        Set<String> metadataOnlyDirs = new HashSet<>();
+        for (Map.Entry<String, List<String>> entry : dirToFilenames.entrySet()) {
+            boolean hasSourceFile = false;
+            for (String filename : entry.getValue()) {
+                if (!METADATA_FILENAMES.contains(filename)) {
+                    hasSourceFile = true;
+                    break;
+                }
+            }
+            if (!hasSourceFile) {
+                metadataOnlyDirs.add(entry.getKey());
+            }
+        }
+
+        // Filter out metadata entries from metadata-only directories
+        List<String> filtered = new ArrayList<>();
+        for (String entry : files) {
+            int colonIdx = entry.indexOf(':');
+            if (colonIdx >= 0) {
+                String path = entry.substring(colonIdx + 1);
+                if (hasActor(path)) {
+                    int lastSlash = path.lastIndexOf('/');
+                    if (lastSlash >= 0) {
+                        String dir = path.substring(0, lastSlash);
+                        String filename = path.substring(lastSlash + 1);
+                        if (metadataOnlyDirs.contains(dir) && METADATA_FILENAMES.contains(filename)) {
+                            continue;
+                        }
+                    }
+                }
+            }
+            filtered.add(entry);
+        }
+        return filtered;
+    }
+
+    /**
+     * Normalize JSON content by sorting keys recursively for consistent diffing.
+     * Returns the original content unchanged if it is not valid JSON.
+     */
+    public static String normalizeJson(String content) {
+        if (content == null || content.isEmpty()) return content;
+        try {
+            Gson gson = new Gson();
+            JsonElement element = gson.fromJson(content, JsonElement.class);
+            if (element != null) {
+                JsonElement sorted = sortJsonKeys(element);
+                return new GsonBuilder().setPrettyPrinting().create().toJson(sorted);
+            }
+        } catch (Exception e) {
+            // Not valid JSON, return as-is
+        }
+        return content;
+    }
+
+    private static JsonElement sortJsonKeys(JsonElement element) {
+        if (element.isJsonObject()) {
+            JsonObject original = element.getAsJsonObject();
+            JsonObject sorted = new JsonObject();
+            List<String> keys = new ArrayList<>(original.keySet());
+            Collections.sort(keys);
+            for (String key : keys) {
+                sorted.add(key, sortJsonKeys(original.get(key)));
+            }
+            return sorted;
+        } else if (element.isJsonArray()) {
+            JsonArray sortedArray = new JsonArray();
+            for (JsonElement item : element.getAsJsonArray()) {
+                sortedArray.add(sortJsonKeys(item));
+            }
+            return sortedArray;
+        }
+        return element;
+    }
+
+    public static List<String> listLocalBranches(Path projectFolderPath) throws Exception {
+        try (Git git = getGit(projectFolderPath)) {
+            List<Ref> refs = git.branchList().call();
+            List<String> branches = new ArrayList<>();
+            for (Ref ref : refs) {
+                branches.add(Repository.shortenRefName(ref.getName()));
+            }
+            return branches;
+        }
+    }
+
+    public static List<String> listRemoteBranches(Path projectFolderPath) throws Exception {
+        try (Git git = getGit(projectFolderPath)) {
+            List<Ref> refs = git.branchList().setListMode(ListBranchCommand.ListMode.REMOTE).call();
+            List<String> branches = new ArrayList<>();
+            for (Ref ref : refs) {
+                branches.add(Repository.shortenRefName(ref.getName()));
+            }
+            return branches;
+        }
+    }
+
+    public static String getCurrentBranch(Path projectFolderPath) throws Exception {
+        try (Git git = getGit(projectFolderPath)) {
+            Repository repo = git.getRepository();
+            String branch = repo.getBranch();
+            // In detached HEAD, getBranch() returns the full commit hash
+            String fullBranch = repo.getFullBranch();
+            if (fullBranch != null && !fullBranch.startsWith("refs/heads/")) {
+                return branch.substring(0, 7) + " (detached)";
+            }
+            return branch;
+        }
+    }
+
+    public static boolean createBranch(Path projectFolderPath, String branchName) throws Exception {
+        try (Git git = getGit(projectFolderPath)) {
+            git.branchCreate().setName(branchName).call();
+            return true;
+        }
+    }
+
+    private static final String STASH_PREFIX = "auto-stash: ";
+
+    public static boolean checkoutBranch(Path projectFolderPath, String branchName) throws Exception {
+        try (Git git = getGit(projectFolderPath)) {
+            String currentBranch = git.getRepository().getBranch();
+
+            // Stash uncommitted changes on the current branch
+            stashChanges(git, currentBranch);
+
+            // If a local branch with this name already exists, just switch to it.
+            if (localBranchExists(git, branchName)) {
+                git.checkout().setName(branchName).call();
+                applyStash(git, branchName);
+                return true;
+            }
+
+            // Otherwise treat branchName as a remote-tracking branch "<remote>/<branch>". The remote
+            // is not necessarily "origin", so resolve it from the configured remotes to derive the
+            // local branch name and the start-point ref (e.g. "test/master" -> local "master"
+            // tracking "test/master"). Note: git allows one local branch per name, so a branch shared
+            // across remotes collapses to a single local branch — once it exists we just switch to it.
+            String localName = branchName;
+            for (String remote : git.getRepository().getRemoteNames()) {
+                if (branchName.startsWith(remote + "/")) {
+                    localName = branchName.substring(remote.length() + 1);
+                    break;
+                }
+            }
+
+            if (localBranchExists(git, localName)) {
+                // A local branch for this name already exists (e.g. created at clone time) — switch to it.
+                git.checkout().setName(localName).call();
+            } else {
+                git.checkout()
+                        .setCreateBranch(true)
+                        .setName(localName)
+                        .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
+                        .setStartPoint(branchName)
+                        .call();
+            }
+
+            // Apply stashed changes for the target branch if any exist
+            applyStash(git, localName);
+
+            return true;
+        }
+    }
+
+    private static boolean localBranchExists(Git git, String branchName) throws Exception {
+        for (Ref ref : git.branchList().call()) {
+            if (Repository.shortenRefName(ref.getName()).equals(branchName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean checkoutCommit(Path projectFolderPath, String commitHash) throws Exception {
+        try (Git git = getGit(projectFolderPath)) {
+            String currentRef = git.getRepository().getFullBranch();
+
+            // Only stash if currently on a branch (not already detached)
+            if (currentRef != null && currentRef.startsWith("refs/heads/")) {
+                String currentBranch = Repository.shortenRefName(currentRef);
+                stashChanges(git, currentBranch);
+            }
+
+            git.checkout().setName(commitHash).call();
+            // No applyStash — detached HEAD has no branch-scoped stash
+            return true;
+        }
+    }
+
+    private static void stashChanges(Git git, String branchName) throws Exception {
+        Status status = git.status().call();
+        boolean hasChanges = !status.getUncommittedChanges().isEmpty()
+                || !status.getUntracked().isEmpty()
+                || !status.getModified().isEmpty()
+                || !status.getMissing().isEmpty();
+
+        if (hasChanges) {
+            git.stashCreate()
+                    .setIncludeUntracked(true)
+                    .setWorkingDirectoryMessage(STASH_PREFIX + branchName)
+                    .call();
+        }
+    }
+
+    private static void applyStash(Git git, String branchName) throws Exception {
+        String targetMessage = STASH_PREFIX + branchName;
+        Collection<RevCommit> stashes = git.stashList().call();
+        int index = 0;
+        for (RevCommit stash : stashes) {
+            if (stash.getFullMessage().contains(targetMessage)) {
+                try {
+                    git.stashApply().setStashRef("stash@{" + index + "}").call();
+                } catch (org.eclipse.jgit.api.errors.StashApplyFailureException e) {
+                    // Stash conflicts with the current branch state — reset the
+                    // failed merge and discard the stash so checkout can proceed.
+                    logger.warn("Stash for branch '" + branchName + "' could not be applied cleanly; discarding stashed changes.", e);
+                    git.reset().setMode(ResetCommand.ResetType.HARD).call();
+                }
+                git.stashDrop().setStashRef(index).call();
+                return;
+            }
+            index++;
+        }
+    }
+
+    public static List<String> getResourceDiffContent(String projectName, String resourcePath) {
+        Path projectPath = getProjectFolderPath(projectName);
+
+        // For Ignition resources, the directory contains resource.json (metadata) plus
+        // one or more data files (view.json, data.bin, code.py, etc.).
+        // We want the data files, not the metadata.
+        String filePath = resourcePath;
+        if (hasActor(resourcePath)) {
+            filePath = findDataFile(projectPath, resourcePath);
+        }
+
+        return getWorkingTreeDiffContent(projectPath, filePath);
+    }
+
+    /** {@code [oldContent, newContent]} of one file, HEAD vs working tree (JSON-normalized). */
+    public static List<String> getWorkingTreeDiffContent(Path workDir, String filePath) {
+        String oldContent = "";
+        String newContent = "";
+
+        // Read old content from HEAD
+        try (Repository repository = getGit(workDir).getRepository()) {
+            ObjectId headId = repository.resolve("HEAD");
+            if (headId != null) {
+                try (RevWalk revWalk = new RevWalk(repository)) {
+                    RevCommit commit = revWalk.parseCommit(headId);
+                    RevTree tree = commit.getTree();
+
+                    try (TreeWalk treeWalk = new TreeWalk(repository)) {
+                        treeWalk.addTree(tree);
+                        treeWalk.setRecursive(true);
+                        treeWalk.setFilter(PathFilter.create(filePath));
+
+                        if (treeWalk.next()) {
+                            ObjectId objectId = treeWalk.getObjectId(0);
+                            ByteArrayOutputStream out = new ByteArrayOutputStream();
+                            try (ObjectReader reader = repository.newObjectReader()) {
+                                reader.open(objectId).copyTo(out);
+                            }
+                            oldContent = out.toString();
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            logger.error("Error reading HEAD content for diff", e);
+        }
+
+        // Read new content from working tree
+        Path workingTreeFile = workDir.resolve(filePath.replace("/", File.separator));
+        if (Files.exists(workingTreeFile)) {
+            try {
+                newContent = new String(Files.readAllBytes(workingTreeFile));
+            } catch (IOException e) {
+                logger.error("Error reading working tree content for diff", e);
+            }
+        }
+
+        // Normalize JSON to eliminate key-ordering noise in diffs
+        if (filePath.endsWith(".json")) {
+            oldContent = normalizeJson(oldContent);
+            newContent = normalizeJson(newContent);
+        }
+
+        return Arrays.asList(oldContent, newContent);
+    }
+
+    /**
+     * Find the primary data file inside an Ignition resource directory,
+     * skipping resource.json (which is metadata).
+     * Falls back to resource.json if no other files exist.
+     */
+    private static String findDataFile(Path projectPath, String resourcePath) {
+        Path resourceDir = projectPath.resolve(resourcePath.replace("/", File.separator));
+        if (Files.isDirectory(resourceDir)) {
+            try {
+                java.util.Optional<Path> dataFile = Files.list(resourceDir)
+                        .filter(Files::isRegularFile)
+                        .filter(p -> !p.getFileName().toString().equals("resource.json"))
+                        .filter(p -> !p.getFileName().toString().equals("thumbnail.png"))
+                        .findFirst();
+                if (dataFile.isPresent()) {
+                    return resourcePath + "/" + dataFile.get().getFileName().toString();
+                }
+            } catch (IOException e) {
+                logger.error("Error listing resource directory", e);
+            }
+        }
+        // Fallback to resource.json if no data file found
+        return resourcePath + "/resource.json";
+    }
+
+    public static boolean deleteBranch(Path projectFolderPath, String branchName) throws Exception {
+        try (Git git = getGit(projectFolderPath)) {
+            String currentBranch = git.getRepository().getBranch();
+            if (branchName.equals(currentBranch)) {
+                throw new IllegalStateException("Cannot delete the currently checked out branch: " + branchName);
+            }
+            git.branchDelete().setBranchNames(branchName).setForce(true).call();
+            return true;
+        }
+    }
+
+    /**
+     * Get paginated commit history from the repository log.
+     *
+     * @param projectFolderPath path to the git working directory
+     * @param skip              number of commits to skip (for pagination)
+     * @param limit             maximum number of commits to return
+     * @return list of String arrays: [fullHash, shortHash, author, date, message, refs]
+     */
+    public static List<String[]> getCommitLog(Path projectFolderPath, int skip, int limit) {
+        List<String[]> commits = new ArrayList<>();
+        try (Git git = getGit(projectFolderPath)) {
+            Repository repo = git.getRepository();
+
+            // Build a map of commit hash → branch names for ref decorations
+            Map<String, List<String>> refMap = new HashMap<>();
+            for (Ref ref : repo.getRefDatabase().getRefsByPrefix(Constants.R_HEADS)) {
+                ObjectId id = ref.getPeeledObjectId() != null ? ref.getPeeledObjectId() : ref.getObjectId();
+                String name = ref.getName().substring(Constants.R_HEADS.length());
+                refMap.computeIfAbsent(id.getName(), k -> new ArrayList<>()).add(name);
+            }
+            for (Ref ref : repo.getRefDatabase().getRefsByPrefix(Constants.R_REMOTES)) {
+                ObjectId id = ref.getPeeledObjectId() != null ? ref.getPeeledObjectId() : ref.getObjectId();
+                String name = ref.getName().substring(Constants.R_REMOTES.length());
+                refMap.computeIfAbsent(id.getName(), k -> new ArrayList<>()).add(name);
+            }
+
+            LogCommand logCmd = git.log().setSkip(skip).setMaxCount(limit);
+
+            // Include the upstream remote-tracking branch so fetched commits
+            // appear in the history even before merging/pulling.
+            String branch = repo.getBranch();
+            if (branch != null) {
+                BranchConfig branchConfig = new BranchConfig(repo.getConfig(), branch);
+                String trackingBranch = branchConfig.getTrackingBranch();
+                if (trackingBranch != null) {
+                    Ref trackingRef = repo.exactRef(trackingBranch);
+                    if (trackingRef != null) {
+                        // Adding any ref disables the default HEAD start, so add both
+                        ObjectId headId = repo.resolve(Constants.HEAD);
+                        if (headId != null) {
+                            logCmd.add(headId);
+                        }
+                        ObjectId trackingId = trackingRef.getObjectId();
+                        if (trackingId != null) {
+                            logCmd.add(trackingId);
+                        }
+                    }
+                }
+            }
+
+            Iterable<RevCommit> log = logCmd.call();
+            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+            for (RevCommit commit : log) {
+                String fullHash = commit.getName();
+                String shortHash = fullHash.substring(0, 7);
+                String authorName = commit.getAuthorIdent().getName();
+                String authorEmail = commit.getAuthorIdent().getEmailAddress();
+                String author = (authorName == null || authorName.isEmpty()) ? authorEmail : authorName;
+                String date = dateFormat.format(commit.getAuthorIdent().getWhen());
+                String message = commit.getShortMessage();
+                List<String> refs = refMap.getOrDefault(fullHash, java.util.Collections.emptyList());
+                String refsStr = String.join(",", refs);
+                commits.add(new String[]{fullHash, shortHash, author, date, message, refsStr});
+            }
+        } catch (Exception e) {
+            logger.error("Error getting commit log", e);
+        }
+        return commits;
+    }
+
+    /**
+     * List files changed in a specific commit by diffing against its parent tree.
+     * Handles initial commits (no parent) via {@link EmptyTreeIterator}.
+     *
+     * @param projectFolderPath path to the git working directory
+     * @param commitHash        full SHA-1 hash of the commit
+     * @return list of strings in format "CHANGE_TYPE:path" (e.g. "ADD:src/Foo.java")
+     */
+    public static List<String> getCommitFileList(Path projectFolderPath, String commitHash) {
+        List<String> files = new ArrayList<>();
+        try (Git git = getGit(projectFolderPath);
+             Repository repository = git.getRepository()) {
+
+            ObjectId commitId = repository.resolve(commitHash);
+            try (RevWalk revWalk = new RevWalk(repository)) {
+                RevCommit commit = revWalk.parseCommit(commitId);
+
+                AbstractTreeIterator parentTreeIter;
+                if (commit.getParentCount() > 0) {
+                    RevCommit parent = revWalk.parseCommit(commit.getParent(0).getId());
+                    parentTreeIter = prepareTreeParser(repository, parent);
+                } else {
+                    parentTreeIter = new EmptyTreeIterator();
+                }
+
+                AbstractTreeIterator commitTreeIter = prepareTreeParser(repository, commit);
+
+                try (DiffFormatter diffFormatter = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
+                    diffFormatter.setRepository(repository);
+                    List<DiffEntry> diffs = diffFormatter.scan(parentTreeIter, commitTreeIter);
+                    for (DiffEntry entry : diffs) {
+                        String path = entry.getChangeType() == DiffEntry.ChangeType.DELETE
+                                ? entry.getOldPath()
+                                : entry.getNewPath();
+                        files.add(entry.getChangeType().name() + ":" + path);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Error getting commit file list", e);
+        }
+        return files;
+    }
+
+    /**
+     * Get the old (parent) and new (commit) content for a specific file at a given commit.
+     *
+     * @param projectFolderPath path to the git working directory
+     * @param commitHash        full SHA-1 hash of the commit
+     * @param filePath          repository-relative file path
+     * @return two-element list: [oldContent, newContent]; empty strings for missing content
+     */
+    public static List<String> getCommitFileDiffContent(Path projectFolderPath, String commitHash, String filePath) {
+        String oldContent = "";
+        String newContent = "";
+
+        try (Git git = getGit(projectFolderPath);
+             Repository repository = git.getRepository()) {
+
+            ObjectId commitId = repository.resolve(commitHash);
+            try (RevWalk revWalk = new RevWalk(repository)) {
+                RevCommit commit = revWalk.parseCommit(commitId);
+
+                // Get new content from the commit
+                newContent = getFileContentAtCommit(repository, commit, filePath);
+
+                // Get old content from parent (if exists)
+                if (commit.getParentCount() > 0) {
+                    RevCommit parent = revWalk.parseCommit(commit.getParent(0).getId());
+                    oldContent = getFileContentAtCommit(repository, parent, filePath);
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Error getting commit file diff content", e);
+        }
+
+        if (filePath.endsWith(".json")) {
+            oldContent = normalizeJson(oldContent);
+            newContent = normalizeJson(newContent);
+        }
+
+        return Arrays.asList(oldContent, newContent);
+    }
+
+    /** Create a {@link CanonicalTreeParser} positioned at the root of a commit's tree. */
+    private static CanonicalTreeParser prepareTreeParser(Repository repository, RevCommit commit) throws IOException {
+        try (ObjectReader reader = repository.newObjectReader()) {
+            CanonicalTreeParser treeParser = new CanonicalTreeParser();
+            treeParser.reset(reader, commit.getTree().getId());
+            return treeParser;
+        }
+    }
+
+    /** Read the UTF-8 content of a file at a specific commit, or empty string if not found. */
+    private static String getFileContentAtCommit(Repository repository, RevCommit commit, String filePath) {
+        try (TreeWalk treeWalk = new TreeWalk(repository)) {
+            treeWalk.addTree(commit.getTree());
+            treeWalk.setRecursive(true);
+            treeWalk.setFilter(PathFilter.create(filePath));
+
+            if (treeWalk.next()) {
+                ObjectId objectId = treeWalk.getObjectId(0);
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                try (ObjectReader reader = repository.newObjectReader()) {
+                    reader.open(objectId).copyTo(out);
+                }
+                return out.toString();
+            }
+        } catch (IOException e) {
+            logger.error("Error reading file content at commit", e);
+        }
+        return "";
+    }
+
+    /**
+     * Discard uncommitted changes for the given paths.
+     * Tracked (modified/deleted) files are checked out from HEAD.
+     * Untracked (created) files are deleted via git clean.
+     *
+     * @param projectFolderPath path to the git working directory
+     * @param paths             list of resource paths to discard
+     * @return true if discard succeeded
+     */
+    public static boolean discardChanges(Path projectFolderPath, List<String> paths) {
+        try (Git git = getGit(projectFolderPath)) {
+            Status status = git.status().call();
+            Set<String> untracked = status.getUntracked();
+
+            List<String> trackedPaths = new ArrayList<>();
+            Set<String> untrackedPaths = new HashSet<>();
+
+            for (String path : paths) {
+                boolean isUntracked = false;
+                for (String u : untracked) {
+                    if (u.equals(path) || u.startsWith(path + "/")) {
+                        isUntracked = true;
+                        break;
+                    }
+                }
+                if (isUntracked) {
+                    untrackedPaths.add(path);
+                } else {
+                    trackedPaths.add(path);
+                }
+            }
+
+            // Revert tracked files to HEAD
+            if (!trackedPaths.isEmpty()) {
+                CheckoutCommand checkout = git.checkout();
+                for (String path : trackedPaths) {
+                    checkout.addPath(path);
+                }
+                checkout.call();
+            }
+
+            // Remove untracked files directly. JGit's CleanCommand.setPaths()
+            // + setCleanDirectories(true) silently no-ops on file paths that
+            // aren't in getUntrackedFolders(); deleting via Files is reliable.
+            for (String path : untrackedPaths) {
+                Path target = projectFolderPath.resolve(path);
+                if (java.nio.file.Files.isDirectory(target)) {
+                    try (java.util.stream.Stream<Path> walk = java.nio.file.Files.walk(target)) {
+                        walk.sorted(java.util.Comparator.reverseOrder())
+                                .forEach(p -> {
+                                    try {
+                                        java.nio.file.Files.deleteIfExists(p);
+                                    } catch (IOException ex) {
+                                        logger.warn("Failed to delete " + p + " during discard", ex);
+                                    }
+                                });
+                    }
+                } else {
+                    java.nio.file.Files.deleteIfExists(target);
+                }
+            }
+
+            return true;
+        } catch (Exception e) {
+            logger.error("Error discarding changes", e);
+            return false;
+        }
+    }
+
+    /**
+     * Create a new commit that reverses the changes of the specified commit (git revert).
+     * If the revert produces merge conflicts, the operation is aborted via hard reset
+     * and an error is thrown so the repo is never left in a conflicted state.
+     */
+    public static boolean revertCommit(Path projectFolderPath, String commitHash) {
+        try (Git git = getGit(projectFolderPath)) {
+            Repository repo = git.getRepository();
+            ObjectId commitId = repo.resolve(commitHash);
+            if (commitId == null) {
+                throw new RuntimeException("Commit not found: " + commitHash);
+            }
+
+            // Guard against reverting commits that aren't reachable from the
+            // current HEAD. The History panel shows both the current branch
+            // and its upstream tracking branch, so users can pick a remote-only
+            // commit by mistake; JGit's revert silently does nothing for those.
+            ObjectId headId = repo.resolve(Constants.HEAD);
+            if (headId == null) {
+                throw new RuntimeException("Cannot revert: HEAD is not resolvable.");
+            }
+            try (RevWalk walk = new RevWalk(repo)) {
+                RevCommit headCommit = walk.parseCommit(headId);
+                RevCommit targetCommit = walk.parseCommit(commitId);
+                walk.markStart(headCommit);
+                boolean reachable = false;
+                for (RevCommit c : walk) {
+                    if (c.getId().equals(targetCommit.getId())) {
+                        reachable = true;
+                        break;
+                    }
+                }
+                if (!reachable) {
+                    throw new RuntimeException("Cannot revert: commit "
+                            + commitId.abbreviate(7).name()
+                            + " is not on the current branch. Check out the branch that contains it first.");
+                }
+            }
+
+            RevCommit result = git.revert().include(commitId).call();
+            if (result == null) {
+                // Revert produced conflicts — abort to avoid leaving repo in conflicted state
+                git.reset().setMode(ResetCommand.ResetType.HARD).call();
+                throw new RuntimeException("Revert failed — conflicts detected. The revert has been aborted.");
+            }
+            return true;
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("Error reverting commit " + commitHash, e);
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Restore the working tree and index to exactly match the tree of {@code targetHash},
+     * WITHOUT moving the current branch ref (HEAD stays on the branch). This is the primitive
+     * behind "restore config to version X": after this call the index is staged so the caller
+     * commits a forward "Restore to …" commit, keeping history linear and the repo on a branch
+     * (unlike {@link #checkoutCommit} which detaches HEAD).
+     *
+     * Robust to a dirty working tree: tracked files are overwritten to the target content,
+     * tracked files that exist at HEAD but not in the target are removed, and untracked
+     * (non-ignored) files are deleted via {@code git clean} — so the working tree ends up
+     * exactly matching the target version. {@code .gitignore} is honored, so ignored paths
+     * (db/logs/keystore/projects) are always preserved.
+     */
+    public static void restoreTree(Path workDir, String targetHash) {
+        try (Git git = getGit(workDir)) {
+            Repository repo = git.getRepository();
+            ObjectId targetId = repo.resolve(targetHash);
+            if (targetId == null) {
+                throw new RuntimeException("Commit not found: " + targetHash);
+            }
+            ObjectId headId = repo.resolve(Constants.HEAD);
+            if (headId == null) {
+                throw new RuntimeException("Cannot restore: HEAD is not resolvable.");
+            }
+
+            try (RevWalk walk = new RevWalk(repo)) {
+                RevCommit targetCommit = walk.parseCommit(targetId);
+                RevCommit headCommit = walk.parseCommit(headId);
+
+                // 1. Remove tracked files that exist at HEAD but not in the target. Diff with
+                //    old=target, new=head: ChangeType.ADD == present in head, absent in target.
+                AbstractTreeIterator targetTree = prepareTreeParser(repo, targetCommit);
+                AbstractTreeIterator headTree = prepareTreeParser(repo, headCommit);
+                try (DiffFormatter df = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
+                    df.setRepository(repo);
+                    for (DiffEntry e : df.scan(targetTree, headTree)) {
+                        if (e.getChangeType() == DiffEntry.ChangeType.ADD) {
+                            git.rm().addFilepattern(e.getNewPath()).call();
+                        }
+                    }
+                }
+
+                // 2. Restore every path in the target tree to the target content (overwriting any
+                //    dirty tracked files), staged for the forward commit.
+                git.checkout().setStartPoint(targetCommit).setAllPaths(true).call();
+
+                // 3. Delete stray untracked (non-ignored) files so the working tree matches the
+                //    target. NOTE: intentionally NO setCleanDirectories(true) — a directory clean
+                //    deletes untracked directories wholesale, taking gitignored runtime data nested
+                //    inside them with it (e.g. config/ignition/tags/valueStore.idb, the tag value
+                //    store), which JGit does not spare the way C git does. Tracked deletions are
+                //    already handled by step 1's git rm.
+                git.clean().call();
+            }
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("Error restoring tree to " + targetHash, e);
+            throw new RuntimeException(e);
+        }
+    }
+
+    // ── Remote management ──────────────────────────────────────────────
+
+    /**
+     * List all remotes configured in the git repository.
+     *
+     * @param projectFolderPath path to the git working directory
+     * @return list of String arrays: [name, url]
+     */
+    public static List<String[]> listRemotes(Path projectFolderPath) throws Exception {
+        List<String[]> remotes = new ArrayList<>();
+        try (Git git = getGit(projectFolderPath)) {
+            List<RemoteConfig> configs = git.remoteList().call();
+            for (RemoteConfig config : configs) {
+                String name = config.getName();
+                String url = config.getURIs().isEmpty() ? "" : config.getURIs().get(0).toString();
+                remotes.add(new String[]{name, url});
+            }
+        }
+        return remotes;
+    }
+
+    public static void addRemote(Path projectFolderPath, String name, String url) throws Exception {
+        try (Git git = getGit(projectFolderPath)) {
+            git.remoteAdd().setName(name).setUri(new URIish(url)).call();
+        }
+    }
+
+    public static void removeRemote(Path projectFolderPath, String name) throws Exception {
+        try (Git git = getGit(projectFolderPath)) {
+            git.remoteRemove().setRemoteName(name).call();
+            // remoteRemove() only clears the remote.<name> config section; it leaves the
+            // remote-tracking refs behind, so prune refs/remotes/<name>/* as well —
+            // otherwise the removed remote's branches keep showing in the branch list.
+            Repository repo = git.getRepository();
+            for (Ref ref : repo.getRefDatabase().getRefsByPrefix(Constants.R_REMOTES + name + "/")) {
+                RefUpdate update = repo.updateRef(ref.getName());
+                update.setForceUpdate(true);
+                update.delete();
+            }
+        }
+    }
+
+    public static void setRemoteUrl(Path projectFolderPath, String name, String newUrl) throws Exception {
+        try (Git git = getGit(projectFolderPath)) {
+            git.remoteSetUrl().setRemoteName(name).setRemoteUri(new URIish(newUrl)).call();
+        }
+    }
+
+    /**
+     * Get the URL of a named remote from the git config.
+     */
+    public static String getRemoteUrl(Path projectFolderPath, String remoteName) throws Exception {
+        try (Git git = getGit(projectFolderPath)) {
+            List<RemoteConfig> configs = git.remoteList().call();
+            for (RemoteConfig config : configs) {
+                if (config.getName().equals(remoteName)) {
+                    return config.getURIs().isEmpty() ? null : config.getURIs().get(0).toString();
+                }
+            }
+        }
+        return null;
+    }
+
+    // ── Merge conflict resolution ──────────────────────────────────────
+
+    /**
+     * Get the list of files currently in merge conflict.
+     */
+    public static List<String> getConflictingFiles(Path projectFolderPath) {
+        try (Git git = getGit(projectFolderPath)) {
+            Status status = git.status().call();
+            return new ArrayList<>(status.getConflicting());
+        } catch (Exception e) {
+            logger.error("Error getting conflicting files", e);
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Resolve a single conflicting file by accepting "ours" or "theirs" stage.
+     * After checkout, marks the file as resolved by adding it to the index.
+     *
+     * @param stage "OURS" or "THEIRS"
+     */
+    public static boolean resolveConflict(Path projectFolderPath, String filePath, String stage) {
+        try (Git git = getGit(projectFolderPath)) {
+            CheckoutCommand.Stage checkoutStage = "OURS".equals(stage)
+                    ? CheckoutCommand.Stage.OURS
+                    : CheckoutCommand.Stage.THEIRS;
+            git.checkout().setStage(checkoutStage).addPath(filePath).call();
+            git.add().addFilepattern(filePath).call();
+            return true;
+        } catch (Exception e) {
+            logger.error("Error resolving conflict for " + filePath, e);
+            throw new RuntimeException("Failed to resolve conflict: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Abort the current merge by performing a hard reset to HEAD.
+     */
+    public static boolean abortMerge(Path projectFolderPath) {
+        try (Git git = getGit(projectFolderPath)) {
+            git.reset().setMode(ResetCommand.ResetType.HARD).call();
+            return true;
+        } catch (Exception e) {
+            logger.error("Error aborting merge", e);
+            throw new RuntimeException("Failed to abort merge: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Complete a merge by committing after all conflicts are resolved.
+     * Reads the default merge commit message from .git/MERGE_MSG.
+     */
+    public static boolean completeMergeCommit(Path projectFolderPath, String projectName, String userName) {
+        try (Git git = getGit(projectFolderPath)) {
+            // Verify no remaining conflicts
+            Status status = git.status().call();
+            if (!status.getConflicting().isEmpty()) {
+                throw new RuntimeException("Cannot complete merge: " +
+                        status.getConflicting().size() + " unresolved conflict(s) remain.");
+            }
+            CommitCommand commit = git.commit();
+            commit.setMessage(readMergeMessage(git.getRepository()));
+            setCommitAuthor(commit, projectName, userName);
+            commit.call();
+            return true;
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("Error completing merge commit", e);
+            throw new RuntimeException("Failed to complete merge: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Read the merge message generated by git during the merge (.git/MERGE_MSG).
+     */
+    private static String readMergeMessage(Repository repository) {
+        try {
+            Path mergeMsgFile = repository.getDirectory().toPath().resolve("MERGE_MSG");
+            if (java.nio.file.Files.exists(mergeMsgFile)) {
+                return new String(java.nio.file.Files.readAllBytes(mergeMsgFile)).trim();
+            }
+        } catch (IOException e) {
+            logger.warn("Could not read MERGE_MSG", e);
+        }
+        return "Merge commit";
+    }
+
+    /**
+     * Get the "ours" (HEAD) and "theirs" (MERGE_HEAD) content for a conflicting file.
+     *
+     * @return two-element list: [oursContent, theirsContent]
+     */
+    public static List<String> getConflictDiffContent(Path projectFolderPath, String filePath) {
+        String oursContent = "";
+        String theirsContent = "";
+
+        try (Git git = getGit(projectFolderPath)) {
+            Repository repository = git.getRepository();
+
+            // Read ours (HEAD)
+            ObjectId headId = repository.resolve("HEAD");
+            if (headId != null) {
+                try (RevWalk revWalk = new RevWalk(repository)) {
+                    RevCommit headCommit = revWalk.parseCommit(headId);
+                    oursContent = getFileContentAtCommit(repository, headCommit, filePath);
+                }
+            }
+
+            // Read theirs (MERGE_HEAD)
+            ObjectId mergeHeadId = repository.resolve("MERGE_HEAD");
+            if (mergeHeadId != null) {
+                try (RevWalk revWalk = new RevWalk(repository)) {
+                    RevCommit mergeCommit = revWalk.parseCommit(mergeHeadId);
+                    theirsContent = getFileContentAtCommit(repository, mergeCommit, filePath);
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Error getting conflict diff content for " + filePath, e);
+        }
+
+        if (filePath.endsWith(".json")) {
+            oursContent = normalizeJson(oursContent);
+            theirsContent = normalizeJson(theirsContent);
+        }
+
+        return Arrays.asList(oursContent, theirsContent);
+    }
+
+    // ── Per-remote credential lookup ───────────────────────────────────
+
+    /**
+     * Look up a {@link GitRemoteCredentialsRecord} for a given project, user, and remote name.
+     *
+     * @return the credential record, or null if not found
+     */
+    public static GitRemoteCredentialsRecord getRemoteCredentialsRecord(
+            String projectName, String userName, String remoteName) throws Exception {
+        GitProjectsConfigRecord projectRecord = getGitProjectConfigRecord(projectName);
+        return GitRemoteCredentialsRecord.findByProjectUserRemote(
+                projectRecord.getId(), userName, remoteName);
+    }
+
+}

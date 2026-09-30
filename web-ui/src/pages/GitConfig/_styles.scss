@@ -1,0 +1,748 @@
+// The platform Button's outlined (colorClass="secondary") and text (colorClass="link") variants
+// render --primary (#0c7bb3) text on a --primary-10 (#e8f4fa) fill, 4.17:1 -- under 4.5:1
+// (measured 8.3.8, resting state). --primary-70 is the platform's own next-darkest step on the
+// same token ramp (5.9:1 on --primary-10); Button takes no colour override, so this reaches past
+// it as the Chip rule above does.
+.MuiButton-outlinedPrimary,
+.MuiButton-textPrimary {
+  color: var(--primary-70);
+}
+
+// Visible focus ring on every control this page's JS mounts, including the Drawer/DrawerTemplate
+// chrome that renders in a portal outside `.gitcfg` (SettingsDrawer, ConfigDrawer) -- the platform
+// inputs and buttons suppress their own outline and draw nothing in its place. Unscoped so it
+// still reaches the drawer's header and footer buttons; only in scope while this bundle is
+// mounted, so it cannot bleed into other gateway pages. `!important`: MUI's OutlinedInput/Select
+// classes carry their own `:focus-visible{outline:0}` at higher specificity (measured 8.3.8 --
+// TextInput and SelectInput still showed no ring without it).
+:focus-visible {
+  outline: 2px solid var(--neutral-100) !important;
+  outline-offset: 1px;
+}
+
+// Colour and weight come from the platform's tokens (--neutral-10…100, --primary, --success,
+// --error, --warning, --font-weight-*), which the gateway shell defines at runtime. It defines no
+// type scale, spacing, radius or monospace stack, so those are declared once here and nowhere else.
+.gitcfg {
+  --gitcfg-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo,
+    monospace;
+  --gitcfg-text-sm: 11px;
+  --gitcfg-text-md: 13px;
+  --gitcfg-text-lg: 15px;
+  --gitcfg-space-1: 0.25rem;
+  --gitcfg-space-2: 0.5rem;
+  --gitcfg-space-3: 0.75rem;
+  --gitcfg-space-4: 1rem;
+  --gitcfg-space-5: 1.5rem;
+  --gitcfg-radius: 4px;
+  --gitcfg-border: 1px solid var(--neutral-20);
+
+  font-size: var(--gitcfg-text-md);
+
+  // One h4 for the whole page. It rendered at three sizes depending on which tab it was on.
+  h4 {
+    margin: var(--gitcfg-space-5) 0 var(--gitcfg-space-1);
+    font-size: var(--gitcfg-text-md);
+    font-weight: var(--font-weight-bold);
+    color: var(--neutral-80);
+  }
+
+  code {
+    font-family: var(--gitcfg-font-mono);
+  }
+}
+
+// A bordered box: forms, diffs, the file tree, copyable snippets.
+@mixin gitcfg-surface {
+  border: var(--gitcfg-border);
+  border-radius: var(--gitcfg-radius);
+}
+
+.gitcfg-content {
+  padding: var(--gitcfg-space-4) 1.25rem;
+}
+
+// --- Page header: every tab opens with this --------------------------------------------
+.gitcfg-page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gitcfg-space-4);
+  margin-bottom: var(--gitcfg-space-4);
+
+  h3 {
+    margin: 0 0 var(--gitcfg-space-1);
+    font-size: var(--gitcfg-text-lg);
+    font-weight: var(--font-weight-bold);
+  }
+
+  p,
+  .gitcfg-page-desc {
+    margin: 0;
+    color: var(--neutral-70);
+    line-height: 1.5;
+    max-width: 46rem;
+  }
+}
+
+// Center the BlankState card in the page (its parent is a plain block) — both axes, so it sits
+// mid-page like the platform's empty-state pages instead of hugging the top.
+.gitcfg-blank-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: calc(100vh - 220px);
+}
+
+// BlankState's icon container is a fixed 140×140 box (built for an <img> that fills it); collapse it
+// to the SVG's size and tighten the gap to the text so the icon reads bigger and sits closer.
+// Reaches into the platform component's DOM, so re-check it after a web-ui package upgrade.
+.gitcfg-blank > div:first-child {
+  height: auto;
+  width: auto;
+  margin-bottom: var(--gitcfg-space-3);
+}
+
+// Remote sync status text in the header — bold, slightly larger, no chip background.
+.gitcfg-sync-status {
+  font-weight: var(--font-weight-bold);
+  font-size: var(--gitcfg-text-lg);
+  white-space: nowrap;
+}
+.gitcfg-sync-off {
+  color: var(--warning-dark);
+}
+.gitcfg-sync-ok {
+  color: var(--neutral-60); // muted: calm when up to date
+}
+
+// Header action cluster (last-push status + Push + cog), flush right in the PageHeader row.
+.gitcfg-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gitcfg-space-2);
+  margin-left: auto;
+
+  // Icon-only (cog) button: center the glyph regardless of the button's default padding.
+  button svg {
+    display: block;
+  }
+}
+
+// Form wrapper. Matches the platform config drawers (e.g. Redundancy): a 16px gutter around the
+// cards and 16px between them; the Card component supplies its own grey header + white content.
+.gitcfg-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gitcfg-space-4);
+  padding: var(--gitcfg-space-4);
+  box-sizing: border-box;
+  width: 100%;
+}
+
+// A section within a tab: its h4 and its buttons on one line.
+.gitcfg-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gitcfg-space-4);
+  margin: var(--gitcfg-space-5) 0 var(--gitcfg-space-2);
+
+  h4 {
+    margin: 0;
+  }
+}
+
+// One button row. `.is-end` right-aligns it, as a form footer.
+.gitcfg-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gitcfg-space-2);
+  flex-shrink: 0;
+
+  &.is-end {
+    justify-content: flex-end;
+  }
+}
+
+// Danger Zone card: red header bar so the destructive section reads as dangerous. Targets the
+// platform Card's internal header class — re-check it after a web-ui package upgrade.
+.gitcfg-danger-card {
+  .ia-card-header {
+    background: var(--error);
+  }
+
+  p {
+    margin: 0 0 var(--gitcfg-space-3);
+    line-height: 1.4;
+  }
+}
+
+// --- Text ------------------------------------------------------------------------------
+
+// Explanatory text under a heading or a control. One class for the whole page.
+.gitcfg-hint {
+  color: var(--neutral-60);
+  font-size: var(--gitcfg-text-md);
+  line-height: 1.45;
+  margin: var(--gitcfg-space-1) 0 var(--gitcfg-space-2);
+  max-width: 60rem;
+}
+
+ul.gitcfg-hint {
+  padding-left: 1.1rem;
+
+  li {
+    margin: 0.2rem 0;
+  }
+}
+
+// Field description inside the platform's FormControlInput, matched to its native 12px grey
+// (a custom ReactNode description otherwise renders at 16px).
+.gitcfg-desc {
+  display: block;
+  font-size: 12px;
+  color: var(--neutral-60);
+}
+
+.gitcfg-provider-error {
+  display: block;
+  margin-top: var(--gitcfg-space-1);
+  color: var(--error);
+  font-size: 12px;
+}
+
+.gitcfg-empty {
+  color: var(--neutral-60);
+  padding: var(--gitcfg-space-4) var(--gitcfg-space-1);
+}
+
+.gitcfg-mono {
+  font-family: var(--gitcfg-font-mono);
+}
+
+// What a tick, a struck-through row and the right-hand column mean, above the Git Ignore tree.
+// One quiet row under the tree, each entry showing the mark itself rather than naming it.
+.gitcfg-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gitcfg-space-1) var(--gitcfg-space-4);
+  // Its own breathing room at both ends — flush against the foot of the window it read as a
+  // cut-off row rather than a caption for the tree.
+  margin: var(--gitcfg-space-2) 0;
+  padding: 0;
+  list-style: none;
+  color: var(--neutral-60);
+  font-size: var(--gitcfg-text-sm);
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  // They are pictures of the tree's marks, not controls: clicking one ticked it.
+  input[type="checkbox"] {
+    margin: 0;
+    pointer-events: none;
+  }
+}
+
+// A question mark beside the page's one-line description; the detail lives in its popover.
+.gitcfg-help {
+  position: relative;
+  display: inline-block;
+  margin-left: var(--gitcfg-space-2);
+}
+
+.gitcfg-help-btn {
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border: 1px solid var(--neutral-40);
+  border-radius: 50%;
+  background: none;
+  color: var(--neutral-60);
+  font-size: var(--gitcfg-text-sm);
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+}
+
+.gitcfg-help-pop {
+  @include gitcfg-surface;
+  position: absolute;
+  z-index: 5;
+  top: 1.6rem;
+  left: 0;
+  display: block;
+  width: 30rem;
+  padding: var(--gitcfg-space-3);
+  background: var(--neutral-10);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 35%);
+  color: var(--neutral-70);
+  font-size: var(--gitcfg-text-md);
+  font-weight: normal;
+
+  strong {
+    color: var(--neutral-90);
+  }
+
+  p {
+    margin: var(--gitcfg-space-2) 0;
+  }
+
+  ul {
+    margin: 0;
+    padding-left: 1.1rem;
+  }
+
+  li {
+    margin-bottom: var(--gitcfg-space-1);
+  }
+}
+
+// The module version, under the page title on every tab.
+.gitcfg-version {
+  margin: 0 0 var(--gitcfg-space-2);
+  color: var(--neutral-60);
+  font-size: var(--gitcfg-text-sm);
+}
+
+// Status words. One colour per meaning, used by every tab.
+.gitcfg-ok {
+  color: var(--success);
+}
+.gitcfg-dirty {
+  color: var(--warning-dark);
+}
+.gitcfg-off {
+  color: var(--neutral-60);
+}
+.gitcfg-err {
+  color: var(--error);
+}
+
+// --- Diff ------------------------------------------------------------------------------
+.gitcfg-files {
+  padding: var(--gitcfg-space-2) var(--gitcfg-space-1);
+
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 2px 0;
+  }
+}
+
+.gitcfg-diff {
+  @include gitcfg-surface;
+  margin-top: var(--gitcfg-space-2);
+}
+
+.gitcfg-diff-title {
+  padding: var(--gitcfg-space-1) var(--gitcfg-space-2);
+  background: var(--neutral-10);
+  font-weight: var(--font-weight-bold);
+  border-bottom: var(--gitcfg-border);
+  font-family: var(--gitcfg-font-mono);
+  word-break: break-all;
+}
+
+.gitcfg-diff-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+
+  pre {
+    margin: 0;
+    padding: var(--gitcfg-space-2);
+    overflow: auto;
+    max-height: 360px;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .gitcfg-diff-old {
+    background: var(--error-10);
+    border-right: var(--gitcfg-border);
+  }
+  .gitcfg-diff-new {
+    background: var(--success-10);
+  }
+}
+
+// --- Tab bar -------------------------------------------------------------------------------
+.gitcfg-tabs {
+  display: flex;
+  border-bottom: var(--gitcfg-border);
+
+  button {
+    appearance: none;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font: inherit;
+    color: var(--neutral-60);
+    cursor: pointer;
+
+    &.is-active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+  }
+}
+
+.gitcfg-tabs {
+  gap: var(--gitcfg-space-5);
+  margin-bottom: var(--gitcfg-space-4);
+
+  button {
+    padding: var(--gitcfg-space-2) 0;
+    font-weight: var(--font-weight-bold);
+  }
+}
+
+// --- Git Ignore tree -----------------------------------------------------------------
+// Search, jump-to, the excluded filter and Expand/Collapse, on one row above the tree.
+.gitcfg-tree-bar {
+  display: flex;
+  // The two fields carry a label above them, so bottom edges are what line up, not centres.
+  align-items: flex-end;
+  gap: var(--gitcfg-space-3);
+  margin-bottom: var(--gitcfg-space-2);
+
+  // The platform fields grow to their container otherwise, and two of them fill the row.
+  > .gitcfg-field {
+    flex: 0 0 16rem;
+    // The drawer margin would sit the fields 12px above everything else on the row.
+    margin-bottom: 0;
+  }
+
+  // Matched to the input height so the tick, the fields and the buttons share one bottom edge.
+  > .gitcfg-check {
+    height: 2rem;
+  }
+
+  // Expand/Collapse sit at the far end, away from the controls that change what is listed.
+  > .gitcfg-actions {
+    margin-left: auto;
+  }
+}
+
+.gitcfg-tree {
+  @include gitcfg-surface;
+  // The tree scrolls inside its own box so the page header and the Save button stay put while a
+  // deep folder is being explored, but it is sized to its content. max-height keeps the scrolling
+  // for a deep tree without a void under a shallow one; min-height stops a two-row tree
+  // collapsing to a sliver.
+  // Sized against the window, but the window is not what the tree sits in: the platform's shell,
+  // this page's header, the toolbar and the legend all take their cut first. Measured on the
+  // 1366x640 laptop case — anything less than this scrolls the gateway's own content pane.
+  max-height: calc(100vh - 26rem);
+  min-height: 12rem;
+  overflow: auto;
+  padding: var(--gitcfg-space-1) 0;
+}
+
+.gitcfg-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 2px var(--gitcfg-space-2) 2px 0;
+  line-height: 22px;
+
+  &:hover {
+    background: var(--neutral-10);
+  }
+
+  input[type="checkbox"] {
+    margin: 0;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+
+  // Excluded with its parent: git cannot re-include it, so the row is read-only. Dims the
+  // checkbox and icon only -- the row's already-muted text is --neutral-60 (5.0:1 on white), and
+  // compounding opacity on top of it fell to 2.2:1 (measured 8.3.8); a non-text decoration has no
+  // contrast floor of its own, so the icon can dim freely.
+  &.is-locked {
+    input[type="checkbox"],
+    .gitcfg-tree-icon {
+      opacity: 0.55;
+    }
+
+    input[type="checkbox"] {
+      cursor: not-allowed;
+    }
+  }
+}
+
+.gitcfg-tree-twisty {
+  width: 16px;
+  flex-shrink: 0;
+  color: var(--neutral-60);
+  cursor: pointer;
+}
+
+.gitcfg-tree-icon {
+  color: var(--neutral-50);
+  flex-shrink: 0;
+  display: flex;
+}
+
+.gitcfg-tree-name {
+  cursor: default;
+  white-space: nowrap;
+
+  // Not versioned: greyed, with its checkbox unticked. A strikethrough read as "deleted" and
+  // made half the tree look broken.
+  &.is-muted {
+    color: var(--neutral-60);
+  }
+}
+
+.gitcfg-tree-rule {
+  margin-left: auto;
+  padding-left: var(--gitcfg-space-4);
+  color: var(--neutral-60);
+  font-family: var(--gitcfg-font-mono);
+  font-size: var(--gitcfg-text-sm);
+  white-space: nowrap;
+}
+
+.gitcfg-tree-note {
+  padding: 2px var(--gitcfg-space-2);
+  color: var(--neutral-60);
+  line-height: 22px;
+
+  &.is-error {
+    color: var(--error);
+  }
+}
+
+.gitcfg-ignore-source {
+  width: 100%;
+  font-family: var(--gitcfg-font-mono);
+  font-size: 12px;
+}
+
+// --- Forms -----------------------------------------------------------------------------
+.gitcfg-cred-row {
+  display: flex;
+  gap: var(--gitcfg-space-5);
+  align-items: center;
+}
+
+// A field and its painted label. See fields.tsx: the platform inputs put `label` into MUI's
+// notched-outline legend, which is never drawn, so the label is rendered here instead.
+.gitcfg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: var(--gitcfg-space-3);
+}
+
+.gitcfg-field-label {
+  color: var(--neutral-60);
+  font-size: var(--gitcfg-text-md);
+  line-height: 1.35;
+}
+
+.gitcfg-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+
+  input {
+    margin: 0;
+  }
+}
+
+// --- Tables ----------------------------------------------------------------------------
+.gitcfg-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  th {
+    text-align: left;
+    font-size: var(--gitcfg-text-sm);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--neutral-60);
+    border-bottom: var(--gitcfg-border);
+    padding: var(--gitcfg-space-2) var(--gitcfg-space-3) var(--gitcfg-space-2) 0;
+  }
+
+  td {
+    // Cells carry no horizontal padding of their own, so a column butts against its neighbour.
+    padding: 0.6rem var(--gitcfg-space-3) 0.6rem 0;
+    border-bottom: 1px solid var(--neutral-10);
+    vertical-align: middle;
+  }
+}
+
+// The row's buttons: right-hand, as narrow as their content.
+.gitcfg-table-act {
+  text-align: right;
+  width: 1%;
+  white-space: nowrap;
+  padding-right: 0 !important;
+
+  // The platform buttons carry no margin of their own, so side by side they touch. A margin, not
+  // flex + gap: `display: flex` on a `td` drops it out of the table and the columns stop aligning.
+  > * + * {
+    margin-left: var(--gitcfg-space-2);
+  }
+}
+
+// Wide tables scroll in place rather than making the whole page scroll sideways at 1366px.
+// Long content scrolls inside its own box so the gateway's content pane never does — the page
+// header, the tabs and the Save button stay put. Sized against the window rather than fixed, so a
+// bigger screen shows more rows instead of more empty space.
+@mixin gitcfg-scroll-pane {
+  max-height: calc(100vh - 20rem);
+  min-height: 12rem;
+  overflow-y: auto;
+}
+
+.gitcfg-table-scroll {
+  @include gitcfg-scroll-pane;
+  overflow-x: auto;
+
+  // The column names have to survive the scroll, or a long table is unreadable halfway down.
+  th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--neutral-10);
+  }
+}
+
+// The platform DataGrid draws its own table; only its height is ours to bound. It needs more room
+// than a plain table: its search bar and row controls are drawn inside this box.
+.gitcfg-grid-scroll {
+  @include gitcfg-scroll-pane;
+  max-height: calc(100vh - 22rem);
+}
+
+.gitcfg-proj-name {
+  display: block;
+}
+
+.gitcfg-proj-title {
+  display: block;
+  color: var(--neutral-60);
+  font-size: var(--gitcfg-text-sm);
+}
+
+// One remote per line in the Credentials table's Reaches column.
+.gitcfg-reach {
+  display: block;
+}
+
+// Monospace metadata in a cell: remotes, paths, timestamps.
+.gitcfg-meta {
+  font-family: var(--gitcfg-font-mono);
+  font-size: var(--gitcfg-text-sm);
+  color: var(--neutral-60);
+  white-space: nowrap;
+}
+
+.gitcfg-proj-remote {
+  max-width: 28rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// --- Runner token --------------------------------------------------------------------------
+// Copyable blocks scroll rather than wrap — a wrapped command is one a reader cannot trust they
+// copied whole.
+.gitcfg-snippet {
+  @include gitcfg-surface;
+  margin: 0.35rem 0 var(--gitcfg-space-3);
+  overflow: hidden;
+
+  .gitcfg-snippet-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--gitcfg-space-2);
+    padding: var(--gitcfg-space-1) var(--gitcfg-space-2);
+    background: var(--neutral-10);
+    border-bottom: var(--gitcfg-border);
+    font-size: var(--gitcfg-text-sm);
+    color: var(--neutral-60);
+
+    button {
+      border: var(--gitcfg-border);
+      border-radius: 3px;
+      background: var(--white);
+      cursor: pointer;
+      font-size: var(--gitcfg-text-sm);
+      padding: 0.1rem var(--gitcfg-space-2);
+      color: var(--neutral-80);
+    }
+  }
+
+  pre {
+    margin: 0;
+    padding: var(--gitcfg-space-2);
+    overflow-x: auto;
+    white-space: pre;
+    font-family: var(--gitcfg-font-mono);
+    font-size: var(--gitcfg-text-sm);
+    line-height: 1.5;
+  }
+}
+
+// The platform Chip renders at 10px and every one of its four semantic colour pairs falls just
+// short of the 4.5:1 text minimum at that size (measured 8.3.8): info/alt #3272d9-on-#f0f5fc
+// 4.21:1, success #e1faeb-on-#038537 4.32:1, error #de1b1b-on-#faf0f0 4.39:1, warning-dark
+// #916a00-on-#fcf2e6 4.45:1 -- a platform default, not a colour this module chose. Chip exposes
+// no colour or size prop, so this reaches its own class the way `.gitcfg-danger-card` reaches the
+// platform Card's header; re-check after a web-ui package upgrade. `[data-component]` + the
+// semantic class it already renders (not the emotion hash) so no call site needs touching.
+// `!important`: Chip sets its own text colour via an inline style, which otherwise wins over any
+// external stylesheet regardless of selector specificity (measured 8.3.8).
+[data-component="web-ui.chip"] {
+  font-size: var(
+    --gitcfg-text-sm
+  ); // 11px floor (1.4.4 / this project's own minimum)
+
+  &.info,
+  &.alt {
+    color: #2557ad !important; // measured 6.3:1 on --info-10, same hue as --info
+  }
+  &.success {
+    color: var(--white) !important; // measured 4.76:1 on --success
+  }
+  &.error {
+    color: #c81616 !important; // measured 5.24:1 on --error-10, same hue as --error
+  }
+  &.warning {
+    color: #7d5c00 !important; // measured 5.58:1 on --warning-10, same hue as --warning-dark
+  }
+}
+
+.gitcfg-token-once {
+  border: 1px solid var(--warning);
+  border-radius: var(--gitcfg-radius);
+  padding: var(--gitcfg-space-2);
+  margin: var(--gitcfg-space-2) 0;
+
+  strong {
+    color: var(--warning-dark);
+  }
+}
