@@ -5,6 +5,8 @@ configuration from the gateway. A Gaskony build of
 [OperaMetrix's Git module](https://github.com/operametrix/ignition-git-module),
 under the Beerware licence.
 
+> **Not an Inductive Automation product, and not supported by Inductive Automation.** Personal work, largely built with AI tools and tested for one purpose on one gateway. Take the ideas; fork and review it before it goes near production. [NOTICE.md](NOTICE.md) says more.
+
 ## Why this exists
 
 Two people editing the same gateway is two people overwriting each other, and a
