@@ -3,6 +3,20 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.9.12] - 2026-10-12
+
+**Type:** PATCH
+
+### Fixed
+- **The config repository versions only `config/` by default.** 3.8.0 staged everything
+  `.gitignore` did not exclude and added a fixed list of data-root files, which missed what other
+  modules keep there — upgrading a gateway with the Python3 and Playwright modules committed
+  29,000 files (their CPython and Chromium installs). `.gitignore` now excludes the data root
+  apart from `config/`; tick a root path on the Git Ignore tab to version it. On upgrade the rules
+  are added above the Versioning page's own section, so paths already ticked on stay versioned,
+  and whatever they exclude is untracked in one commit. History keeps those files' objects; a
+  repository that needs the space back has to be rewritten.
+
 ## [3.9.10] - 2026-10-12
 
 **Type:** PATCH

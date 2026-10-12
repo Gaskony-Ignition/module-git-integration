@@ -152,21 +152,19 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     + " project's delivery on the Projects tab.", e);
         }
 
-        // 3.8.0 lets .gitignore alone decide what the config repository versions. Paths the old
-        // hard-coded scope skipped are added to the ignore file once, so the wider staging commits
-        // nothing new.
+        // .gitignore alone decides what the config repository versions (3.8.0). 3.9.12 makes it
+        // exclude the data root apart from config/, and untracks what 3.8.0 swept in, once.
         try {
-            List<String> added = DataDirGitManager.widenScopeOnce();
-            if (!added.isEmpty()) {
-                logger.info("Added {} data-root rules to .gitignore so widening the config"
-                        + " repository commits nothing new.", added.size());
+            List<String> untracked = DataDirGitManager.denyRootOnce();
+            if (!untracked.isEmpty()) {
+                logger.info("Config repository now versions only config/ by default; untracked {}"
+                        + " data-root files.", untracked.size());
                 GitEvents.fire(GitEvent.of("ignore").config()
-                        .message("Data-root paths added to .gitignore — the repository now"
-                                + " versions everything it does not exclude")
-                        .files(added).success());
+                        .message("Only config/ is versioned by default — data-root files untracked")
+                        .files(untracked).success());
             }
         } catch (Exception e) {
-            logger.error("Could not widen the config repository's scope; check the Git Ignore tab.", e);
+            logger.error("Could not restrict the config repository to config/; check the Git Ignore tab.", e);
         }
 
         // Scheduled sync. Inert until a project has a sync record configured, so starting it

@@ -61,7 +61,15 @@ public class DataDirGitManager {
 
     /** Config-as-code lives under {@code config/}; the {@code .gitignore} sits at the repo root. */
 
-    /** Based on Inductive Automation's version-control-guide template, plus {@code projects/}. */
+    /**
+     * Only {@code config/} by default. Other modules keep whole runtimes under the data root (the
+     * Python3 module's CPython distributions, Playwright's browsers), so a data root versioned by
+     * default swept tens of thousands of files into the repository.
+     */
+    private static final String ROOT_RULES_COMMENT =
+            "# Only config/ is versioned by default; tick a data-root path on the Git Ignore tab to add it.";
+
+    /** Based on Inductive Automation's version-control-guide template, plus the root rules. */
     private static final List<String> GITIGNORE_LINES = List.of(
             "# Ignition data-directory config-as-code — managed by the Git module",
             "**/db/*",
@@ -95,30 +103,19 @@ public class DataDirGitManager {
             "**/.resources/",
             "**/.alarms_*",
             "",
-            "# Per-project resources are versioned separately by this module's per-project repos",
-            "projects/",
-            "",
-            "# Module-internal state at the data-dir root (not config), never versioned",
-            ".git-module-legacy-migrated",
-            ".git-module-scope-widened",
-            "",
-            "# Data-root files the module refused to stage before 3.8.0. Listed explicitly so",
-            "# widening the repository to plain git semantics commits nothing new — tick any of",
-            "# them on the Git Ignore tab to start versioning it. Anchored: the data root only.",
-            "/gateway.xml",
-            "/gateway.xml_clean",
-            "/ignition.conf",
-            "/logback.xml",
-            "/log4j.properties",
-            "/commissioning.json",
-            "/redundancy.xml",
-            "/modules.json",
-            "/email-profiles/",
-            "/.context.tmp"
+            ROOT_RULES_COMMENT,
+            "/*",
+            "!/config/",
+            "!/.gitignore"
     );
 
-    /** Written once the data-root rules above have been added to an older repository's ignore file. */
-    private static final String WIDENED_MARKER = ".git-module-scope-widened";
+    /** The data-root paths 3.8.0 to 3.9.10 listed one by one in {@code .gitignore}. */
+    private static final List<String> PRE_3911_ROOT_PATHS = List.of(
+            "gateway.xml", "gateway.xml_clean", "ignition.conf", "logback.xml", "log4j.properties",
+            "commissioning.json", "redundancy.xml", "modules.json", "email-profiles");
+
+    /** Written once {@link #denyRootOnce} has run, so a path the user later ticks stays ticked. */
+    private static final String ROOT_DENIED_MARKER = ".git-module-root-denied";
 
     /** A single uncommitted config change. {@code type} ∈ ADDED | MODIFIED | DELETED | UNTRACKED. */
     public record ConfigChange(String path, String type) {}
@@ -228,43 +225,86 @@ public class DataDirGitManager {
     }
 
     /**
-     * Once, on a repository initialised before 3.8.0: add the data-root rules above, so widening
-     * the staging scope commits nothing that was not already committed. The marker file stops it
-     * running twice — otherwise a path the user deliberately ticked on would be re-ignored at the
-     * next restart.
+     * Once, on a repository initialised before 3.9.12: add the root rules and untrack whatever they
+     * now exclude, in one commit. 3.8.0 staged everything its fixed list of root files missed, so
+     * an upgraded gateway committed other modules' runtimes and caches.
      *
-     * @return the rules added, empty when there was nothing to do
+     * <p>The rules go ABOVE the managed section: git's last match wins, so a root path the user
+     * ticked on there keeps its negation. The marker stops it running twice — otherwise a path the
+     * user ticks on later would be re-ignored at the next restart.
+     *
+     * @return the paths untracked, empty when there was nothing to do
      */
-    public static List<String> widenScopeOnce() {
+    public static List<String> denyRootOnce() {
         synchronized (DATA_DIR_LOCK) {
-            if (!isInitialized() || Files.exists(dataDir().resolve(WIDENED_MARKER))) {
+            if (!isInitialized() || Files.exists(dataDir().resolve(ROOT_DENIED_MARKER))) {
                 return List.of();
             }
-            List<String> added = new ArrayList<>();
-            try {
+            List<String> untracked = new ArrayList<>();
+            try (Git git = GitManager.getGit(dataDir())) {
                 Path gitignore = dataDir().resolve(".gitignore");
                 List<String> lines = Files.exists(gitignore)
                         ? new ArrayList<>(Files.readAllLines(gitignore)) : new ArrayList<>();
-                for (String rule : GITIGNORE_LINES) {
-                    if (rule.isBlank() || rule.startsWith("#")) {
-                        continue;
+                boolean rulesAdded = lines.stream().noneMatch(l -> l.trim().equals("/*"));
+                if (rulesAdded) {
+                    // 3.8.0 excluded each of these, so one still versioned was ticked on — and
+                    // ticking deletes its line rather than adding a negation, so nothing below the
+                    // new rules would keep it. Give it one.
+                    List<FastIgnoreRule> before = ignoreRules();
+                    List<String> kept = new ArrayList<>();
+                    for (String name : PRE_3911_ROOT_PATHS) {
+                        boolean isDir = Files.isDirectory(dataDir().resolve(name));
+                        if (isTracked(git.getRepository(), name, isDir)
+                                && !decide(before, name, isDir).excluded()) {
+                            kept.add(name);
+                        }
                     }
-                    if (lines.stream().noneMatch(l -> l.trim().equals(rule))) {
-                        appendManaged(lines, rule);
-                        added.add(rule);
+                    int at = lines.indexOf(MANAGED_MARKER);
+                    if (at < 0) {
+                        at = lines.size();
                     }
-                }
-                if (!added.isEmpty()) {
+                    lines.addAll(at, List.of(ROOT_RULES_COMMENT, "/*", "!/config/", "!/.gitignore", ""));
+                    for (String name : kept) {
+                        boolean isDir = Files.isDirectory(dataDir().resolve(name));
+                        appendManaged(lines, "!/" + name + (isDir ? "/" : ""));
+                        if (isDir) {
+                            appendManaged(lines, "!/" + name + "/**");
+                        }
+                    }
                     writeIgnoreFile(String.join("\n", lines));
                 }
-                Files.writeString(dataDir().resolve(WIDENED_MARKER),
-                        "Data-root ignore rules added when this repository was widened to plain"
-                                + " git semantics (Git Integration 3.8.0).\n");
+
+                // A .gitignore line has no effect on a tracked file, so the rules alone would leave
+                // everything 3.8.0 swept in still versioned. Only what the ROOT rules exclude is
+                // untracked; a tracked file deeper down that a template glob covers is left as it was.
+                List<FastIgnoreRule> rules = ignoreRules();
+                DirCache cache = git.getRepository().readDirCache();
+                for (int i = 0; i < cache.getEntryCount(); i++) {
+                    String path = cache.getEntry(i).getPathString();
+                    int slash = path.indexOf('/');
+                    String top = slash < 0 ? path : path.substring(0, slash);
+                    if (decide(rules, top, slash >= 0).excluded()) {
+                        untracked.add(path);
+                    }
+                }
+                if (rulesAdded || !untracked.isEmpty()) {
+                    if (!untracked.isEmpty()) {
+                        var rm = git.rm().setCached(true);
+                        untracked.forEach(rm::addFilepattern);
+                        rm.call();
+                    }
+                    git.add().addFilepattern(".gitignore").call();
+                    git.commit().setMessage("Only config/ is versioned by default ("
+                                    + untracked.size() + " data-root files untracked)")
+                            .setAuthor(gatewayAuthor(), "").call();
+                }
+                Files.writeString(dataDir().resolve(ROOT_DENIED_MARKER),
+                        "Root ignore rules added by Git Integration 3.9.12.\n");
             } catch (Exception e) {
-                logger.error("Could not widen the config repository's scope", e);
+                logger.error("Could not restrict the config repository to config/", e);
                 throw new RuntimeException(e);
             }
-            return added;
+            return untracked;
         }
     }
 

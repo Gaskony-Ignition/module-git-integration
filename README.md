@@ -38,10 +38,10 @@ the module's version under its title. The **Git Ignore** tree shows the whole
 data directory, because that is what the repository sits in: a ticked row is
 versioned, an unticked one is greyed and says why on the right — its own
 `.gitignore` line, an inherited rule, or its parent folder. `.gitignore` is the
-only thing that decides, so anything listed can be ticked on. Runtime state —
-databases, logs, caches, and the per-project folders, which have their own
-repositories — is excluded by default, as are gateway files that are specific to
-one machine (`ignition.conf`, `modules.json`, `commissioning.json`). A data
+only thing that decides, so anything listed can be ticked on. By default only
+`config/` is versioned: the rest of the data directory holds databases, logs,
+the per-project folders (each has its own repository), other modules' runtimes,
+and files specific to one machine (`ignition.conf`, `modules.json`). A data
 directory is deep, so the tree has a search that finds a file or folder anywhere
 in it, a jump to any top-level folder, a filter that hides everything excluded,
 and Expand/Collapse.

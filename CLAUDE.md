@@ -56,7 +56,7 @@ No Vision client scope.
 - **The config-as-code repo is rooted at the data directory and `.gitignore` is
   the only thing deciding what it versions** (3.8.0 — never reintroduce a
   staging scope; a file nothing ignored was silently never committed).
-  `projects/` is excluded, so the per-project repos are never nested inside it.
+  `/*` + `!/config/` keep out other modules' runtimes (CPython, Chromium).
 - **`ConfigAutoCommitter` (a `ResourceCollectionListener`) is the only live
   config-change notification** — per-resource listeners are never notified, and
   a plain file write (`.gitignore`) is not one either, so that path commits for
