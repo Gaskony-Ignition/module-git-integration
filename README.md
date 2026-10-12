@@ -102,13 +102,11 @@ brings changes in; nothing is pushed.
 | Sync — replace | The gateway fetches on a timer and makes the project match the branch exactly, rollbacks included — pointed at a branch of built releases, it installs releases with no runner. |
 
 Runner deliveries need **Credentials → Runner access** switched on and a token.
-Repo updates and sync need the project to have a remote and a credential.
-Nothing but that drawer ever sets a delivery: upgrading from 3.5.0 or 3.6.0
-clears the ones those versions assigned, so re-pick each project's delivery
-after the upgrade.
+Repo updates and sync need a remote and a credential; until there is a
+remote they are disabled.
 
 This build adds the gateway-side Versioning page, change badges, and delivery on
-top of upstream 2.1.0 — see [CHANGELOG.md](CHANGELOG.md) for the full list.
+top of upstream 2.1.0 ([CHANGELOG.md](CHANGELOG.md)).
 
 The Versioning page meets WCAG 2.1 AA, short of three platform controls with no
 naming prop of their own: the gateway's own header logo, the History table's
