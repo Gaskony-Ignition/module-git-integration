@@ -3,6 +3,15 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.9.10] - 2026-10-12
+
+**Type:** PATCH
+
+### Changed
+- The Projects drawer's Delivery list shows every option. Without a remote, Runner —
+  repo updates, Sync — pull and Sync — replace are listed but disabled rather than
+  hidden, so it is clear they exist.
+
 ## [3.9.9] - 2026-09-25
 
 **Type:** PATCH — accessibility (WCAG 2.1 AA)

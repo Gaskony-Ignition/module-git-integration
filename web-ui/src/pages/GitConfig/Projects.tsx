@@ -324,10 +324,13 @@ const Projects = () => {
             <SelectInput
               label="How changes reach this project"
               value={delivery}
-              values={(Object.keys(DELIVERY_LABEL) as Delivery[])
-                // Without a remote only Off and a runner release are possible.
-                .filter((d) => hasRemote || !needsRemote(d) || d === delivery)
-                .map((d) => ({ label: DELIVERY_LABEL[d], value: d }))}
+              // Without a remote only Off and a runner release are possible; the rest stay
+              // listed but disabled so it is clear they exist.
+              values={(Object.keys(DELIVERY_LABEL) as Delivery[]).map((d) => ({
+                label: DELIVERY_LABEL[d],
+                value: d,
+                disabled: !hasRemote && needsRemote(d) && d !== delivery,
+              }))}
               onChange={(e: unknown) =>
                 setDelivery((selectValue(e) as Delivery) || "off")
               }
