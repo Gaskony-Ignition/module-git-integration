@@ -3,6 +3,16 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.10.1] - 2026-10-13
+
+**Type:** PATCH
+
+### Fixed
+- **The Git Ignore tab showed everything under `config/` as excluded.** Its rule matcher tested
+  the root rule `/*` against each file's own name as well as its path, so every file at every
+  depth matched it and `!/config/` never re-included them. Only the tab was wrong: the repository
+  went on versioning `config/` as before. A rule that starts with `/` now applies at the root only.
+
 ## [3.10.0] - 2026-10-13
 
 **Type:** MINOR

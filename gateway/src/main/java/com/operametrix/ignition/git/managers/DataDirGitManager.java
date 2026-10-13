@@ -1044,7 +1044,9 @@ public class DataDirGitManager {
                 continue;
             }
             boolean hit = r.isMatch("/" + path, isDir, true);
-            if (!hit && r.getNameOnly()) {
+            // JGit flags an anchored "/*" as name-only too; testing its basename would let it
+            // exclude every path at every depth, so only a rule with no slash at all gets this.
+            if (!hit && r.getNameOnly() && !isAnchored(r)) {
                 // A name-only rule applies to every segment, so test the basename too.
                 int slash = path.lastIndexOf('/');
                 hit = r.isMatch("/" + (slash >= 0 ? path.substring(slash + 1) : path), isDir, true);
@@ -1054,6 +1056,12 @@ public class DataDirGitManager {
             }
         }
         return match;
+    }
+
+    /** A rule that starts with a slash ("/*", "!/config/") applies at the repo root only. */
+    private static boolean isAnchored(FastIgnoreRule r) {
+        String pattern = r.toString();
+        return (pattern.startsWith("!") ? pattern.substring(1) : pattern).startsWith("/");
     }
 
     /**
