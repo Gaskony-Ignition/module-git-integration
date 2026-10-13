@@ -13,7 +13,7 @@ upstream's; everything below is this fork.
   depth matched it and `!/config/` never re-included them. Only the tab was wrong: the repository
   went on versioning `config/` as before. A rule that starts with `/` now applies at the root only.
 
-## [3.10.0] - 2026-10-13
+## [3.10.0] - 2026-10-13 — withdrawn, use 3.10.1
 
 **Type:** MINOR
 
@@ -31,7 +31,7 @@ upstream's; everything below is this fork.
 - A new config repository ignores this module's own records (credentials, remotes, deliveries),
   which belong to the gateway they were set on. An existing repository keeps its own `.gitignore`.
 
-## [3.9.12] - 2026-10-12
+## [3.9.12] - 2026-10-12 — withdrawn, use 3.10.1
 
 **Type:** PATCH
 
