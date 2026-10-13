@@ -17,6 +17,7 @@ import com.operametrix.ignition.git.records.GitUserSshKeyRecord;
 import com.operametrix.ignition.git.records.legacy.GitLegacyImporter;
 import com.operametrix.ignition.git.records.legacy.RetiredResourceCleanup;
 import com.operametrix.ignition.git.managers.ConfigAutoCommitter;
+import com.operametrix.ignition.git.managers.ConfigSync;
 import com.operametrix.ignition.git.managers.CredentialCheck;
 import com.operametrix.ignition.git.managers.DataDirGitManager;
 import com.inductiveautomation.ignition.common.gson.Gson;
@@ -360,6 +361,14 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleInit).mount();
 
+        routes.newRoute("/config-delivery").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleSaveConfigDelivery).mount();
+
+        routes.newRoute("/config-sync-now").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleConfigSyncNow).mount();
+
         routes.newRoute("/update-from-remote").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleUpdateFromRemote).mount();
@@ -593,6 +602,21 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     o.addProperty("providerName", secret.getAsReferenced().getProviderName());
                     o.addProperty("secretName", secret.getAsReferenced().getSecretName());
                 }
+                ConfigSync.Settings sync = ConfigSync.get();
+                JsonObject delivery = new JsonObject();
+                delivery.addProperty("mode", sync.mode());
+                delivery.addProperty("branch", sync.branch());
+                delivery.addProperty("intervalSeconds", sync.intervalSeconds());
+                ConfigSync.LastRun last = ConfigSync.lastRun();
+                if (last != null) {
+                    JsonObject lr = new JsonObject();
+                    lr.addProperty("time", last.time());
+                    lr.addProperty("ok", last.ok());
+                    lr.addProperty("message", last.message());
+                    lr.addProperty("commit", last.commit());
+                    delivery.add("last", lr);
+                }
+                o.add("delivery", delivery);
                 // Unsynced-commit count for the header sync indicator.
                 o.addProperty("ahead", DataDirGitManager.aheadCount());
                 long time = DataDirGitManager.getLastPushTime();
@@ -786,6 +810,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
     private Object handleRemoveRemote(RequestContext req, HttpServletResponse resp) {
         try {
+            ConfigSync.save(ConfigSync.MODE_OFF, "", ConfigSync.DEFAULT_INTERVAL_SECONDS);
             DataDirGitManager.removeRemote();
             DataDirGitManager.commitAllIfDirty("Remove config repository remote");
             return ok();
@@ -1036,6 +1061,33 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             o.addProperty("hash", hash);
+            return o.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    private Object handleSaveConfigDelivery(RequestContext req, HttpServletResponse resp) {
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            if (GitConfigRemoteRecord.get() == null) {
+                throw new RuntimeException("Set the config repository remote first.");
+            }
+            int interval = body.has("intervalSeconds") && !body.get("intervalSeconds").isJsonNull()
+                    ? body.get("intervalSeconds").getAsInt() : ConfigSync.DEFAULT_INTERVAL_SECONDS;
+            ConfigSync.save(optString(body, "mode"), optString(body, "branch"), interval);
+            return ok();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    private Object handleConfigSyncNow(RequestContext req, HttpServletResponse resp) {
+        try {
+            String result = ConfigSync.syncNow();
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", true);
+            o.addProperty("result", result);
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);

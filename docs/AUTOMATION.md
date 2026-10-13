@@ -68,6 +68,19 @@ would put repository-supplied shell beside the project store.
 **A webhook receiver was built and removed.** It worked, but could not receive a
 delivery on a gateway GitHub cannot reach — which is most of them.
 
+## The config repository follows a branch too
+
+Configure Versioning has the same choice for the gateway config repo: Off, or **Sync — replace**
+with a branch and an interval. It fetches on the same timer, and when the branch tip is not the
+one last applied (or HEAD's tree no longer matches it) it points the local branch and HEAD at the
+tip, hard-resets, removes untracked files the repository does not ignore, and applies with a
+settings rescan. Local commits made by the auto-committer are discarded and counted in the Logs
+entry, so a gateway that follows a branch is meant to change only through that branch. The
+auto-committer is held while it runs and for a few seconds after, so the rescan's own events
+commit nothing. Untracked files go one by one, never `clean -d`, so gitignored data inside an
+untracked directory survives. The setting lives in `.git/config`, not a resource: a resource would
+be versioned, and the branch's copy would overwrite it.
+
 ## Local changes
 
 Pull and repo updates refuse rather than stash or force: silently reverting an

@@ -14,7 +14,7 @@ are the two runner routes — see Delivery below.
 | Area | Method + path |
 | --- | --- |
 | Config-as-code | `GET /status` (also carries the module version, shown under the page title), `/history`, `/commit-files`, `/file-diff`, `/remote`, `/secret-providers`, `/tree`, `/tree-search`, `/ignore` |
-| Config-as-code | `POST /restore`, `/init`, `/deinit`, `/remote`, `/remote-remove`, `/remote-test`, `/push`, `/ignore`, `/update-from-remote` |
+| Config-as-code | `POST /restore`, `/init`, `/deinit`, `/remote`, `/remote-remove`, `/remote-test`, `/push`, `/ignore`, `/update-from-remote`, `/config-delivery` (follow a branch: off or replace, branch, interval), `/config-sync-now` |
 | Projects & credentials | `GET /projects`, `/credentials` |
 | Projects & credentials | `POST /project-init`, `/project-remote`, `/project-credential`, `/project-images`, `/project-snapshot-images`, `/credentials`, `/credential-remove`, `/credential-check` |
 | Delivery & logs | `GET /events`, `/runner` |
@@ -56,6 +56,7 @@ deletes the resource types left over from removed features, both idempotent.
 | `DataDirGitManager` (no staging scope — `.gitignore` alone decides, and its `/*` + `!/config/` rules keep it to `config/` by default; `denyRootOnce` adds them to an older repository and untracks what they exclude, guarded by the `.git-module-root-denied` marker) | The data-directory (config-as-code) repo: init, status, auto-commit, restore, push, remote, and the exclusion tree — `listTree` one level at a time, `searchTree` a breadth-first walk capped at 40,000 entries and 200 matches. Serialised by one static `DATA_DIR_LOCK`. |
 | `ConfigAutoCommitter` | Listens for config changes and commits them; the only live notification surface (per-resource listeners on the config collection are never called). |
 | `GitProjectManager` / `GitTagManager` / `GitThemeManager` / `GitImageManager` | Per-project resource import, and gateway-resource snapshot (tags/themes/images) into the project tree. |
+| `ConfigSync` | The config repo's Delivery (off, or Sync — replace): settings in `.git/config` section `gitmodule.configsync` (not a resource, which would be versioned and overwritten by the branch), run from the `SyncScheduler` timer; calls `DataDirGitManager.replaceFromBranch`, which holds `ConfigAutoCommitter` and records the applied tip in `refs/git-module/config-synced`. `GET /remote` carries `delivery` and the last run. |
 | `SyncScheduler` | Per-project scheduled fetch, then fast-forward (Pull) or reset to the branch (Replace). |
 | `CredentialCheck` (3.7.0) | Per credential: GitHub token expiry (the `github-authentication-token-expiration` header on `GET /user`; 401 = rejected), and for each remote using it, read (fetch advertisement) and push (receive-pack advertisement — refused there without write, so nothing is sent). Scope: a classic token's `x-oauth-scopes` header (every repository its account can reach) or a fine-grained token's granted repositories. Every failure is kept and shown rather than logged at debug. In memory; startup + 30 s, daily, on add, on attach, on **Check**. |
 | `RunnerAuth` / `RunnerTrigger` / `ReleaseReceiver` | Runner token check; the opt-in guard (`RunnerTrigger.refuse`); the repo-update and release routes. |

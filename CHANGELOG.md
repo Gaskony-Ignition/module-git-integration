@@ -3,6 +3,22 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.10.0] - 2026-10-13
+
+**Type:** MINOR
+
+### Added
+- **The gateway config repository can follow a branch.** In Configure Versioning, Delivery is Off
+  (the default) or Sync — replace, with a branch and a check interval (30 seconds or more, 300
+  by default). On each interval the gateway fetches the branch and, if it moved or the config no
+  longer matches it, makes the config match it exactly: local commits and uncommitted changes are
+  discarded, files the branch dropped are removed, a branch moved backwards is followed, and a
+  settings rescan applies the result with no restart. Gitignored runtime files are never touched.
+  Each run is a Logs entry with the commit applied and how many local commits and changes were
+  discarded; Sync now runs it on demand. The auto-commit is held while it runs, so nothing is
+  committed on top of the branch. Needs a config remote; the setting is kept in the
+  repository's `.git/config`, outside the versioned files.
+
 ## [3.9.12] - 2026-10-12
 
 **Type:** PATCH

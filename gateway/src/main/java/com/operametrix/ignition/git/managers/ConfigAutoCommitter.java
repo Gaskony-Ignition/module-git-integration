@@ -49,6 +49,14 @@ public class ConfigAutoCommitter implements ResourceCollectionListener {
         return t;
     });
 
+    /** Epoch millis before which flush defers; set while a branch follow replaces the config. */
+    private static volatile long holdUntil;
+
+    /** Keeps the auto-commit away from files being replaced until {@code ms} from now . */
+    public static void hold(long ms) {
+        holdUntil = System.currentTimeMillis() + ms;
+    }
+
     private final Object scheduleLock = new Object();
     private ScheduledFuture<?> scheduled;
 
@@ -99,6 +107,11 @@ public class ConfigAutoCommitter implements ResourceCollectionListener {
     private void flush() {
         synchronized (scheduleLock) {
             scheduled = null;
+        }
+        long wait = holdUntil - System.currentTimeMillis();
+        if (wait > 0) {
+            schedule(wait + 250);
+            return;
         }
         try {
             if (!DataDirGitManager.isInitialized()) {

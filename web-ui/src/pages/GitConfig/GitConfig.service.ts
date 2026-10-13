@@ -84,6 +84,13 @@ export interface RemoteResp {
   // Local commits not yet on the remote (0 = up to date).
   ahead?: number;
   lastPush?: { time: number; ok: boolean; error?: string };
+  // Follow a remote branch: the config is replaced by it on a timer (3.10.0).
+  delivery?: {
+    mode: "off" | "replace";
+    branch: string;
+    intervalSeconds: number;
+    last?: { time: number; ok: boolean; message: string; commit: string };
+  };
 }
 // Inline secret fields shared by save/test requests.
 export interface RemoteSecretReq {
@@ -380,6 +387,25 @@ export const gitConfigApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ["status", "history", "remote"],
     }),
+    saveConfigDelivery: builder.mutation<
+      unknown,
+      { mode: "off" | "replace"; branch: string; intervalSeconds: number }
+    >({
+      query: (body) => ({
+        url: `${BASE}/config-delivery`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["remote"],
+    }),
+    configSyncNow: builder.mutation<{ result: string }, void>({
+      query: () => ({
+        url: `${BASE}/config-sync-now`,
+        method: "POST",
+        body: {},
+      }),
+      invalidatesTags: ["status", "history", "remote", "events"],
+    }),
     getTree: builder.query<TreeResp, string>({
       query: (path) => `${BASE}/tree?path=${encodeURIComponent(path || "")}`,
       providesTags: ["tree"],
@@ -476,6 +502,8 @@ export const {
   useInitMutation,
   useDeinitMutation,
   useUpdateFromRemoteMutation,
+  useSaveConfigDeliveryMutation,
+  useConfigSyncNowMutation,
   useGetTreeQuery,
   useSearchTreeQuery,
   useGetIgnoreQuery,

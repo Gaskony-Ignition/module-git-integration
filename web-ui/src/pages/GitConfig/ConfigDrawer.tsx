@@ -15,7 +15,11 @@ import {
   TextArea,
   TextAutocomplete,
   TextInput,
+  useToastNotifications,
 } from "../../webui";
+import { SelectInput, TextInput as LabelledTextInput } from "./fields";
+import { selectValue } from "./selectValue";
+import { errorToast } from "./errors";
 import {
   useGetRemoteQuery,
   useGetSecretProvidersQuery,
@@ -23,6 +27,8 @@ import {
   useRemoveRemoteMutation,
   useTestRemoteMutation,
   useDeinitMutation,
+  useSaveConfigDeliveryMutation,
+  useConfigSyncNowMutation,
 } from "./GitConfig.service";
 
 const DEFAULT_BRANCH = "main";
@@ -58,6 +64,12 @@ const ConfigDrawer = ({
   const [removeRemote] = useRemoveRemoteMutation();
   const [testRemote, { isLoading: testing }] = useTestRemoteMutation();
   const [deinit] = useDeinitMutation();
+  const [saveDelivery] = useSaveConfigDeliveryMutation();
+  const [syncNow, { isLoading: syncing }] = useConfigSyncNowMutation();
+  const toasts = useToastNotifications();
+  const [deliveryMode, setDeliveryMode] = useState<"off" | "replace">("off");
+  const [deliveryBranch, setDeliveryBranch] = useState("");
+  const [deliveryEvery, setDeliveryEvery] = useState("300");
 
   const form = useForm<FormShape>({
     defaultValues: {
@@ -102,6 +114,11 @@ const ConfigDrawer = ({
       secretName: remote.secretName || "",
     });
     setFeedback(null);
+    setDeliveryMode(remote.delivery?.mode === "replace" ? "replace" : "off");
+    setDeliveryBranch(
+      remote.delivery?.branch || remote.branch || DEFAULT_BRANCH
+    );
+    setDeliveryEvery(String(remote.delivery?.intervalSeconds || 300));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -138,6 +155,12 @@ const ConfigDrawer = ({
       await saveRemote({
         ...secretPayload(d),
         branch: d.branch.trim() || DEFAULT_BRANCH,
+      }).unwrap();
+      // The remote record has to exist before a delivery can be set against it.
+      await saveDelivery({
+        mode: deliveryMode,
+        branch: deliveryBranch.trim(),
+        intervalSeconds: Number(deliveryEvery) || 300,
       }).unwrap();
       onClose();
     } catch (e: any) {
@@ -294,6 +317,67 @@ const ConfigDrawer = ({
           ) : null}
         </div>
       </Card>
+
+      {configured ? (
+        <Card title="Delivery">
+          <SelectInput
+            label="How changes reach this gateway"
+            value={deliveryMode}
+            values={[
+              { label: "Off", value: "off" },
+              { label: "Sync — replace", value: "replace" },
+            ]}
+            onChange={(e: unknown) =>
+              setDeliveryMode(selectValue(e) === "replace" ? "replace" : "off")
+            }
+          />
+          {deliveryMode === "replace" ? (
+            <>
+              <p className="gitcfg-hint">
+                Replace makes the gateway config match the branch exactly. Local
+                commits and uncommitted changes are discarded, and a branch
+                moved backwards is followed.
+              </p>
+              <LabelledTextInput
+                label="Branch"
+                value={deliveryBranch}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setDeliveryBranch(e.target.value)
+                }
+              />
+              <LabelledTextInput
+                label="Check every (seconds, minimum 30)"
+                value={deliveryEvery}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setDeliveryEvery(e.target.value)
+                }
+              />
+            </>
+          ) : null}
+          {remote?.delivery?.last ? (
+            <p className={remote.delivery.last.ok ? "gitcfg-ok" : "gitcfg-err"}>
+              Last run {new Date(remote.delivery.last.time).toLocaleString()}:{" "}
+              {remote.delivery.last.message}
+            </p>
+          ) : null}
+          {remote?.delivery?.mode === "replace" ? (
+            <div className="gitcfg-actions">
+              <Button
+                colorClass="secondary"
+                disabled={syncing}
+                onClick={() =>
+                  syncNow()
+                    .unwrap()
+                    .then((r) => toasts.notifySuccess(`Config: ${r.result}`))
+                    .catch(errorToast(toasts, "Sync failed"))
+                }
+              >
+                {syncing ? "Syncing…" : "Sync now"}
+              </Button>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
 
       <Card title="Danger Zone" className="gitcfg-danger-card">
         <p className="gitcfg-off">

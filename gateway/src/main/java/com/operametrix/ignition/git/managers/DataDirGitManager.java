@@ -13,9 +13,14 @@ import org.eclipse.jgit.api.RemoteSetUrlCommand;
 import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.dircache.DirCache;
+import org.eclipse.jgit.dircache.DirCacheIterator;
+import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.treewalk.FileTreeIterator;
+import org.eclipse.jgit.treewalk.WorkingTreeIterator;
 import org.eclipse.jgit.ignore.FastIgnoreRule;
 import org.eclipse.jgit.ignore.IgnoreNode;
 import org.eclipse.jgit.lib.Constants;
+import org.eclipse.jgit.lib.FileMode;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.RefUpdate;
 import org.eclipse.jgit.lib.Repository;
@@ -763,6 +768,161 @@ public class DataDirGitManager {
                 throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
             }
         }
+    }
+
+    /** Outcome of one {@link #replaceFromBranch} run. {@code commit} is empty when nothing was done. */
+    public record ReplaceResult(boolean changed, String commit, int discardedCommits,
+                                int discardedChanges, List<String> files, boolean rolledBack) {}
+
+    /** Ref holding the last remote tip a branch-follow replaced the config with. */
+    static final String SYNCED_REF = "refs/git-module/config-synced";
+
+    /**
+     * Makes config exactly the remote branch: fetch, then, unless the tip is the one last applied and
+     * HEAD already has its tree, point the local branch and HEAD at it, hard-reset, remove untracked
+     * files the repository does not ignore, and apply with a settings rescan. Local commits and
+     * uncommitted changes are discarded and counted; a branch moved backwards is followed.
+     *
+     * <p>Untracked files are removed one by one, not by {@code git clean -d}: a directory clean takes
+     * gitignored runtime data nested inside an untracked directory with it (see
+     * {@link #updateFromRemote()}).
+     */
+    public static ReplaceResult replaceFromBranch(String branch) {
+        GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+        if (remote == null) {
+            throw new RuntimeException("No remote is configured to follow.");
+        }
+        if (branch == null || branch.isBlank()) {
+            throw new RuntimeException("No branch is set to follow.");
+        }
+        synchronized (DATA_DIR_LOCK) {
+            if (!isInitialized()) {
+                throw new RuntimeException("Config versioning is not initialised.");
+            }
+            try (Git git = GitManager.getGit(dataDir())) {
+                Repository repo = git.getRepository();
+
+                FetchCommand fetch = git.fetch().setRemote(ORIGIN)
+                        .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
+                GitManager.setAuthenticationFromIds(fetch, remote.getUri(),
+                        remote.getSshKeyId(), remote.getHttpsCredentialId());
+                fetch.call();
+
+                ObjectId tip = repo.resolve(trackingRef(branch));
+                if (tip == null) {
+                    throw new RuntimeException("Branch '" + branch + "' was not found on the remote.");
+                }
+                ObjectId head = repo.resolve(Constants.HEAD);
+                ObjectId applied = repo.resolve(SYNCED_REF);
+
+                try (RevWalk walk = new RevWalk(repo)) {
+                    RevCommit tipCommit = walk.parseCommit(tip);
+                    if (tip.equals(applied) && head != null
+                            && walk.parseCommit(head).getTree().equals(tipCommit.getTree())) {
+                        return new ReplaceResult(false, "", 0, 0, List.of(), false);
+                    }
+
+                    // Commits of the branch itself that the gateway had applied are not "local": a
+                    // branch moved backwards drops them, but nobody on this gateway made them.
+                    int discardedCommits = 0;
+                    boolean rolledBack = head != null && !head.equals(tip) && walk.isMergedInto(
+                            walk.parseCommit(tip), walk.parseCommit(head));
+                    if (head != null) {
+                        walk.reset();
+                        walk.markStart(walk.parseCommit(head));
+                        walk.markUninteresting(tipCommit);
+                        if (applied != null) {
+                            walk.markUninteresting(walk.parseCommit(applied));
+                        }
+                        for (RevCommit ignored : walk) {
+                            discardedCommits++;
+                        }
+                    }
+                    int discardedChanges = getStatus().size();
+                    List<String> files = changedBetween(repo, head, tip);
+
+                    // Hold the auto-committer first: it must not commit the rescan's own events, or
+                    // a local commit lands on top of the tip just applied.
+                    ConfigAutoCommitter.hold(30_000);
+                    git.branchCreate().setName(branch).setStartPoint(tip.name()).setForce(true).call();
+                    repo.updateRef(Constants.HEAD).link("refs/heads/" + branch);
+                    git.reset().setMode(ResetCommand.ResetType.HARD).setRef(tip.name()).call();
+                    removeUntracked(repo);
+
+                    RefUpdate mark = repo.updateRef(SYNCED_REF);
+                    mark.setNewObjectId(tip);
+                    mark.setForceUpdate(true);
+                    mark.update();
+
+                    applyConfigToRunningGateway();
+                    ConfigAutoCommitter.hold(6_000);
+                    return new ReplaceResult(true, tip.name(), discardedCommits, discardedChanges, files,
+                            rolledBack);
+                }
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                logger.error("Config branch follow failed", e);
+                throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+            }
+        }
+    }
+
+    /** Deletes files neither tracked nor ignored; never enters an ignored directory or a nested repo. */
+    private static void removeUntracked(Repository repo) throws IOException {
+        List<Path> doomed = new ArrayList<>();
+        try (TreeWalk tw = new TreeWalk(repo)) {
+            tw.addTree(new DirCacheIterator(repo.readDirCache()));
+            tw.addTree(new FileTreeIterator(repo));
+            tw.setRecursive(false);
+            while (tw.next()) {
+                DirCacheIterator tracked = tw.getTree(0, DirCacheIterator.class);
+                WorkingTreeIterator file = tw.getTree(1, WorkingTreeIterator.class);
+                if (file == null || file.isEntryIgnored()) {
+                    continue;
+                }
+                if (tw.isSubtree()) {
+                    if (!FileMode.GITLINK.equals(file.getEntryFileMode())) {
+                        tw.enterSubtree();
+                    }
+                } else if (tracked == null) {
+                    doomed.add(dataDir().resolve(tw.getPathString()));
+                }
+            }
+        }
+        for (Path p : doomed) {
+            Files.deleteIfExists(p);
+            // Drop directories the removal emptied; a non-empty one (ignored data inside) stays.
+            for (Path d = p.getParent(); d != null && !d.equals(dataDir()); d = d.getParent()) {
+                try {
+                    Files.delete(d);
+                } catch (IOException notEmpty) {
+                    break;
+                }
+            }
+        }
+    }
+
+    private static List<String> changedBetween(Repository repo, ObjectId from, ObjectId to) {
+        List<String> out = new ArrayList<>();
+        try (RevWalk walk = new RevWalk(repo);
+             org.eclipse.jgit.lib.ObjectReader reader = repo.newObjectReader();
+             Git git = new Git(repo)) {
+            org.eclipse.jgit.treewalk.CanonicalTreeParser oldTree = new org.eclipse.jgit.treewalk.CanonicalTreeParser();
+            if (from != null) {
+                oldTree.reset(reader, walk.parseCommit(from).getTree());
+            }
+            org.eclipse.jgit.treewalk.CanonicalTreeParser newTree = new org.eclipse.jgit.treewalk.CanonicalTreeParser();
+            newTree.reset(reader, walk.parseCommit(to).getTree());
+            for (var e : git.diff().setOldTree(from == null ? new org.eclipse.jgit.treewalk.EmptyTreeIterator() : oldTree)
+                    .setNewTree(newTree).call()) {
+                out.add(e.getChangeType() == org.eclipse.jgit.diff.DiffEntry.ChangeType.DELETE
+                        ? e.getOldPath() : e.getNewPath());
+            }
+        } catch (Exception e) {
+            logger.debug("Could not list files changed by the branch follow", e);
+        }
+        return out;
     }
 
     /**

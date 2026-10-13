@@ -92,6 +92,11 @@ public final class SyncScheduler {
     private static void tick() {
         try {
             long now = System.currentTimeMillis() / 1000L;
+            try {
+                com.operametrix.ignition.git.managers.ConfigSync.tick(now);
+            } catch (Throwable t) {
+                logger.error("Config branch follow tick failed.", t);
+            }
             for (GitSyncRecord cfg : GitSyncRecord.listEnabled()) {
                 Long last = lastRun.get(cfg.getProject());
                 if (last != null && now - last < cfg.getIntervalSeconds()) {
