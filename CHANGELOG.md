@@ -18,6 +18,8 @@ upstream's; everything below is this fork.
   discarded; Sync now runs it on demand. The auto-commit is held while it runs, so nothing is
   committed on top of the branch. Needs a config remote; the setting is kept in the
   repository's `.git/config`, outside the versioned files.
+- A new config repository ignores this module's own records (credentials, remotes, deliveries),
+  which belong to the gateway they were set on. An existing repository keeps its own `.gitignore`.
 
 ## [3.9.12] - 2026-10-12
 

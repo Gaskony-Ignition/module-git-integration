@@ -107,6 +107,10 @@ public class DataDirGitManager {
             "**/migration-log-*.md",
             "**/.resources/",
             "**/.alarms_*",
+            // This module's own records: git credentials, remotes and deliveries belong to the
+            // gateway they were set on. Versioned, a gateway following another's branch would take
+            // that gateway's remote and deliveries, and Sync - replace would delete its own.
+            "**/com.operametrix.ignition.git/",
             "",
             ROOT_RULES_COMMENT,
             "/*",
