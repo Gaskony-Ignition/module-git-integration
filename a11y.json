@@ -1,7 +1,9 @@
 {
   "_comment": "web URLs are absolute: replace GATEWAY with the test gateway host before running a11y-gate.sh",
   "gateway": "module-testing",
-  "web": ["http://GATEWAY:8088/app/config-versioning"],
+  "web": [
+    "http://GATEWAY:8088/app/config-versioning"
+  ],
   "login": true,
   "exceptions": [
     {
@@ -23,6 +25,21 @@
       "rule": "button-name",
       "match": "m5 8 3-3M1 8l7-7",
       "reason": "The platform TextArea's own resize-handle button (bottom-right corner, both the Credentials drawer's Private key field and the Git Ignore raw-source editor). TextAreaProps exposes no prop to name it -- verified against TextArea.types.d.ts, 8.3.8; matched on its icon's SVG path since the wrapping class is an emotion hash."
+    },
+    {
+      "rule": "focus-ring-contrast",
+      "component": "web-ui.app-header",
+      "reason": "Ignition's own gateway chrome, not this module's markup: the header's Help & Resources and admin links. Verified on 8.3.10, 03/11/2026: all 30 focus-ring-contrast stops (2) sit in the gateway header or the Platform side navigation, outside the module's .gitcfg container; the module renders no <a> and its 6 own focusable elements pass. a11y-check can only scope a focus exception by the stop's tag name, so this covers that tag everywhere on the page."
+    },
+    {
+      "rule": "focus-ring-contrast",
+      "component": "A",
+      "reason": "Ignition's own gateway chrome, not this module's markup: the icon rail (Home, Platform, Connections, Network, Services, Diagnostics) and the side-nav links, including this module's own Versioning menu entry. Verified on 8.3.10, 03/11/2026: all 30 focus-ring-contrast stops (26 anchors) sit in the gateway header or the Platform side navigation, outside the module's .gitcfg container; the module renders no <a> and its 6 own focusable elements pass. a11y-check can only scope a focus exception by the stop's tag name, so this covers that tag everywhere on the page."
+    },
+    {
+      "rule": "focus-ring-contrast",
+      "component": "DIV",
+      "reason": "Ignition's own gateway chrome, not this module's markup: the side-nav group headers System and Security. Verified on 8.3.10, 03/11/2026: all 30 focus-ring-contrast stops (2 divs) sit in the gateway header or the Platform side navigation, outside the module's .gitcfg container; the module renders no <a> and its 6 own focusable elements pass. a11y-check can only scope a focus exception by the stop's tag name, so this covers that tag everywhere on the page."
     }
   ]
 }
