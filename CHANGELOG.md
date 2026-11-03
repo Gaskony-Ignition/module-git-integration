@@ -13,6 +13,11 @@ upstream's; everything below is this fork.
   no patched release. JGit 7.8's SSH artefact does not depend on it, so the jar is gone from the
   `.modl`.
 
+### Fixed
+- **The "Remote" chip on the History tab failed WCAG AA contrast.** Its text was dark blue on a
+  solid blue fill (1.49:1); it is now white (4.62:1). The same fix applies to the rename and copy
+  chips in an expanded commit.
+
 ### Changed
 - **JGit 6.10.1 to 7.8.0** (`org.eclipse.jgit` and `org.eclipse.jgit.ssh.apache`), with Apache MINA
   sshd 2.14.0 to 2.19.0. No source changes were needed. With eddsa gone, Ed25519 SSH keys are

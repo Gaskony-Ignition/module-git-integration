@@ -721,9 +721,13 @@ ul.gitcfg-hint {
     --gitcfg-text-sm
   ); // 11px floor (1.4.4 / this project's own minimum)
 
-  &.info,
   &.alt {
     color: #2557ad !important; // measured 6.3:1 on --info-10, same hue as --info
+  }
+  // The solid info chip (Remote, rename/copy) is a filled #3272d9, not the pale fill `.alt` has,
+  // so the dark text above came out at 1.49:1 on it.
+  &.info:not(.alt) {
+    color: var(--white) !important; // 4.62:1 on #3272d9
   }
   &.success {
     color: var(--white) !important; // measured 4.76:1 on --success
