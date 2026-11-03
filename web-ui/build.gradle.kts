@@ -10,7 +10,7 @@ plugins {
 val projectOutput: String by extra("$buildDir/generated-resources/")
 
 node {
-    version.set("18.0.0")
+    version.set("24.22.2")
     yarnVersion.set("1.22.18")
     npmVersion.set("8.5.5")
     download.set(true)

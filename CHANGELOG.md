@@ -3,6 +3,22 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.10.2] - 2026-11-03
+
+**Type:** PATCH
+
+### Security
+- **Bundled web dependencies updated for Dependabot alerts.** The Versioning page bundles `qs`
+  (6.17.1; GHSA-4mjr-xmp4-gh2g, GHSA-x5fp-wj9c-mxmx, GHSA-6pq8-jhm2-2vcw) and `react-router-dom`
+  (6.30.6; GHSA-jjmj-jmhj-qwj2), both now past their medium advisories. The webpack build tooling
+  moved to current majors (webpack 5.112.2, webpack-dev-server 6.1.0, webpack-cli 7.3.1), and a full
+  `yarn upgrade` cleared the other build-time alerts. The web build now downloads Node 24.22.2
+  (was 18.0.0), which the updated tooling needs. No behaviour change.
+- **Still open:** two medium react-router advisories (GHSA-wrjc-x8rr-h8h6, GHSA-337j-9hxr-rhxg) are
+  fixed only in react-router 7. `@inductiveautomation/ignition-web-ui` pins `react-router-dom` at
+  `^6.30.4`, so the page stays on 6.30.6 until Inductive Automation moves. Also open: minimatch
+  (GHSA-g3hv-75wg-m249) and deepmerge (GHSA-gcqx-w48m-w2h4), build-time only.
+
 ## [3.10.1] - 2026-10-13
 
 **Type:** PATCH
