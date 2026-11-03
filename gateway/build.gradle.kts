@@ -19,7 +19,7 @@ dependencies {
     // classes. compileOnly, at or below what the gateway bundles (8.3.x ships jython-ia 2.7.4.x).
     compileOnly("org.python:jython-ia:2.7.3.5")
 
-    modlImplementation("org.eclipse.jgit:org.eclipse.jgit.ssh.apache:6.10.1.202505221210-r")
+    modlImplementation("org.eclipse.jgit:org.eclipse.jgit.ssh.apache:7.8.0.202609011348-r")
 
     // Bundles the Config Versioning React page (built by :web-ui) into the gateway jar under mounted/.
     modlImplementation(project(":web-ui"))

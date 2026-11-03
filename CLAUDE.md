@@ -113,7 +113,7 @@ No Vision client scope.
 
 ## Key libraries
 
-- Eclipse JGit 6.10.1 — all git operations
+- Eclipse JGit 7.8.0 — all git operations
 - Apache MINA sshd — SSH transport
 - Lombok — annotation processing (designer)
 - React 18 + RTK Query + `@inductiveautomation/ignition-web-ui` — the

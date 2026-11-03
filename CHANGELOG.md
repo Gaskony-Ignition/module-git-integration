@@ -3,6 +3,24 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.11.0] - 2026-11-03
+
+**Type:** MINOR
+
+### Security
+- **Ed25519 signature-malleability advisory (GHSA-p53j-g8pw-4w5f) no longer applies.** The module
+  bundled `net.i2p.crypto:eddsa` 0.3.0 through `org.eclipse.jgit.ssh.apache` 6.10.1, and eddsa has
+  no patched release. JGit 7.8's SSH artefact does not depend on it, so the jar is gone from the
+  `.modl`.
+
+### Changed
+- **JGit 6.10.1 to 7.8.0** (`org.eclipse.jgit` and `org.eclipse.jgit.ssh.apache`), with Apache MINA
+  sshd 2.14.0 to 2.19.0. No source changes were needed. With eddsa gone, Ed25519 SSH keys are
+  handled by the JDK; no BouncyCastle jar is bundled. Tested on an 8.3.10 gateway against Gitea
+  28.3.0: init, commit, push and pull over HTTP with a password, and push and pull over SSH with
+  Ed25519, RSA and ECDSA keys, all succeed; an unregistered key and a wrong password are refused.
+  SSH host keys are still accepted without verification, as before.
+
 ## [3.10.2] - 2026-11-03
 
 **Type:** PATCH
