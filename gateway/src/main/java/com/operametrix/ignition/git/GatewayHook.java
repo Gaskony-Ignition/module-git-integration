@@ -826,6 +826,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             boolean ssh = uri != null && !uri.trim().toLowerCase().startsWith("http");
             boolean reference = "reference".equalsIgnoreCase(optString(body, "mode"));
             String username = optString(body, "username");
+            SshTransportConfigCallback.lastFingerprint = null;
             if (reference) {
                 // Resolve the referenced secret to plaintext for the test.
                 SecretConfig cfg = referencedSecret(body);
@@ -852,7 +853,12 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     DataDirGitManager.testRemoteRaw(uri, ssh ? key : null, username, ssh ? null : password);
                 }
             }
-            return ok();
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", true);
+            if (ssh && SshTransportConfigCallback.lastFingerprint != null) {
+                o.addProperty("fingerprint", SshTransportConfigCallback.lastFingerprint);
+            }
+            return o.toString();
         } catch (Exception e) {
             return error(resp, e);
         }

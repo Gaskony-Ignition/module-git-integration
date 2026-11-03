@@ -171,8 +171,14 @@ const ConfigDrawer = ({
   const doTest = async () => {
     setFeedback(null);
     try {
-      await testRemote(secretPayload(getValues())).unwrap();
-      setFeedback({ ok: true, text: "Connection OK." });
+      const res: any = await testRemote(secretPayload(getValues())).unwrap();
+      setFeedback({
+        ok: true,
+        text:
+          res && res.fingerprint
+            ? `Connection OK. Server key ${res.fingerprint}.`
+            : "Connection OK.",
+      });
     } catch (e: any) {
       setFeedback({ ok: false, text: errText(e) });
     }

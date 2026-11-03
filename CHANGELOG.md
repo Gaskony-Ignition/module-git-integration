@@ -3,6 +3,20 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.11.1] - 2026-11-03
+
+**Type:** PATCH
+
+### Security
+- **SSH host keys are now checked (trust on first use).** Every SSH connection used to accept any
+  host key, so a server could be impersonated without a trace. The first connection to a host and
+  port now records its key in `<data folder>/var/git-module/known_hosts` (outside the config
+  repository, so it is never committed); a later connection that presents a different key is
+  refused, with an error naming the host and both SHA256 fingerprints. The Configure drawer's
+  connection test shows the server's fingerprint so it can be checked against the server. Existing
+  SSH remotes record their key on their next connection, so that first connection is still
+  unverified. To accept a rebuilt server's new key, delete its line from the `known_hosts` file.
+
 ## [3.11.0] - 2026-11-03
 
 **Type:** MINOR
