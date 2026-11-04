@@ -90,6 +90,8 @@ const Projects = () => {
         url: url.trim() || undefined,
         sshKeyId: chosen?.type === "SSH" ? chosen.id : undefined,
         httpsCredentialId: chosen?.type === "HTTPS" ? chosen.id : undefined,
+        // Clone the branch the delivery will pull, not the remote's default.
+        branch: (needsRemote(delivery) && branch.trim()) || undefined,
       }).unwrap();
     } else if (target.versioned) {
       if (url.trim() !== "" && url.trim() !== (target.remoteUrl || "")) {

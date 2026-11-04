@@ -3,6 +3,21 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.11.2] - 2026-11-04
+
+**Type:** PATCH
+
+### Fixed
+- **Putting a project under version control from the Projects tab now clones the Branch you set.**
+  It always cloned the remote's default branch and only recorded the Branch afterwards, for the
+  sync. A branch that is not on the remote now fails with the list of branches that are.
+- **A branch without `project.json` at its root is refused before anything on disk changes.** The
+  clone cleans and hard-resets the project folder, so such a branch wiped the gateway's project,
+  dropped it from the Projects list and left no way to edit it. The project and its records are
+  now left as they were.
+- **Saving a pulling delivery for a folder with no root `project.json` says so,** instead of
+  reporting that the project has no remote.
+
 ## [3.11.1] - 2026-11-03
 
 **Type:** PATCH

@@ -334,6 +334,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
         url?: string;
         sshKeyId?: number;
         httpsCredentialId?: number;
+        branch?: string;
       }
     >({
       query: (body) => ({ url: `${BASE}/project-init`, method: "POST", body }),

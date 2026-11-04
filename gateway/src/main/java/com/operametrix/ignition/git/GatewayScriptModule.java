@@ -112,7 +112,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             if (git.getRepository().resolve("HEAD") == null) {
                 // An init that never reached its first checkout: finish it instead of
                 // asking the remote for a branch this repo does not have.
-                checkoutRemote(projectName, userName, remoteName, git);
+                checkoutRemote(projectName, userName, remoteName, null, git);
                 return true;
             }
             PullCommand pull = git.pull();
@@ -370,7 +370,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
      *
      * @param repoUri the clone URL, or {@code null}/empty for a local-only repository
      */
-    private void materializeRepo(String projectName, String userName, String repoUri) throws Exception {
+    private void materializeRepo(String projectName, String userName, String repoUri, String branch)
+            throws Exception {
         Path projectFolderPath = getProjectFolderPath(projectName);
         Path gitDir = projectFolderPath.resolve(".git");
         boolean created = !Files.exists(gitDir);
@@ -391,7 +392,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             } else {
                 git.remoteAdd().setName("origin").setUri(uri).call();
             }
-            checkoutRemote(projectName, userName, "origin", git);
+            checkoutRemote(projectName, userName, "origin", branch, git);
         } catch (Exception e) {
             logger.error("An error occurred while setting up local repo for '" + projectName + "' project.", e);
             if (created) {
@@ -402,15 +403,15 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     /**
-     * Bring an unborn repository up to the named remote's default branch, or push the current
-     * folder up when that remote is empty.
+     * Bring an unborn repository up to {@code branch} on the named remote (its default branch when
+     * {@code branch} is blank), or push the current folder up when that remote is empty.
      *
      * <p>The remote is a parameter rather than a hardcoded {@code origin} because
      * {@link #pullImpl} routes here for an unborn repository and carries the remote the caller
      * actually asked for — using origin regardless would silently pull from the wrong place.
      */
-    private void checkoutRemote(String projectName, String userName, String remoteName, Git git)
-            throws Exception {
+    private void checkoutRemote(String projectName, String userName, String remoteName, String branch,
+                                Git git) throws Exception {
         // Lightweight ls-remote to detect the default branch without downloading objects
         LsRemoteCommand lsRemote = git.lsRemote().setRemote(remoteName).setHeads(true);
         setAuthentication(lsRemote, projectName, userName, remoteName);
@@ -420,8 +421,18 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             setupGitFromCurrentFolder(projectName, userName, git);
             return;
         }
-        // Detect default branch, then shallow-fetch only that branch
-        String defaultBranch = detectDefaultBranchFromRefs(remoteRefs);
+        String defaultBranch;
+        if (branch == null || branch.isBlank()) {
+            defaultBranch = detectDefaultBranchFromRefs(remoteRefs);
+        } else {
+            defaultBranch = branch.trim();
+            if (remoteRefs.stream().noneMatch(r -> r.getName().equals("refs/heads/" + defaultBranch))) {
+                throw new RuntimeException("Branch '" + defaultBranch + "' is not on " + remoteName
+                        + ". Branches there: " + String.join(", ", remoteRefs.stream()
+                                .map(Ref::getName).filter(n -> n.startsWith("refs/heads/"))
+                                .map(n -> n.substring("refs/heads/".length())).sorted().toList()));
+            }
+        }
         FetchCommand fetch = git.fetch()
                 .setRemote(remoteName)
                 .setRefSpecs(new RefSpec("+refs/heads/" + defaultBranch
@@ -429,6 +440,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                 .setDepth(1);
         setAuthentication(fetch, projectName, userName, remoteName);
         fetch.call();
+        requireRootProjectJson(git, remoteName, defaultBranch);
         setupGitFromRemoteRepo(projectName, remoteName, defaultBranch, git);
         // Unshallow to pull full commit history for the History panel
         FetchCommand unshallow = git.fetch()
@@ -436,6 +448,26 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                 .setUnshallow(true);
         setAuthentication(unshallow, projectName, userName, remoteName);
         unshallow.call();
+    }
+
+    /**
+     * The checkout that follows cleans and hard-resets the project folder, so a branch without
+     * project.json at its root would wipe the gateway's project and leave a folder Ignition (and
+     * the Projects list) no longer treats as a project. Checked against the fetched tree, before
+     * anything on disk changes, so the caller's rollback leaves the project as it was.
+     */
+    private void requireRootProjectJson(Git git, String remoteName, String branch) throws Exception {
+        org.eclipse.jgit.lib.Repository repo = git.getRepository();
+        org.eclipse.jgit.lib.ObjectId tip = repo.resolve("refs/remotes/" + remoteName + "/" + branch);
+        try (org.eclipse.jgit.revwalk.RevWalk walk = new org.eclipse.jgit.revwalk.RevWalk(repo);
+             org.eclipse.jgit.treewalk.TreeWalk tw = org.eclipse.jgit.treewalk.TreeWalk.forPath(
+                     repo, "project.json", walk.parseCommit(tip).getTree())) {
+            if (tw == null) {
+                throw new RuntimeException("Branch '" + branch + "' has no project.json at its root, so it"
+                        + " is not an Ignition project. Pick the branch that holds the project at its"
+                        + " root. Nothing was changed.");
+            }
+        }
     }
 
     private void deleteRecursively(Path root) {
@@ -550,6 +582,12 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     @Override
     protected boolean initializeProjectImpl(String projectName, String repoUri, String ignitionUser,
                                              long sshKeyId, long httpsCredentialId) throws Exception {
+        return initializeProject(projectName, repoUri, ignitionUser, sshKeyId, httpsCredentialId, null);
+    }
+
+    /** As {@link #initializeProjectImpl}, cloning {@code branch} instead of the remote's default. */
+    public boolean initializeProject(String projectName, String repoUri, String ignitionUser,
+                                     long sshKeyId, long httpsCredentialId, String branch) throws Exception {
         // Check project not already registered
         if (isProjectRegisteredImpl(projectName)) {
             throw new Exception("Project '" + projectName + "' is already registered.");
@@ -581,7 +619,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
         // Attempt to initialize the local repo
         try {
-            materializeRepo(projectName, ignitionUser, repoUri);
+            materializeRepo(projectName, ignitionUser, repoUri, branch);
         } catch (Exception e) {
             // Rollback: delete all records on failure
             try {

@@ -1381,7 +1381,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                         ? body.get("sshKeyId").getAsLong() : 0L;
                 long httpsId = body.has("httpsCredentialId") && !body.get("httpsCredentialId").isJsonNull()
                         ? body.get("httpsCredentialId").getAsLong() : 0L;
-                ok = scriptModule.initializeProject(project, url.trim(), actor, sshKeyId, httpsId);
+                ok = scriptModule.initializeProject(project, url.trim(), actor, sshKeyId, httpsId,
+                        optString(body, "branch"));
                 if (ok && (sshKeyId > 0 || httpsId > 0)) {
                     CredentialCheck.checkSoon(sshKeyId > 0 ? "SSH" : "HTTPS",
                             sshKeyId > 0 ? sshKeyId : httpsId);
@@ -1537,9 +1538,18 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
 
             boolean pulls = delivery.startsWith("sync-") || delivery.equals("runner-repo");
-            if (pulls && GitProjectManager.listProjectStatus().stream().noneMatch(p ->
-                    p.name().equals(project) && p.remoteUrl() != null && !p.remoteUrl().isBlank())) {
-                throw new RuntimeException("'" + project + "' has no remote to pull from; set one first.");
+            if (pulls) {
+                // The list only holds folders with a root project.json, so a missing row is not
+                // a missing remote.
+                GitProjectManager.ProjectStatus status = GitProjectManager.listProjectStatus().stream()
+                        .filter(p -> p.name().equals(project)).findFirst().orElse(null);
+                if (status == null) {
+                    throw new RuntimeException("'" + project + "' has no project.json at the root of its"
+                            + " folder, so it is not an Ignition project as checked out.");
+                }
+                if (status.remoteUrl() == null || status.remoteUrl().isBlank()) {
+                    throw new RuntimeException("'" + project + "' has no remote to pull from; set one first.");
+                }
             }
 
             GitRunnerRecord runner = GitRunnerRecord.get();
