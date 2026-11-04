@@ -3,6 +3,20 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [3.11.3] - 2026-11-04
+
+**Type:** PATCH
+
+### Fixed
+- **Deleting a project now removes the module's records for it**: its repo, user and remote
+  credential records, its scheduled sync and its runner delivery. They used to stay behind, so the
+  sync failed on every tick, the Credentials tab reported the credential's link to the project as
+  broken, and a project later created under the same name inherited the delivery and credential.
+  Projects deleted while the module was not running are cleaned up at its next startup.
+- **Renaming a project is handled as a delete.** Ignition's rename builds the project in a new
+  folder and deletes the old one, `.git` included, so the renamed project shows as not versioned
+  and has to be linked again from the Projects tab.
+
 ## [3.11.2] - 2026-11-04
 
 **Type:** PATCH

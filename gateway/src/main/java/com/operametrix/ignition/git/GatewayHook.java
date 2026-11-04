@@ -19,6 +19,7 @@ import com.operametrix.ignition.git.records.legacy.RetiredResourceCleanup;
 import com.operametrix.ignition.git.managers.ConfigAutoCommitter;
 import com.operametrix.ignition.git.managers.ConfigSync;
 import com.operametrix.ignition.git.managers.CredentialCheck;
+import com.operametrix.ignition.git.managers.ProjectRecords;
 import com.operametrix.ignition.git.managers.DataDirGitManager;
 import com.inductiveautomation.ignition.common.gson.Gson;
 import com.inductiveautomation.ignition.common.gson.JsonArray;
@@ -58,6 +59,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     private final Logger logger = LoggerFactory.getLogger(getClass());
 
     private GatewayScriptModule scriptModule;
+    private ProjectRecords projectRecords;
     private static GatewayContext context;
 
     private GitProjectsConfigRecord.Handler projectHandler;
@@ -193,11 +195,20 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         // Changes made while the gateway/module was offline can't reach the listener — sweep them.
         autoCommitter.commitLeftovers();
 
+        // Deletes and renames made while the module was not running reach no listener.
+        projectRecords = new ProjectRecords();
+        context.getProjectManager().addListener(projectRecords);
+        ProjectRecords.reconcile();
+
         logger.info("startup()");
     }
 
     @Override
     public void shutdown() {
+        if (projectRecords != null) {
+            context.getProjectManager().removeListener(projectRecords);
+            projectRecords.shutdown();
+        }
         SyncScheduler.shutdown();
         CredentialCheck.shutdown();
         if (runnerHandler != null) runnerHandler.shutdown();

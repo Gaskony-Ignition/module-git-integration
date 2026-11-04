@@ -98,6 +98,11 @@ public final class SyncScheduler {
                 logger.error("Config branch follow tick failed.", t);
             }
             for (GitSyncRecord cfg : GitSyncRecord.listEnabled()) {
+                // A delete the listener missed would otherwise fail here on every tick.
+                if (com.operametrix.ignition.git.managers.ProjectRecords.isGone(cfg.getProject())) {
+                    com.operametrix.ignition.git.managers.ProjectRecords.reconcile();
+                    continue;
+                }
                 Long last = lastRun.get(cfg.getProject());
                 if (last != null && now - last < cfg.getIntervalSeconds()) {
                     continue;

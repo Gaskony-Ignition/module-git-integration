@@ -143,6 +143,13 @@ public class GitProjectsConfigRecord {
                 .orElse(null);
     }
 
+    public static java.util.List<GitProjectsConfigRecord> listAll() {
+        return handler.getResources().stream()
+                .map(DecodedResource::config)
+                .map(GitProjectsConfigRecord::new)
+                .toList();
+    }
+
     public static GitProjectsConfigRecord findById(long id) {
         return handler.findResource(String.valueOf(id))
                 .map(d -> new GitProjectsConfigRecord(d.config()))

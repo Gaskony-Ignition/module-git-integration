@@ -93,6 +93,14 @@ public class GitReposUsersRecord {
         }
     }
 
+    public static java.util.List<GitReposUsersRecord> listByProject(long projectId) {
+        return handler.getResources().stream()
+                .map(DecodedResource::config)
+                .filter(c -> c.projectId() == projectId)
+                .map(GitReposUsersRecord::new)
+                .toList();
+    }
+
     public static GitReposUsersRecord findByProjectAndUser(long projectId, String ignitionUser) {
         return handler.getResources().stream()
                 .map(DecodedResource::config)
