@@ -1384,6 +1384,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
             String url = optString(body, "url");
             String actor = req.getActor();
+            // The drawer sends its delivery with the init, so leaving the page mid-save cannot
+            // leave a linked project with Delivery Off. Checked first, so a bad value inits nothing.
+            String delivery = body.has("delivery") ? checkDelivery(body) : null;
             boolean ok;
             if (url == null || url.isBlank()) {
                 ok = scriptModule.initializeLocalProject(project, actor);
@@ -1398,6 +1401,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     CredentialCheck.checkSoon(sshKeyId > 0 ? "SSH" : "HTTPS",
                             sshKeyId > 0 ? sshKeyId : httpsId);
                 }
+            }
+            if (ok && delivery != null) {
+                applyDelivery(body, project, delivery, actor);
             }
             JsonObject o = new JsonObject();
             o.addProperty("ok", ok);
@@ -1539,70 +1545,78 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         try {
             JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
             String project = optString(body, "project");
-            String delivery = optString(body, "delivery");
             if (project == null || project.isBlank()) {
                 throw new RuntimeException("A project name is required.");
             }
-            if (!List.of("off", "runner-release", "runner-repo", "sync-pull", "sync-replace")
-                    .contains(delivery)) {
-                throw new RuntimeException("Unknown delivery '" + delivery + "'.");
-            }
-
-            boolean pulls = delivery.startsWith("sync-") || delivery.equals("runner-repo");
-            if (pulls) {
-                // The list only holds folders with a root project.json, so a missing row is not
-                // a missing remote.
-                GitProjectManager.ProjectStatus status = GitProjectManager.listProjectStatus().stream()
-                        .filter(p -> p.name().equals(project)).findFirst().orElse(null);
-                if (status == null) {
-                    throw new RuntimeException("'" + project + "' has no project.json at the root of its"
-                            + " folder, so it is not an Ignition project as checked out.");
-                }
-                if (status.remoteUrl() == null || status.remoteUrl().isBlank()) {
-                    throw new RuntimeException("'" + project + "' has no remote to pull from; set one first.");
-                }
-            }
-
-            GitRunnerRecord runner = GitRunnerRecord.get();
-            switch (delivery) {
-                case "runner-release" -> runner.setMode(project, GitRunnerRecord.MODE_RELEASE);
-                case "runner-repo" -> runner.setMode(project, GitRunnerRecord.MODE_REPO);
-                default -> runner.clearMode(project);
-            }
-            runner.save();
-
-            // The sync record also carries the branch and credential a runner repo update pulls
-            // with, so it is kept (disabled) rather than deleted when the timer is not wanted.
-            GitSyncRecord sync = GitSyncRecord.findByProject(project);
-            if (sync == null && pulls) {
-                sync = new GitSyncRecord();
-                sync.setProject(project);
-            }
-            if (sync != null) {
-                sync.setEnabled(delivery.startsWith("sync-"));
-                if (pulls) {
-                    sync.setMode(delivery.equals("sync-replace")
-                            ? GitSyncRecord.MODE_REPLACE : GitSyncRecord.MODE_PULL);
-                    sync.setBranch(optString(body, "branch"));
-                    if (body.has("intervalSeconds")) {
-                        sync.setIntervalSeconds((int) optLong(body, "intervalSeconds"));
-                    }
-                    if (body.has("remoteName")) {
-                        sync.setRemoteName(optString(body, "remoteName"));
-                    }
-                    // Unattended, so it authenticates as a named user's stored credential rather
-                    // than whoever is in a Designer. Default to the admin saving it.
-                    String owner = optString(body, "ignitionUser");
-                    sync.setIgnitionUser(owner == null || owner.isBlank() ? req.getActor() : owner);
-                }
-                sync.save();
-            }
+            String delivery = checkDelivery(body);
+            applyDelivery(body, project, delivery, req.getActor());
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             o.addProperty("delivery", delivery);
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);
+        }
+    }
+
+    private static String checkDelivery(JsonObject body) {
+        String delivery = optString(body, "delivery");
+        if (!List.of("off", "runner-release", "runner-repo", "sync-pull", "sync-replace")
+                .contains(delivery)) {
+            throw new RuntimeException("Unknown delivery '" + delivery + "'.");
+        }
+        return delivery;
+    }
+
+    private static void applyDelivery(JsonObject body, String project, String delivery, String actor) {
+        boolean pulls = delivery.startsWith("sync-") || delivery.equals("runner-repo");
+        if (pulls) {
+            // The list only holds folders with a root project.json, so a missing row is not
+            // a missing remote.
+            GitProjectManager.ProjectStatus status = GitProjectManager.listProjectStatus().stream()
+                    .filter(p -> p.name().equals(project)).findFirst().orElse(null);
+            if (status == null) {
+                throw new RuntimeException("'" + project + "' has no project.json at the root of its"
+                        + " folder, so it is not an Ignition project as checked out.");
+            }
+            if (status.remoteUrl() == null || status.remoteUrl().isBlank()) {
+                throw new RuntimeException("'" + project + "' has no remote to pull from; set one first.");
+            }
+        }
+
+        GitRunnerRecord runner = GitRunnerRecord.get();
+        switch (delivery) {
+            case "runner-release" -> runner.setMode(project, GitRunnerRecord.MODE_RELEASE);
+            case "runner-repo" -> runner.setMode(project, GitRunnerRecord.MODE_REPO);
+            default -> runner.clearMode(project);
+        }
+        runner.save();
+
+        // The sync record also carries the branch and credential a runner repo update pulls
+        // with, so it is kept (disabled) rather than deleted when the timer is not wanted.
+        GitSyncRecord sync = GitSyncRecord.findByProject(project);
+        if (sync == null && pulls) {
+            sync = new GitSyncRecord();
+            sync.setProject(project);
+        }
+        if (sync != null) {
+            sync.setEnabled(delivery.startsWith("sync-"));
+            if (pulls) {
+                sync.setMode(delivery.equals("sync-replace")
+                        ? GitSyncRecord.MODE_REPLACE : GitSyncRecord.MODE_PULL);
+                sync.setBranch(optString(body, "branch"));
+                if (body.has("intervalSeconds")) {
+                    sync.setIntervalSeconds((int) optLong(body, "intervalSeconds"));
+                }
+                if (body.has("remoteName")) {
+                    sync.setRemoteName(optString(body, "remoteName"));
+                }
+                // Unattended, so it authenticates as a named user's stored credential rather
+                // than whoever is in a Designer. Default to the admin saving it.
+                String owner = optString(body, "ignitionUser");
+                sync.setIgnitionUser(owner == null || owner.isBlank() ? actor : owner);
+            }
+            sync.save();
         }
     }
 

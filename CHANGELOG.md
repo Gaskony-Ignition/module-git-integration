@@ -16,6 +16,9 @@ upstream's; everything below is this fork.
 - **Renaming a project is handled as a delete.** Ignition's rename builds the project in a new
   folder and deletes the old one, `.git` included, so the renamed project shows as not versioned
   and has to be linked again from the Projects tab.
+- **Linking a project from the Projects tab is one request.** The drawer used to clone, then save
+  the delivery in a second call, so leaving the page while it said "Saving…" left the project
+  linked with Delivery Off. The gateway now sets the delivery as part of the init.
 
 ## [3.11.2] - 2026-11-04
 

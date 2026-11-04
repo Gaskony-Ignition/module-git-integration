@@ -83,17 +83,29 @@ const Projects = () => {
     if (!target) return;
     const chosen = credentials.find((c) => String(c.id) === credId);
 
-    // Repository first: a delivery that pulls needs the remote in place.
+    const deliveryFields = {
+      delivery,
+      branch: branch.trim(),
+      intervalSeconds: Number(every) || 300,
+      ignitionUser: user.trim(),
+    };
+
+    // One request: the gateway clones, then sets the delivery, so leaving the page mid-save
+    // cannot leave the project linked with Delivery Off.
     if (!target.versioned && version) {
       await init({
         project: target.name,
         url: url.trim() || undefined,
         sshKeyId: chosen?.type === "SSH" ? chosen.id : undefined,
         httpsCredentialId: chosen?.type === "HTTPS" ? chosen.id : undefined,
+        ...deliveryFields,
         // Clone the branch the delivery will pull, not the remote's default.
         branch: (needsRemote(delivery) && branch.trim()) || undefined,
       }).unwrap();
-    } else if (target.versioned) {
+      toasts.notifySuccess(`Saved ${target.name}`);
+      return;
+    }
+    if (target.versioned) {
       if (url.trim() !== "" && url.trim() !== (target.remoteUrl || "")) {
         await setRemote({ project: target.name, url: url.trim() }).unwrap();
       }
@@ -110,13 +122,7 @@ const Projects = () => {
       }
     }
 
-    await saveDelivery({
-      project: target.name,
-      delivery,
-      branch: branch.trim(),
-      intervalSeconds: Number(every) || 300,
-      ignitionUser: user.trim(),
-    }).unwrap();
+    await saveDelivery({ project: target.name, ...deliveryFields }).unwrap();
     toasts.notifySuccess(`Saved ${target.name}`);
   };
 
