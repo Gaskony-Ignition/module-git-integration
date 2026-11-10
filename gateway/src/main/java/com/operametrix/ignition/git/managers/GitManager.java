@@ -412,7 +412,7 @@ public class GitManager {
     public static void cloneRepo(String projectName, String userName, String URI, String branchName) {
         File projectDirFile = getProjectFolderPath(projectName).toFile();
         if (projectDirFile.exists()) {
-            try (Git git = Git.init().setDirectory(projectDirFile).call()) {
+            try (Git git = Git.init().setDirectory(projectDirFile).setInitialBranch(MasterRename.initialBranch(branchName)).call()) {
                 disableSsl(git);
 
                 // GIT REMOTE ADD

@@ -164,13 +164,22 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                     org.eclipse.jgit.lib.Repository r = git.getRepository();
                     FetchCommand fetch = git.fetch().setRemote(remoteName).setRemoveDeletedRefs(true);
                     setAuthentication(fetch, projectName, userName, remoteName);
-                    fetch.call();
+                    try {
+                        fetch.call();
+                    } catch (GitAPIException e) {
+                        throw PullGuard.error(e);
+                    }
                     com.operametrix.ignition.git.records.GitConfigRemoteRecord gw =
                             com.operametrix.ignition.git.records.GitConfigRemoteRecord.get();
+                    refuseGoneUpstream(r, gw == null ? null : gw.getBranch());
                     String target = ProjectScope.pushTarget(r, remoteName, gw == null ? null : gw.getBranch());
                     org.eclipse.jgit.lib.ObjectId tip = r.resolve("refs/remotes/" + remoteName + "/" + target);
                     if (tip == null) {
                         throw new RuntimeException("Branch '" + target + "' is not on " + remoteName + ".");
+                    }
+                    String layout = LayoutCheck.problem(r, tip, r.resolve("HEAD"), remoteName + "/" + target, true);
+                    if (layout != null) {
+                        throw new RuntimeException(layout);
                     }
                     Set<String> dirty = IgnitionReformat.realChanges(r, git.status().call());
                     List<String> blocking = ProjectScope.blockingChanges(r, repo, tip, dirty);
@@ -211,6 +220,14 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                 checkoutRemote(projectName, userName, remoteName, null, git);
                 return true;
             }
+            // Fetch with prune first: a branch merged and deleted on the remote is then gone here
+            // too, and is said plainly instead of JGit's RefNotAdvertisedException.
+            FetchCommand fetch = git.fetch().setRemote(remoteName).setRemoveDeletedRefs(true);
+            setAuthentication(fetch, projectName, userName, remoteName);
+            fetch.call();
+            GitSyncRecord sync = GitSyncRecord.findByProject(projectName);
+            refuseGoneUpstream(git.getRepository(), sync == null ? null : sync.getBranch());
+
             PullCommand pull = git.pull();
             pull.setRemote(remoteName);
             setAuthentication(pull, projectName, userName, remoteName);
@@ -245,9 +262,22 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             }
         } catch (GitAPIException e) {
             logger.error(e.toString());
-            throw new RuntimeException(e);
+            throw PullGuard.error(e);
         }
         return true;
+    }
+
+    /**
+     * Refuses a pull whose branch's upstream was deleted on the remote, naming the branch to go
+     * back to; the Designer offers to switch to it and pull.
+     */
+    private static void refuseGoneUpstream(org.eclipse.jgit.lib.Repository r, String configured)
+            throws java.io.IOException {
+        PullGuard.Gone gone = PullGuard.goneUpstream(r);
+        if (gone != null) {
+            throw new RuntimeException(PullGuard.encode(gone,
+                    PullGuard.defaultBranch(r, gone.remote(), configured, gone.branch())));
+        }
     }
 
     private static void importSnapshots(String projectName, boolean importTags, boolean importTheme,
@@ -302,6 +332,16 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                         gw == null ? null : gw.getBranch());
                 push.setRefSpecs(new RefSpec("refs/heads/" + git.getRepository().getBranch()
                         + ":refs/heads/" + upstream));
+                // Never push over a branch laid out another way or with unrelated history.
+                FetchCommand probe = git.fetch().setRemote(remoteName).setRemoveDeletedRefs(true);
+                setAuthentication(probe, projectName, userName, remoteName);
+                probe.call();
+                org.eclipse.jgit.lib.Repository r = git.getRepository();
+                String layout = LayoutCheck.problem(r, r.resolve("refs/remotes/" + remoteName + "/" + upstream),
+                        r.resolve("HEAD"), remoteName + "/" + upstream, true);
+                if (layout != null) {
+                    throw new RuntimeException(layout);
+                }
             }
 
             if (pushAllBranches) {
@@ -334,7 +374,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
         } catch (GitAPIException e) {
             logger.error(e.toString(), e);
-            throw new RuntimeException(e);
+            throw PullGuard.error(e);
         }
         return true;
     }
@@ -524,7 +564,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         Path gitDir = projectFolderPath.resolve(".git");
         boolean created = !Files.exists(gitDir);
         try (Git git = created
-                ? Git.init().setDirectory(projectFolderPath.toFile()).call()
+                ? Git.init().setDirectory(projectFolderPath.toFile())
+                        .setInitialBranch(MasterRename.initialBranch(branch)).call()
                 : getGit(projectFolderPath)) {
             if (!created && git.getRepository().resolve("HEAD") != null) {
                 return;
@@ -927,7 +968,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         // Initialize local repo: git init + add . + initial commit
         try {
             Path projectFolderPath = getProjectFolderPath(projectName);
-            try (Git git = Git.init().setDirectory(projectFolderPath.toFile()).call()) {
+            try (Git git = Git.init().setDirectory(projectFolderPath.toFile())
+                    .setInitialBranch(MasterRename.initialBranch(null)).call()) {
                 disableSsl(git);
                 git.add().addFilepattern(".").call();
 
@@ -1120,7 +1162,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             logger.info("Fetch from '" + remoteName + "' was successful.");
         } catch (GitAPIException e) {
             logger.error(e.toString(), e);
-            throw new RuntimeException(e);
+            throw PullGuard.error(e);
         }
         return true;
     }
