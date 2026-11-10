@@ -90,9 +90,14 @@ public final class RunnerTrigger {
             String result = SyncScheduler.syncNow(sync);
             logger.info("Runner requested a sync of '{}': {}", project, result);
             JsonObject o = new JsonObject();
-            o.addProperty("ok", true);
+            // syncNow reports a failed pull as a result, not an exception; the workflow step
+            // must still fail, as it does in the Combined layout.
+            o.addProperty("ok", !result.startsWith("failed"));
             o.addProperty("project", project);
             o.addProperty("result", result);
+            if (result.startsWith("failed")) {
+                resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            }
             return o.toString();
         } catch (Exception e) {
             logger.warn("Runner-requested sync of '{}' failed.", project, e);

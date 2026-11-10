@@ -248,6 +248,12 @@ public final class SyncScheduler {
                     GitManager.setAuthentication(pull, project, user, remoteName);
                     PullResult result = pull.call();
                     if (!result.isSuccessful()) {
+                        // A conflicted merge leaves markers in the project's files and the
+                        // repository mid-merge, refusing every later sync; the tree was clean, so
+                        // put it back as it was.
+                        if (local != null) {
+                            git.reset().setMode(ResetCommand.ResetType.HARD).setRef(local.getName()).call();
+                        }
                         MergeResult merge = result.getMergeResult();
                         String reason = merge == null ? "pull rejected" : ("merge " + merge.getMergeStatus());
                         throw new IllegalStateException(reason);
