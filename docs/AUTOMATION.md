@@ -128,3 +128,47 @@ session/CSRF model, because a workflow step has neither:
 Changing files under `data/projects/<name>/` is not noticed by Ignition on its
 own, so every delivery ends with a project import and a scan request, and an
 event on the Logs tab.
+
+## Runner setup
+
+For a GitHub remote, use a fine-grained token per gateway: owned by the
+organisation, limited to the repositories that gateway deploys, **Contents:
+Read-only** unless the gateway pushes. The Credentials tab then shows it reading,
+not pushing. Expiry is read for github.com only; SSH keys and other hosts show
+reach alone.
+
+Once per gateway:
+
+1. **Credentials → Runner access → Edit**: tick *Accept deliveries from a
+   runner* and *Generate a token*, Save. Copy the token — it is shown once, and
+   a new one stops the old one working. Save it as an Actions secret in every
+   repository that deploys here.
+2. A GitHub self-hosted runner on a machine that can reach the gateway, with a
+   label no other runner carries.
+3. A workflow whose `runs-on` names that label and which sends the token to the
+   gateway, at the address the runner reaches it on (for a runner on the same
+   Docker host, `http://localhost:` and the published port).
+
+Check the runner can reach the gateway before relying on it. With no zip, a
+correct address and token answer 400 "no release zip"; 401 is a wrong token,
+404 the runner switched off, 409 a project not set to Runner — release:
+
+```bash
+curl -sS -X POST -H 'Authorization: Bearer <token>' \
+  "http://<gateway>/data/git-config/runner-release?project=<project>"
+```
+
+```powershell
+try { Invoke-RestMethod -Method Post -Headers @{ Authorization = "Bearer <token>" } `
+  -Uri "http://<gateway>/data/git-config/runner-release?project=<project>" }
+catch { $_.Exception.Response.StatusCode.value__ }
+```
+
+A repo update is `POST /data/git-config/runner-sync` with the body
+`{"project": "<name>"}`.
+
+**Push or pull?** A runner (push) can build, gate and report success back to
+GitHub, and a release needs no git credentials on the gateway. Sync (pull) needs
+no machine beside the gateway, but the gateway needs a credential and a route to
+the git host, and whoever moved the branch learns nothing about whether it was
+applied — check Logs.

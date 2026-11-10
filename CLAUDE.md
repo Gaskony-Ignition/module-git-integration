@@ -8,11 +8,10 @@ Designer popup list — this file is standing instructions and gotchas only.
 
 A Java module for Ignition 8.3 that embeds a Git client into the Designer:
 commit, push, pull with conflict resolution, branches, and snapshotting
-gateway resources (tags/themes/images) into the project. It also versions the gateway **data
-directory** (config-as-code) in a separate repo, surfaced through a gateway
-web page (Platform → System → "Versioning"): config changes auto-commit as
-they happen, and the page gives history/restore. Originally built by
-AXONE-IO, maintained by Operametrix; this fork is Gaskony's build on top.
+gateway resources (tags/themes/images) into the project. It also versions the
+gateway **data directory** (config-as-code) in a separate repo, via a gateway
+page (Platform → System → "Versioning") with auto-commit, history and restore.
+Built by AXONE-IO, maintained by Operametrix; this is Gaskony's fork.
 
 ## Build commands
 
@@ -24,10 +23,10 @@ Clear `build/moduleContent` first: after a version bump it keeps the previous
 version's jars and the `.modl` ships both. Prettier violations fail webpack — run
 `node_modules/.bin/prettier --write "src/**/*.{ts,tsx}"` in `web-ui/`.
 
-Tests: `./gradlew test` covers the pure branch and layout logic (`BranchHygieneTest`,
-`RepoLocatorTest`, `ProjectScopeTest`, `LayoutSwitchTest`, `BranchGraphTest`, `BranchSwitchTest`, and `IgnoreRulesTest` for the Git
-Ignore tab's tick logic); for the rest install the `.modl` and
-exercise the Designer and the Versioning page — in both repository layouts.
+Tests: `./gradlew test` covers the pure branch, layout and Git Ignore tick logic
+(`BranchHygieneTest`, `RepoLocatorTest`, `ProjectScopeTest`, `LayoutSwitchTest`,
+`BranchGraphTest`, `BranchSwitchTest`, `IgnoreRulesTest`); for the rest install
+the `.modl` and exercise the Designer and Versioning page in both layouts.
 
 ## Architecture
 
@@ -60,21 +59,17 @@ No Vision client scope.
   staging scope; a file nothing ignored was silently never committed).
   `/*` + `!/config/` keep out other modules' runtimes (CPython, Chromium).
 - **`ConfigAutoCommitter` (a `ResourceCollectionListener`) is the only live
-  config-change notification** — per-resource listeners are never notified, and
-  a plain file write (`.gitignore`) is not one either, so that path commits for
-  itself. Events within 2s coalesce; `commitLeftovers()` sweeps offline changes.
+  config-change notification**; per-resource listeners are never notified and a
+  plain file write (`.gitignore`) is not one, so that path commits itself.
+  Events within 2s coalesce; `commitLeftovers()` sweeps offline changes.
 - **Restore resets the working tree to the target commit and keeps HEAD on the
-  branch** (unlike the detaching checkout), then applies it via a settings
-  rescan.
+  branch** (unlike the detaching checkout), then applies it by settings rescan.
 - **`GITIGNORE_LINES` must ignore the SQLite sidecars `*-wal`/`*-shm`**, or
   `git add .` races the tag value store and dies with `FileNotFoundException`,
   so init never completes on a live gateway.
-- **Git Ignore tree semantics**: excluding a tracked path also runs
-  `git rm --cached`; re-including under a glob appends a negation rather than
-  editing it (deleting `**/logs` to recover one file versions a gigabyte);
-  nothing under an excluded directory can be re-included, so that row is
-  read-only; a folder's tick is its children's roll-up, since a rule can
-  exclude a directory's contents but not the directory. Saving commits.
+- **Git Ignore tree**: excluding a tracked path also runs `git rm --cached`;
+  re-including under a glob appends a negation, never edits it. Rules in
+  `docs/INTERNALS.md`.
 - **Change badges are drawn by a `DotBorder`, not `addBadge`.** The tree's
   cell-renderer delegate stops painting added badges after the session's first
   commit; a border sidesteps it. Don't simplify this back.
@@ -90,29 +85,29 @@ No Vision client scope.
   apostrophes, `"parent": ""`, reordered `files`), so git sees those files
   modified with identical content. Count changes through `IgnitionReformat`,
   never raw `Status`, or Pull refuses for ever.
-- **Delivery is opt-in per project, only pulls in, and is only ever set from
-  the Projects drawer** — 3.5.0 assigned one on upgrade and 3.7.0 clears that
-  once; never add a migration that writes a delivery. Off refuses the runner;
-  `POST /delivery` keeps the runner mode and sync record exclusive. Polling,
-  not a webhook: GitHub cannot reach most gateways. Read `docs/AUTOMATION.md`.
+- **Delivery is opt-in per project, only pulls in, and is only set from the
+  Projects drawer** — never add a migration that writes one. Off refuses the
+  runner; `POST /delivery` keeps runner mode and sync record exclusive. Polling,
+  not a webhook: GitHub cannot reach most gateways. See `docs/AUTOMATION.md`.
 - **Drawers render in a portal outside `.gitcfg`**, so their body needs the
   `gitcfg` class or every `--gitcfg-*` token is undefined (`SettingsDrawer`).
 - **A release replaces the project folder but carries `.git` and
   `global-props/data.bin` across**, or it destroys the repository and the
   gateway's project properties.
-- **Runner routes read the raw query string**, never `getParameter`: Jetty
-  would parse a large non-zip body as a form and 500.
-- **Styles: colour and weight from the platform tokens** (`--neutral-*`,
-  `--primary`, `--success`, `--error`, `--warning-dark` for amber text);
-  type, spacing, radius and the mono stack from the `--gitcfg-*` block at the
-  top of `_styles.scss`. No hex or font stack anywhere else. `.ia-card-header`
-  and `.gitcfg-blank > div:first-child` reach into platform DOM — re-check
-  both after a web-ui package upgrade.
-- **Every project git operation goes through `GitManager.repoFor(project)`**, never
-  `projects/<name>` directly: in the Combined layout the project is a prefix of the data-dir
-  repository. Paths handed to the Designer stay project-relative (`ProjectScope`, `Repo.inProject`/
-  `toProjectPath`), and anything that writes that repository holds `DataDirGitManager.lock()`.
-  Combined commits use `--only` — but never for an `rm --cached`, which `--only` re-adds from disk.
+- **Runner routes read the raw query string**, never `getParameter` (Jetty
+  parses a large non-zip body as a form and 500s).
+- **Styles:** colour and weight from the platform tokens (`--neutral-*`,
+  `--primary`, `--success`, `--error`, `--warning-dark` for amber text); type,
+  spacing, radius and mono stack from the `--gitcfg-*` block in `_styles.scss`.
+  No hex or font stack elsewhere. `.ia-card-header` and
+  `.gitcfg-blank > div:first-child` reach into platform DOM — re-check after a
+  web-ui upgrade.
+- **Every project git operation goes through `GitManager.repoFor(project)`**,
+  never `projects/<name>` directly: in Combined the project is a prefix of the
+  data-dir repository. Paths handed to the Designer stay project-relative
+  (`ProjectScope`, `Repo.inProject`/`toProjectPath`); writers hold
+  `DataDirGitManager.lock()`. Combined commits use `--only`, never for an
+  `rm --cached` (it re-adds from disk).
 - **Image snapshot walks the store tree** (`getImages` lists one level and
   returns folders as entries with no bytes) **and import merges, never
   deletes** — the store is gateway-scoped, so clearing it first would make

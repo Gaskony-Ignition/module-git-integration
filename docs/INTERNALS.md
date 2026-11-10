@@ -84,3 +84,12 @@ Swing `JDialog`s parented to the Designer frame; callbacks live in `GitActionMan
 | `RemotesPopup` | Named-remote list/form, picks a saved credential. |
 | `UserCredentialsPopup` | User-level SSH keys + per-host HTTPS credentials. |
 | `InitProgressDialog` | Modal progress for long operations, keeps the EDT responsive. |
+
+## Git Ignore tree rules
+
+Re-including under a glob appends a negation rather than editing the glob:
+deleting `**/logs` to recover one file would version a gigabyte. Nothing under an
+excluded directory can be re-included, so that row is read-only. A folder's tick
+is the roll-up of its children, since a rule can exclude a directory's contents
+but not the directory itself. Saving commits.
+
