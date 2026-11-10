@@ -73,7 +73,11 @@ const Logs = () => {
                     <td>
                       <span
                         className={
-                          e.outcome === "failure" ? "gitcfg-err" : "gitcfg-ok"
+                          e.outcome === "failure"
+                            ? "gitcfg-err"
+                            : e.outcome === "warning"
+                            ? "gitcfg-dirty"
+                            : "gitcfg-ok"
                         }
                       >
                         {e.type}

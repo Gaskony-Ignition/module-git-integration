@@ -22,6 +22,8 @@ public record GitEvent(String type, String outcome, String scope, String project
 
     public static final String SUCCESS = "success";
     public static final String FAILURE = "failure";
+    /** Done, but with something the reader must act on (not counted as a failure). */
+    public static final String WARNING = "warning";
 
     public static final String SCOPE_PROJECT = "project";
     public static final String SCOPE_CONFIG = "config";
@@ -106,6 +108,11 @@ public record GitEvent(String type, String outcome, String scope, String project
         public GitEvent failure(String reason) {
             this.message = reason;
             return build(FAILURE);
+        }
+
+        public GitEvent warning(String reason) {
+            this.message = reason;
+            return build(WARNING);
         }
 
         private GitEvent build(String outcome) {

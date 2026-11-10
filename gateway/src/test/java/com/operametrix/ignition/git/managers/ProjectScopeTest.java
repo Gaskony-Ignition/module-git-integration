@@ -165,4 +165,60 @@ class ProjectScopeTest {
         assertThatThrownBy(() -> ProjectScope.commit(git, a, List.of("project.json"), "m", false, "e", ""))
                 .hasMessageContaining("own .git");
     }
+
+    @Test
+    void replaceCleanKeepsAProjectThatIsOnlyOnThisGateway() throws Exception {
+        write(data, "projects/Local/project.json", "{\"title\":\"Local\"}");
+        write(data, "projects/Local/ignition/global-props/data.bin", "props");
+        write(data, "config/stray.json", "{}");
+        write(data, "projects/A/stray.txt", "x");
+
+        List<String> kept = ProjectScope.removeUntracked(git.getRepository(), true);
+
+        assertThat(kept).containsExactly("projects/Local");
+        assertThat(Files.exists(data.resolve("projects/Local/project.json"))).isTrue();
+        assertThat(Files.exists(data.resolve("config/stray.json"))).isFalse();
+        assertThat(Files.exists(data.resolve("projects/A/stray.txt"))).isFalse();
+        // Ignored per-gateway data is never touched.
+        assertThat(Files.exists(data.resolve("projects/A/ignition/global-props/data.bin"))).isTrue();
+    }
+
+    @Test
+    void separateReplaceStillRemovesAnUntrackedFolder() throws Exception {
+        write(data, "projects/Local/project.json", "{}");
+        assertThat(ProjectScope.removeUntracked(git.getRepository(), false)).isEmpty();
+        assertThat(Files.exists(data.resolve("projects/Local/project.json"))).isFalse();
+    }
+
+    @Test
+    void pullIsBlockedOnlyByDirtyFilesOutsideTheProjectThatItWouldChange() throws Exception {
+        org.eclipse.jgit.lib.ObjectId base = git.getRepository().resolve("HEAD");
+        write(data, "config/a.json", "{\"a\":9}");
+        write(data, "projects/B/project.json", "{\"title\":\"B9\"}");
+        write(data, "projects/A/project.json", "{\"title\":\"A9\"}");
+        git.add().addFilepattern(".").call();
+        RevCommit incoming = git.commit().setMessage("remote").setAuthor("r", "").call();
+        git.reset().setMode(org.eclipse.jgit.api.ResetCommand.ResetType.HARD).setRef(base.getName()).call();
+
+        write(data, "projects/B/project.json", "{\"title\":\"B local\"}");
+        write(data, "projects/A/project.json", "{\"title\":\"A local\"}");
+        write(data, "modules.json", "{\"ignored\":1}");
+        java.util.Set<String> dirty = new java.util.TreeSet<>(git.status().call().getUncommittedChanges());
+
+        assertThat(ProjectScope.blockingChanges(git.getRepository(), a, incoming, dirty))
+                .containsExactly("projects/B/project.json");
+    }
+
+    @Test
+    void pushTargetNeverPutsAnotherBranchOntoTheConfiguredOne() throws Exception {
+        org.eclipse.jgit.lib.Repository r = git.getRepository();
+        String home = r.getBranch();
+        // The only branch, no upstream: the configured branch, as the page has always pushed.
+        assertThat(ProjectScope.pushTarget(r, "origin", "main")).isEqualTo("main");
+        ProjectScope.setUpstream(r, "origin", "main");
+        git.checkout().setCreateBranch(true).setName("feature").call();
+        assertThat(ProjectScope.pushTarget(r, "origin", "main")).isEqualTo("feature");
+        git.checkout().setName(home).call();
+        assertThat(ProjectScope.pushTarget(r, "origin", "main")).isEqualTo("main");
+    }
 }

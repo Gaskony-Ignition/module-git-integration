@@ -659,6 +659,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.add("delivery", delivery);
                 // Unsynced-commit count for the header sync indicator.
                 o.addProperty("ahead", DataDirGitManager.aheadCount());
+                // What Remote Sync pushes: the checked-out branch, and where it goes.
+                String[] target = DataDirGitManager.pushTargetNow(remote);
+                o.addProperty("pushFrom", target[0]);
+                o.addProperty("pushTo", target[1]);
                 long time = DataDirGitManager.getLastPushTime();
                 if (time > 0) {
                     JsonObject lastPush = new JsonObject();
@@ -906,8 +910,12 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
     private Object handlePush(RequestContext req, HttpServletResponse resp) {
         try {
-            DataDirGitManager.push();
-            return ok();
+            String[] pushed = DataDirGitManager.push();
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", true);
+            o.addProperty("from", pushed[0]);
+            o.addProperty("to", pushed[1]);
+            return o.toString();
         } catch (Exception e) {
             return error(resp, e);
         }

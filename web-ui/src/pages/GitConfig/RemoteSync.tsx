@@ -41,10 +41,19 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
             startIcon={<Refresh width={18} height={18} />}
             disabled={pushing}
             onClick={() =>
-              push().unwrap().catch(errorToast(toasts, "Remote Sync failed"))
+              push()
+                .unwrap()
+                .then((r) =>
+                  toasts.notifySuccess(`Pushed ${r.from} to ${r.to}`)
+                )
+                .catch(errorToast(toasts, "Remote Sync failed"))
             }
           >
-            {pushing ? "Syncing…" : "Remote Sync"}
+            {pushing
+              ? "Syncing…"
+              : remote?.pushFrom && remote.pushTo
+              ? `Remote Sync (${remote.pushFrom} → ${remote.pushTo})`
+              : "Remote Sync"}
           </Button>
         </>
       ) : null}

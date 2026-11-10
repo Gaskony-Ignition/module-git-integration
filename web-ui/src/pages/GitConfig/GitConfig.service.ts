@@ -88,6 +88,9 @@ export interface RemoteResp {
   secretName?: string;
   // Local commits not yet on the remote (0 = up to date).
   ahead?: number;
+  // Remote Sync pushes the checked-out branch (pushFrom) to pushTo on the remote.
+  pushFrom?: string;
+  pushTo?: string;
   lastPush?: { time: number; ok: boolean; error?: string };
   // Follow a remote branch: the config is replaced by it on a timer (3.10.0).
   delivery?: {
@@ -290,7 +293,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
     testRemote: builder.mutation<unknown, RemoteSecretReq>({
       query: (body) => ({ url: `${BASE}/remote-test`, method: "POST", body }),
     }),
-    push: builder.mutation<unknown, void>({
+    push: builder.mutation<{ from: string; to: string }, void>({
       query: () => ({ url: `${BASE}/push`, method: "POST", body: {} }),
       // History too: a push flips commits from local to remote.
       invalidatesTags: ["remote", "history"],

@@ -84,23 +84,6 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         }
     }
 
-    /**
-     * Combined: the gateway repository's branch usually has no upstream (it was made by
-     * {@code git init}, and the remote added afterwards), so pull and push use the branch set for
-     * the gateway remote, as the Versioning page's Push does. Null when the checked-out branch has
-     * an upstream of its own, or no gateway remote is set.
-     */
-    private static String gatewayBranchWithoutUpstream(Git git) throws java.io.IOException {
-        String branch = git.getRepository().getBranch();
-        if (branch != null && new org.eclipse.jgit.lib.BranchConfig(git.getRepository().getConfig(), branch)
-                .getTrackingBranch() != null) {
-            return null;
-        }
-        com.operametrix.ignition.git.records.GitConfigRemoteRecord gw =
-                com.operametrix.ignition.git.records.GitConfigRemoteRecord.get();
-        return gw == null || gw.getBranch() == null || gw.getBranch().isBlank() ? null : gw.getBranch();
-    }
-
     /** Read-only in Combined: the one remote belongs to the gateway, set on the Versioning page. */
     private static void refuseInCombined(String what) {
         if (GitManager.combined()) {
@@ -174,25 +157,45 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         if (repo.scoped()) {
             org.eclipse.jgit.lib.ObjectId before = headOf(repo.root());
             synchronized (GitManager.lockFor(repo)) {
+                // Config's own pending changes are committed first, as the auto-committer would
+                // within seconds; what is left outside this project is someone else's work.
+                DataDirGitManager.commitAllIfDirty("Config changes before a pull");
                 try (Git git = getGit(repo.root())) {
-                    PullCommand pull = git.pull().setRemote(remoteName);
-                    String upstream = gatewayBranchWithoutUpstream(git);
-                    if (upstream != null) {
-                        pull.setRemoteBranchName(upstream);
+                    org.eclipse.jgit.lib.Repository r = git.getRepository();
+                    FetchCommand fetch = git.fetch().setRemote(remoteName).setRemoveDeletedRefs(true);
+                    setAuthentication(fetch, projectName, userName, remoteName);
+                    fetch.call();
+                    com.operametrix.ignition.git.records.GitConfigRemoteRecord gw =
+                            com.operametrix.ignition.git.records.GitConfigRemoteRecord.get();
+                    String target = ProjectScope.pushTarget(r, remoteName, gw == null ? null : gw.getBranch());
+                    org.eclipse.jgit.lib.ObjectId tip = r.resolve("refs/remotes/" + remoteName + "/" + target);
+                    if (tip == null) {
+                        throw new RuntimeException("Branch '" + target + "' is not on " + remoteName + ".");
                     }
-                    setAuthentication(pull, projectName, userName, remoteName);
-                    PullResult result = pull.call();
-                    if (!result.isSuccessful()) {
-                        if (result.getMergeResult() != null && result.getMergeResult().getMergeStatus()
-                                == MergeResult.MergeStatus.CONFLICTING) {
-                            List<String> files = new ArrayList<>();
-                            for (String f : git.status().call().getConflicting()) {
-                                files.add(repo.toProjectPath(f));
-                            }
-                            throw new RuntimeException("MERGE_CONFLICT:" + String.join("\n", files));
+                    Set<String> dirty = IgnitionReformat.realChanges(r, git.status().call());
+                    List<String> blocking = ProjectScope.blockingChanges(r, repo, tip, dirty);
+                    if (!blocking.isEmpty()) {
+                        throw new RuntimeException("Not pulled: the pull would change " + blocking.size()
+                                + " file(s) with uncommitted changes outside this project, in config or"
+                                + " another project's Designer. Commit or discard them first:\n"
+                                + String.join("\n", blocking.subList(0, Math.min(20, blocking.size())))
+                                + (blocking.size() > 20 ? "\n..." : ""));
+                    }
+                    ConfigAutoCommitter.hold(30_000);
+                    MergeResult merge = git.merge().include(tip)
+                            .setMessage("Merge " + remoteName + "/" + target).call();
+                    if (merge.getMergeStatus() == MergeResult.MergeStatus.CONFLICTING) {
+                        List<String> files = new ArrayList<>();
+                        for (String f : git.status().call().getConflicting()) {
+                            files.add(repo.toProjectPath(f));
                         }
-                        throw new RuntimeException("Pull failed: " + (result.getMergeResult() != null
-                                ? result.getMergeResult().getMergeStatus().toString() : "unknown status"));
+                        throw new RuntimeException("MERGE_CONFLICT:" + String.join("\n", files));
+                    }
+                    if (!merge.getMergeStatus().isSuccessful()) {
+                        throw new RuntimeException("Pull failed: " + merge.getMergeStatus());
+                    }
+                    if (r.getConfig().getString("branch", r.getBranch(), "merge") == null) {
+                        ProjectScope.setUpstream(r, remoteName, target);
                     }
                 }
             }
@@ -288,10 +291,16 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             PushCommand push = git.push();
             push.setRemote(remoteName);
             setAuthentication(push, projectName, userName, remoteName);
-            String upstream = GitManager.combined() ? gatewayBranchWithoutUpstream(git) : null;
-            if (upstream != null && !pushAllBranches) {
-                // The Versioning page's Push does the same: HEAD to the gateway remote's branch.
-                push.setRefSpecs(new RefSpec("HEAD:refs/heads/" + upstream));
+            String upstream = null;
+            if (GitManager.combined() && !pushAllBranches) {
+                // Same rule as the Versioning page's Push: the checked-out branch to its upstream,
+                // the first time to the configured branch (home branch) or its own name.
+                com.operametrix.ignition.git.records.GitConfigRemoteRecord gw =
+                        com.operametrix.ignition.git.records.GitConfigRemoteRecord.get();
+                upstream = ProjectScope.pushTarget(git.getRepository(), remoteName,
+                        gw == null ? null : gw.getBranch());
+                push.setRefSpecs(new RefSpec("refs/heads/" + git.getRepository().getBranch()
+                        + ":refs/heads/" + upstream));
             }
 
             if (pushAllBranches) {
@@ -317,6 +326,9 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                         throw new RuntimeException("Push rejected: " + update.getMessage());
                     }
                 }
+            }
+            if (upstream != null) {
+                ProjectScope.setUpstream(git.getRepository(), remoteName, upstream);
             }
 
         } catch (GitAPIException e) {
@@ -395,8 +407,9 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         builder.colNames(List.of("resource", "type", "actor", "timestamp"));
         builder.colTypes(List.of(String.class, String.class, String.class, String.class));
 
+        // Thrown, not logged: the Designer shows it in the Commit panel instead of blank badges.
+        ProjectScope.requireNoNestedRepo(repo);
         try (Git git = getGit(projectPath)) {
-            ProjectScope.requireNoNestedRepo(repo);
             Status status = ProjectScope.status(git, repo);
 
             // Filtered on repo paths (they read HEAD), then made project-relative for the Designer.
@@ -1311,9 +1324,9 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                                                   String ignitionUser, long sshKeyId,
                                                   long httpsCredentialId) {
         if (GitManager.combined()) {
-            logger.warn("Not attaching a credential to project '" + projectName + "': the Combined layout"
-                    + " uses the gateway repository's credential (Configure Versioning).");
-            return false;
+            throw new IllegalStateException("Project '" + projectName + "' has no credential of its own in"
+                    + " the Combined layout: every project uses the gateway repository's remote and"
+                    + " credential, set in Configure Versioning.");
         }
         try {
             GitRemoteCredentialsRecord creds = getRemoteCredentialsRecord(

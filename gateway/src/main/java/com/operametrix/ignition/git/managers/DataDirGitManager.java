@@ -13,14 +13,9 @@ import org.eclipse.jgit.api.RemoteSetUrlCommand;
 import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.dircache.DirCache;
-import org.eclipse.jgit.dircache.DirCacheIterator;
 import org.eclipse.jgit.treewalk.TreeWalk;
-import org.eclipse.jgit.treewalk.FileTreeIterator;
-import org.eclipse.jgit.treewalk.WorkingTreeIterator;
 import org.eclipse.jgit.ignore.FastIgnoreRule;
-import org.eclipse.jgit.ignore.IgnoreNode;
 import org.eclipse.jgit.lib.Constants;
-import org.eclipse.jgit.lib.FileMode;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.RefUpdate;
 import org.eclipse.jgit.lib.Repository;
@@ -32,7 +27,6 @@ import org.eclipse.jgit.transport.RemoteRefUpdate;
 import org.eclipse.jgit.transport.URIish;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -66,57 +60,8 @@ public class DataDirGitManager {
 
     /** Config-as-code lives under {@code config/}; the {@code .gitignore} sits at the repo root. */
 
-    /**
-     * Only {@code config/} by default. Other modules keep whole runtimes under the data root (the
-     * Python3 module's CPython distributions, Playwright's browsers), so a data root versioned by
-     * default swept tens of thousands of files into the repository.
-     */
-    private static final String ROOT_RULES_COMMENT =
-            "# Only config/ is versioned by default; tick a data-root path on the Git Ignore tab to add it.";
-
-    /** Based on Inductive Automation's version-control-guide template, plus the root rules. */
-    private static final List<String> GITIGNORE_LINES = List.of(
-            "# Ignition data-directory config-as-code — managed by the Git module",
-            "**/db/*",
-            "**/metricsdb/*",
-            "**/autobackup/*",
-            "**/db_backup_sqlite.idb",
-            "**/valueStore.idb",
-            // SQLite write-ahead-log sidecars. Without these the baseline `git add .` races the
-            // tag value store: the directory scan lists valueStore.idb-wal, SQLite checkpoints and
-            // deletes it, and the add dies with FileNotFoundException — so init could never
-            // complete on a gateway that was actually running. Ignoring the .idb itself is not
-            // enough; the sidecars are separate paths.
-            "**/*-wal",
-            "**/*-shm",
-            "**/jar-cache/*",
-            "**/request*",
-            "**/response*",
-            "*.tmp",
-            "*.bak",
-            "**/var",
-            "*.log",
-            "**/logs",
-            "**/certificates/*",
-            "**/keystore/",
-            "**/config/local",
-            "**/config/resources/local",
-            "**/.container-init.conf",
-            "**/conversion-report.txt",
-            "**.digest.json",
-            "**/migration-log-*.md",
-            "**/.resources/",
-            "**/.alarms_*",
-            // This module's own records: git credentials, remotes and deliveries belong to the
-            // gateway they were set on. Versioned, a gateway following another's branch would take
-            // that gateway's remote and deliveries, and Sync - replace would delete its own.
-            "**/com.operametrix.ignition.git/",
-            "",
-            ROOT_RULES_COMMENT,
-            "/*",
-            "!/config/",
-            "!/.gitignore"
-    );
+    private static final String ROOT_RULES_COMMENT = IgnoreRules.ROOT_RULES_COMMENT;
+    private static final List<String> GITIGNORE_LINES = IgnoreRules.TEMPLATE;
 
     /** The data-root paths 3.8.0 to 3.9.10 listed one by one in {@code .gitignore}. */
     private static final List<String> PRE_3911_ROOT_PATHS = List.of(
@@ -444,11 +389,31 @@ public class DataDirGitManager {
             if (record == null) {
                 record = new GitConfigRemoteRecord();
             }
+            repointUpstreams(record.getBranch(), branch.trim());
             record.setUri(uri.trim());
             record.setBranch(branch.trim());
             record.setSshKeyId(sshKeyId);
             record.setHttpsCredentialId(httpsCredentialId);
             record.save();
+        }
+    }
+
+    /** A branch that pushed to the old configured branch pushes to the new one. */
+    private static void repointUpstreams(String oldBranch, String newBranch) {
+        if (oldBranch == null || oldBranch.isBlank() || oldBranch.equals(newBranch)) {
+            return;
+        }
+        try (Git git = GitManager.getGit(dataDir())) {
+            var c = git.getRepository().getConfig();
+            for (String b : c.getSubsections("branch")) {
+                if (ORIGIN.equals(c.getString("branch", b, "remote"))
+                        && (Constants.R_HEADS + oldBranch).equals(c.getString("branch", b, "merge"))) {
+                    c.setString("branch", b, "merge", Constants.R_HEADS + newBranch);
+                }
+            }
+            c.save();
+        } catch (Exception e) {
+            logger.warn("Could not move branch upstreams to " + newBranch, e);
         }
     }
 
@@ -517,31 +482,68 @@ public class DataDirGitManager {
         }
     }
 
-    /** Manual push of the local history to the configured remote branch. */
-    public static void push() {
+    /**
+     * The remote branch the checked-out branch pushes to ({@link ProjectScope#pushTarget}): its
+     * upstream, else the configured branch for the repository's home branch, else the same name.
+     * Falls back to the configured branch when HEAD is detached, for the status line only.
+     */
+    public static String pushBranch(Repository repo, GitConfigRemoteRecord remote) {
+        try {
+            return ProjectScope.pushTarget(repo, ORIGIN, remote.getBranch());
+        } catch (Exception e) {
+            return remote.getBranch();
+        }
+    }
+
+    /** {@code [checked-out branch, remote branch]} a push would use now; for the page's labels. */
+    public static String[] pushTargetNow(GitConfigRemoteRecord remote) {
+        if (!isInitialized()) {
+            return new String[] {"", remote.getBranch()};
+        }
+        synchronized (DATA_DIR_LOCK) {
+            try (Git git = GitManager.getGit(dataDir())) {
+                return new String[] {git.getRepository().getBranch(), pushBranch(git.getRepository(), remote)};
+            } catch (Exception e) {
+                return new String[] {"", remote.getBranch()};
+            }
+        }
+    }
+
+    /**
+     * Manual push of the checked-out branch: to its upstream, or — the first time — to the
+     * configured branch (home branch) or the same name, recorded as its upstream. Never another
+     * branch onto the configured one: in the Combined layout a Designer can check one out.
+     *
+     * @return {@code [local branch, remote branch]}
+     */
+    public static String[] push() {
         GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
         if (remote == null) {
             throw new RuntimeException("No remote configured.");
         }
+        String[] target = {"", remote.getBranch()};
         try {
-            doPush(remote);
+            target = doPush(remote);
             GitEvents.fire(GitEvent.of(GitEvent.PUSH).config()
-                    .user(gatewayAuthor()).branch(remote.getBranch()).remote(remote.getUri())
-                    .message("Pushed gateway config to " + remote.getBranch()).success());
+                    .user(gatewayAuthor()).branch(target[1]).remote(remote.getUri())
+                    .message("Pushed " + target[0] + " to " + target[1]).success());
+            return target;
         } catch (RuntimeException e) {
             GitEvents.fire(GitEvent.of(GitEvent.PUSH).config()
-                    .user(gatewayAuthor()).branch(remote.getBranch()).remote(remote.getUri())
+                    .user(gatewayAuthor()).branch(target[1]).remote(remote.getUri())
                     .failure(GitEvents.reason(e)));
             throw e;
         }
     }
 
-    private static void doPush(GitConfigRemoteRecord remote) {
+    private static String[] doPush(GitConfigRemoteRecord remote) {
         synchronized (DATA_DIR_LOCK) {
             try (Git git = GitManager.getGit(dataDir())) {
+                String local = git.getRepository().getBranch();
+                String target = ProjectScope.pushTarget(git.getRepository(), ORIGIN, remote.getBranch());
                 PushCommand push = git.push()
                         .setRemote(ORIGIN)
-                        .setRefSpecs(new RefSpec("HEAD:refs/heads/" + remote.getBranch()));
+                        .setRefSpecs(new RefSpec("refs/heads/" + local + ":refs/heads/" + target));
                 GitManager.setAuthenticationFromIds(push, remote.getUri(),
                         remote.getSshKeyId(), remote.getHttpsCredentialId());
                 for (PushResult result : push.call()) {
@@ -551,7 +553,7 @@ public class DataDirGitManager {
                                 && st != RemoteRefUpdate.Status.UP_TO_DATE) {
                             if (st == RemoteRefUpdate.Status.REJECTED_NONFASTFORWARD) {
                                 throw new RuntimeException("Push rejected: the remote branch '"
-                                        + remote.getBranch() + "' has commits this gateway doesn't "
+                                        + target + "' has commits this gateway doesn't "
                                         + "have (non-fast-forward). Reconcile them before pushing — "
                                         + "bring the remote's commits into this gateway, or reset the "
                                         + "remote branch if its history isn't needed (e.g. it was "
@@ -567,13 +569,15 @@ public class DataDirGitManager {
                 Repository repo = git.getRepository();
                 ObjectId head = repo.resolve("HEAD");
                 if (head != null) {
-                    RefUpdate ru = repo.updateRef(trackingRef(remote.getBranch()));
+                    RefUpdate ru = repo.updateRef(trackingRef(target));
                     ru.setNewObjectId(head);
                     ru.setForceUpdate(true);
                     ru.update();
                 }
+                ProjectScope.setUpstream(repo, ORIGIN, target);
                 lastPushTime = System.currentTimeMillis();
                 lastPushError = null;
+                return new String[] {local, target};
             } catch (Exception e) {
                 String friendly = friendlyPushError(e);
                 lastPushTime = System.currentTimeMillis();
@@ -642,7 +646,7 @@ public class DataDirGitManager {
                 }
                 GitConfigRemoteRecord r = GitConfigRemoteRecord.get();
                 if (r != null) {
-                    ObjectId trackingId = repo.resolve(trackingRef(r.getBranch()));
+                    ObjectId trackingId = repo.resolve(trackingRef(pushBranch(repo, r)));
                     if (trackingId != null) {
                         remote = trackingId.getName();
                     }
@@ -676,7 +680,7 @@ public class DataDirGitManager {
                 }
                 try (RevWalk walk = new RevWalk(repo)) {
                     walk.markStart(walk.parseCommit(head));
-                    ObjectId trackingId = repo.resolve(trackingRef(remote.getBranch()));
+                    ObjectId trackingId = repo.resolve(trackingRef(pushBranch(repo, remote)));
                     if (trackingId != null) {
                         walk.markUninteresting(walk.parseCommit(trackingId));
                     }
@@ -892,7 +896,15 @@ public class DataDirGitManager {
                     git.branchCreate().setName(branch).setStartPoint(tip.name()).setForce(true).call();
                     repo.updateRef(Constants.HEAD).link("refs/heads/" + branch);
                     git.reset().setMode(ResetCommand.ResetType.HARD).setRef(tip.name()).call();
-                    removeUntracked(repo);
+                    // Combined: a project that exists only on this gateway is not the branch's to
+                    // delete; it stays, and the Logs tab says so.
+                    List<String> kept = ProjectScope.removeUntracked(repo, GitManager.combined());
+                    for (String k : kept) {
+                        logger.warnf("Sync - replace kept %s: it is on this gateway only, not on %s.", k, branch);
+                        GitEvents.fire(GitEvent.of(GitEvent.SYNC).config().branch(branch).files(List.of(k))
+                                .warning("Kept " + k + ": a project on this gateway only, not on " + branch
+                                        + ". Commit it or delete it."));
+                    }
 
                     RefUpdate mark = repo.updateRef(SYNCED_REF);
                     mark.setNewObjectId(tip);
@@ -1090,41 +1102,6 @@ public class DataDirGitManager {
             } catch (Exception e) {
                 logger.error("Gateway pull failed", e);
                 throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
-            }
-        }
-    }
-
-    /** Deletes files neither tracked nor ignored; never enters an ignored directory or a nested repo. */
-    private static void removeUntracked(Repository repo) throws IOException {
-        List<Path> doomed = new ArrayList<>();
-        try (TreeWalk tw = new TreeWalk(repo)) {
-            tw.addTree(new DirCacheIterator(repo.readDirCache()));
-            tw.addTree(new FileTreeIterator(repo));
-            tw.setRecursive(false);
-            while (tw.next()) {
-                DirCacheIterator tracked = tw.getTree(0, DirCacheIterator.class);
-                WorkingTreeIterator file = tw.getTree(1, WorkingTreeIterator.class);
-                if (file == null || file.isEntryIgnored()) {
-                    continue;
-                }
-                if (tw.isSubtree()) {
-                    if (!FileMode.GITLINK.equals(file.getEntryFileMode())) {
-                        tw.enterSubtree();
-                    }
-                } else if (tracked == null) {
-                    doomed.add(dataDir().resolve(tw.getPathString()));
-                }
-            }
-        }
-        for (Path p : doomed) {
-            Files.deleteIfExists(p);
-            // Drop directories the removal emptied; a non-empty one (ignored data inside) stays.
-            for (Path d = p.getParent(); d != null && !d.equals(dataDir()); d = d.getParent()) {
-                try {
-                    Files.delete(d);
-                } catch (IOException notEmpty) {
-                    break;
-                }
             }
         }
     }
@@ -1327,88 +1304,20 @@ public class DataDirGitManager {
                             boolean tracked, String rule, boolean ownRule, String childState,
                             boolean reincludable) {}
 
-    /** Parsed {@code .gitignore} rules, newest last (git's last-match-wins order). */
     private static List<FastIgnoreRule> ignoreRules() throws IOException {
-        Path gitignore = dataDir().resolve(".gitignore");
-        if (!Files.exists(gitignore)) {
-            return List.of();
-        }
-        IgnoreNode node = new IgnoreNode();
-        try (InputStream in = Files.newInputStream(gitignore)) {
-            node.parse(in);
-        }
-        return node.getRules();
+        return IgnoreRules.parse(dataDir().resolve(".gitignore"));
     }
 
-    /**
-     * Decide one path against the rules, git-style: the LAST matching rule wins, and a negation
-     * (`!foo`) re-includes. Returns {@code null} when nothing matched.
-     *
-     * <p>Matching is done on the full repo-relative path AND on each trailing path segment, because
-     * a rule without a slash (e.g. {@code *.log}) matches at any depth — {@code FastIgnoreRule}
-     * itself only compares what it is handed.
-     */
     private static FastIgnoreRule matchRule(List<FastIgnoreRule> rules, String path, boolean isDir) {
-        FastIgnoreRule match = null;
-        for (FastIgnoreRule r : rules) {
-            if (r.isEmpty()) {
-                continue;
-            }
-            boolean hit = r.isMatch("/" + path, isDir, true);
-            // JGit flags an anchored "/*" as name-only too; testing its basename would let it
-            // exclude every path at every depth, so only a rule with no slash at all gets this.
-            if (!hit && r.getNameOnly() && !isAnchored(r)) {
-                // A name-only rule applies to every segment, so test the basename too.
-                int slash = path.lastIndexOf('/');
-                hit = r.isMatch("/" + (slash >= 0 ? path.substring(slash + 1) : path), isDir, true);
-            }
-            if (hit) {
-                match = r;
-            }
-        }
-        return match;
+        return IgnoreRules.matchRule(rules, path, isDir);
     }
 
-    /** A rule that starts with a slash ("/*", "!/config/") applies at the repo root only. */
-    private static boolean isAnchored(FastIgnoreRule r) {
-        String pattern = r.toString();
-        return (pattern.startsWith("!") ? pattern.substring(1) : pattern).startsWith("/");
+    private static IgnoreRules.Decision decide(List<FastIgnoreRule> rules, String path, boolean isDir) {
+        return IgnoreRules.decide(rules, path, isDir);
     }
 
-    /**
-     * Whether a path is excluded, taking ancestors into account. Git cannot re-include a file whose
-     * PARENT DIRECTORY is excluded, so an ancestor's exclusion is final for everything beneath it —
-     * a negation deeper down is silently ineffective, and the UI must not offer it.
-     *
-     * @return the deciding rule and whether an ancestor (not the path itself) settled it
-     */
-    private static Decision decide(List<FastIgnoreRule> rules, String path, boolean isDir) {
-        // Walk ancestors root-downwards; the first excluded ancestor settles it.
-        StringBuilder walked = new StringBuilder();
-        for (String segment : path.split("/")) {
-            if (walked.length() > 0) {
-                walked.append('/');
-            }
-            walked.append(segment);
-            String sofar = walked.toString();
-            boolean last = sofar.equals(path);
-            FastIgnoreRule m = matchRule(rules, sofar, last ? isDir : true);
-            if (m != null && m.getResult() && !last) {
-                // An ancestor is excluded — nothing below it can be re-included.
-                return new Decision(m, true);
-            }
-            if (last) {
-                return new Decision(m, false);
-            }
-        }
-        return new Decision(null, false);
-    }
-
-    /** The rule that settled a path, and whether it was inherited from an excluded ancestor. */
-    private record Decision(FastIgnoreRule rule, boolean fromAncestor) {
-        boolean excluded() {
-            return rule != null && rule.getResult();
-        }
+    private static boolean isOwnLine(FastIgnoreRule rule, String path, boolean isDir) {
+        return IgnoreRules.isOwnLine(rule, path, isDir);
     }
 
     /** Is this path in the index? Tracked files ignore {@code .gitignore} entirely. */
@@ -1456,7 +1365,7 @@ public class DataDirGitManager {
                         }
                         boolean isDir = Files.isDirectory(p);
                         String path = base.isEmpty() ? name : base + "/" + name;
-                        Decision d = decide(rules, path, isDir);
+                        IgnoreRules.Decision d = decide(rules, path, isDir);
                         boolean excluded = d.excluded();
                         FastIgnoreRule own = matchRule(rules, path, isDir);
                         boolean ownRule = own != null && own == d.rule() && isOwnLine(own, path, isDir);
@@ -1537,7 +1446,7 @@ public class DataDirGitManager {
                                 queue.clear();
                                 break;
                             }
-                            Decision d = decide(rules, path, isDir);
+                            IgnoreRules.Decision d = decide(rules, path, isDir);
                             FastIgnoreRule own = matchRule(rules, path, isDir);
                             out.add(new TreeEntry(name, path, isDir, d.excluded(),
                                     isTracked(repo, path, isDir),
@@ -1564,22 +1473,6 @@ public class DataDirGitManager {
     private static final java.util.Comparator<Path> DIR_FIRST =
             java.util.Comparator.<Path, Boolean>comparing(p -> !Files.isDirectory(p))
                     .thenComparing(p -> p.getFileName().toString(), String.CASE_INSENSITIVE_ORDER);
-
-    /**
-     * Whether the deciding rule is this path's own explicit line rather than an inherited glob.
-     * Only an own line can be removed by unticking; a glob has to be negated instead.
-     */
-    private static boolean isOwnLine(FastIgnoreRule rule, String path, boolean isDir) {
-        String text = rule.toString().trim();
-        if (text.startsWith("!")) {
-            text = text.substring(1);
-        }
-        String bare = text.startsWith("/") ? text.substring(1) : text;
-        if (bare.endsWith("/")) {
-            bare = bare.substring(0, bare.length() - 1);
-        }
-        return bare.equals(path) || (isDir && bare.equals(path + "/"));
-    }
 
     /**
      * Roll a folder's children up to INCLUDED / EXCLUDED / MIXED so a collapsed folder can show a

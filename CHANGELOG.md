@@ -22,6 +22,9 @@ upstream's; everything below is this fork.
 - **Gateway delivery: Sync — pull and Runner — repo updates** (Combined only), beside Sync — replace.
   In Combined a project's own delivery is Off or Runner — release; a release and a project delete
   are committed for that project's folder.
+- **Remote Sync pushes the checked-out branch** to its upstream — the first time, the home branch to
+  the configured branch and any other to its own name — never another branch onto the configured
+  one. The button and the result name both branches.
 - **RPC:** `getRepositoryLayout`. **REST:** `POST /layout`; `/status` and `/projects` carry `layout`.
 
 ### Changed

@@ -12,6 +12,7 @@ import {
   useGetSecretProvidersQuery,
   useRemoveCredentialMutation,
   useSaveRunnerMutation,
+  useGetStatusQuery,
 } from "./GitConfig.service";
 import { errorToast } from "./errors";
 import { selectValue } from "./selectValue";
@@ -25,6 +26,8 @@ type Kind = "SSH" | "HTTPS";
 type Mode = "inline" | "reference";
 
 const Credentials = () => {
+  const { data: status } = useGetStatusQuery();
+  const combined = status?.layout === "combined";
   // Polls only while a check the gateway queued (after an add) has not reported yet.
   const [pending, setPending] = React.useState(false);
   const { data, isFetching } = useGetCredentialsQuery(undefined, {
@@ -435,7 +438,9 @@ const Credentials = () => {
           </span>
         </label>
         <p className="gitcfg-hint">
-          Each project still needs a runner delivery on the Projects tab.
+          {combined
+            ? "Repo updates are the gateway's: set Configure Versioning › Delivery to Runner — repo updates. A release still needs the project set to Runner — release on the Projects tab."
+            : "Each project still needs a runner delivery on the Projects tab."}
         </p>
       </SettingsDrawer>
     </div>
