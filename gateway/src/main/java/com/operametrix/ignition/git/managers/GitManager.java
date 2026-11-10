@@ -37,7 +37,6 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.filter.PathFilter;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
-import simpleorm.dataset.SQuery;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -279,14 +278,13 @@ public class GitManager {
      */
     public static String resolveUserEmail(String userName) {
         try {
-            List<com.inductiveautomation.ignition.gateway.user.UserSourceProfileRecord> profiles =
-                    getContext().getPersistenceInterface().query(
-                            new SQuery<>(com.inductiveautomation.ignition.gateway.user.UserSourceProfileRecord.META));
-            for (com.inductiveautomation.ignition.gateway.user.UserSourceProfileRecord profileRecord : profiles) {
+            // 8.3 keeps user sources as config resources; the old SimpleORM table is empty, so the
+            // query that used to list them found none and every commit went out with no email.
+            var userSources = getContext().getUserSourceManager();
+            for (var source : userSources.getUserProfileHandler().getResources()) {
                 try {
                     com.inductiveautomation.ignition.gateway.user.UserSourceProfile profile =
-                            getContext().getUserSourceManager().getProfile(
-                                    profileRecord.getString(com.inductiveautomation.ignition.gateway.user.UserSourceProfileRecord.Name));
+                            userSources.getProfile(source.name());
                     if (profile == null) continue;
                     com.inductiveautomation.ignition.common.user.User user =
                             profile.getUser(userName).orElse(null);
