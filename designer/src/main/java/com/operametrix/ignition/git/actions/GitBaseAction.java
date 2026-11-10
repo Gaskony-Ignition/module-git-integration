@@ -2,6 +2,7 @@ package com.operametrix.ignition.git.actions;
 
 import com.operametrix.ignition.git.BranchDeleteResult;
 import com.operametrix.ignition.git.InitProgressDialog;
+import com.operametrix.ignition.git.PolicyRefusals;
 import com.inductiveautomation.ignition.client.util.gui.ErrorUtil;
 import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceId;
@@ -66,7 +67,13 @@ public class GitBaseAction {
                 progress.complete();
                 try {
                     get();
-                    if (rejected) {
+                    if (rejected && PolicyRefusals.reason("FORCE_PUSH") != null) {
+                        JOptionPane.showMessageDialog(context.getFrame(),
+                                "Push was rejected because the remote contains commits not present locally.\n"
+                                        + "Force push is " + PolicyRefusals.reason("FORCE_PUSH")
+                                        + ": pull and push again instead.",
+                                "Push Rejected", JOptionPane.WARNING_MESSAGE);
+                    } else if (rejected) {
                         int choice = JOptionPane.showConfirmDialog(
                                 context.getFrame(),
                                 "Push was rejected because the remote contains commits not present locally.\n"

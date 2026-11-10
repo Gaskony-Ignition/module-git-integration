@@ -58,9 +58,15 @@ public class HistoryPanel extends JPanel {
         toolbar.add(createToolbarButton(VectorIcons.get("refresh"), "Refresh", () -> {
             if (onRefreshRequested != null) onRefreshRequested.run();
         }));
-        toolbar.add(createToolbarButton(IconUtils.getIcon("/com/operametrix/ignition/git/icons/ic_push.svg"), "Push", () -> {
+        JButton pushButton = createToolbarButton(IconUtils.getIcon("/com/operametrix/ignition/git/icons/ic_push.svg"), "Push", () -> {
             if (onPushRequested != null) onPushRequested.run();
-        }));
+        });
+        toolbar.add(pushButton);
+        // Disabled, not hidden, when the gateway's Git policy turns pushing off; the tooltip says why.
+        PolicyRefusals.onChange(() -> {
+            pushButton.setEnabled(PolicyRefusals.reason("PUSH") == null);
+            pushButton.setToolTipText(PolicyRefusals.label("Push", "PUSH"));
+        });
         toolbar.add(createToolbarButton(IconUtils.getIcon("/com/operametrix/ignition/git/icons/ic_fetch.svg"), "Fetch", () -> {
             if (onFetchRequested != null) onFetchRequested.run();
         }));

@@ -92,6 +92,11 @@ public class CommitPanel extends JPanel {
             }
         });
         bottomControls.add(commitButton, BorderLayout.EAST);
+        // The gateway's Git policy can turn Designer commits off in a deployment mode.
+        PolicyRefusals.onChange(() -> {
+            commitButton.setText(PolicyRefusals.label("Commit", "DESIGNER_COMMIT"));
+            commitButton.setEnabled(PolicyRefusals.reason("DESIGNER_COMMIT") == null);
+        });
         commitSection.add(bottomControls, BorderLayout.SOUTH);
         centerPanel.add(commitSection, BorderLayout.NORTH);
 

@@ -98,7 +98,9 @@ public class BranchPopup extends JDialog {
         localBranchList.setCellRenderer(new CurrentBranchRenderer());
         attachLocalListHandlers();
         JPanel localPanel = new JPanel(new BorderLayout());
-        JButton createBtn = buildIconButton(VectorIcons.get("add"), "Create Branch...", e -> onCreateBranchRequested());
+        JButton createBtn = buildIconButton(VectorIcons.get("add"),
+                PolicyRefusals.label("Create Branch...", "BRANCH_SWITCH"), e -> onCreateBranchRequested());
+        createBtn.setEnabled(PolicyRefusals.reason("BRANCH_SWITCH") == null);
         JButton localRefreshBtn = buildIconButton(VectorIcons.get("refresh"), "Refresh", e -> onRefresh());
         JButton cleanupBtn = new JButton("Clean up...");
         cleanupBtn.setToolTipText("Fetch, then delete local branches that are gone from the remote or already merged");
@@ -169,16 +171,21 @@ public class BranchPopup extends JDialog {
 
                 JPopupMenu menu = new JPopupMenu();
 
-                JMenuItem checkoutItem = new JMenuItem("Checkout");
-                checkoutItem.setEnabled(!branch.equals(currentBranch));
+                String policy = PolicyRefusals.reason("BRANCH_SWITCH");
+                JMenuItem checkoutItem = new JMenuItem(PolicyRefusals.label("Checkout", "BRANCH_SWITCH"));
+                checkoutItem.setEnabled(!branch.equals(currentBranch) && policy == null);
                 checkoutItem.addActionListener(a -> onCheckoutBranch(branch));
                 menu.add(checkoutItem);
 
                 menu.addSeparator();
 
                 String blocked = branch.equals(currentBranch) ? "current" : row.protectedReason();
+                if (blocked == null && policy != null) {
+                    blocked = policy;
+                }
                 JMenuItem deleteItem = new JMenuItem(blocked == null ? "Delete"
-                        : "Delete (" + ("current".equals(blocked) ? "current branch" : "protected: " + blocked) + ")");
+                        : "Delete (" + ("current".equals(blocked) ? "current branch"
+                        : blocked.equals(policy) ? policy : "protected: " + blocked) + ")");
                 deleteItem.setForeground(new Color(0xCC0000));
                 deleteItem.setEnabled(blocked == null);
                 deleteItem.addActionListener(a -> {
@@ -229,8 +236,8 @@ public class BranchPopup extends JDialog {
                 if (branch == null) return;
 
                 JPopupMenu menu = new JPopupMenu();
-                JMenuItem checkoutItem = new JMenuItem("Checkout");
-                checkoutItem.setEnabled(!branch.equals(currentBranch));
+                JMenuItem checkoutItem = new JMenuItem(PolicyRefusals.label("Checkout", "BRANCH_SWITCH"));
+                checkoutItem.setEnabled(!branch.equals(currentBranch) && PolicyRefusals.reason("BRANCH_SWITCH") == null);
                 checkoutItem.addActionListener(a -> onCheckoutBranch(branch));
                 menu.add(checkoutItem);
 

@@ -386,6 +386,7 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     public void refreshCommitPanel() {
         if (commitPanel == null) return;
         new Thread(() -> {
+            PolicyRefusals.refresh();
             try {
                 Dataset ds = rpc.getUncommitedChanges(projectName, userName);
                 commitPanel.setChangesData(ds);
