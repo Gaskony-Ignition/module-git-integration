@@ -5,7 +5,35 @@ upstream's; everything below is this fork.
 
 ## 4.1.0 (unreleased)
 
+### Added
+- **Git policy, per deployment mode.** A new `git-policy` resource (Versioning › Policy) says
+  whether this gateway may push, force push, commit from the Designer, create/switch/delete
+  branches and switch the layout, which deliveries it allows (Sync — pull, Sync — replace, Runner;
+  Off always), and which remote hosts it may contact. The default is earlier versions' behaviour.
+  Every path asks it: Designer RPCs, the page's routes (403), the sync timer, the config follow and
+  the runner. Refused controls stay visible, disabled, with the reason. See docs/MODES.md.
+- **Per-mode records.** The config remote, credentials, sync deliveries, runner access and the
+  policy can be overridden per mode — from the page (**Save to: core | <mode>**, **Reset to
+  core**, a "from core / from Prod" tag) or from Platform › Modes and `resources/copy`, which
+  answered "COPY operation not allowed" before.
+- The page header shows the deployment mode, and commits made by the gateway or the Designer
+  while a mode is active end with a `Gateway-Mode: <mode>` trailer.
+
+### Changed
+- The Git policy is versioned with the config; every other record of this module still is not.
+  New repositories ignore `**/com.operametrix.ignition.git/*` with
+  `!**/com.operametrix.ignition.git/git-policy/`; an existing `.gitignore` has its one
+  `**/com.operametrix.ignition.git/` line rewritten into those two once (marker
+  `.git-module-policy-versioned`) and nothing else touched.
+
 ### Fixed
+- The config repository pushed and fetched through `origin` in `data/.git/config`, set only when
+  the remote was saved, while authenticating with the remote record the active mode resolved: after
+  a mode change one mode's credential was sent to the other mode's URL. Origin is now set from the
+  effective record (URL, branch, no push URL) before every push, fetch and pull.
+- A credential is no longer sent to a host other than its own: the gateway remote's credential in
+  Combined to a Designer-added remote elsewhere, an HTTPS credential to a host its host field does
+  not name, or a saved credential tested against a URL on another host.
 - A revert from the Designer is authored by the Designer user (with their email) instead of "ignition". The revert commit is rewritten in place with the same tree, parent and message, so nothing staged or dirty is touched in either layout.
 
 ## [4.0.0] - 2026-11-10

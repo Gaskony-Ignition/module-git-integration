@@ -94,6 +94,13 @@ changes in; nothing is pushed.
 Runner deliveries need **Credentials → Runner access** switched on and a token.
 Repo updates and sync need a remote and a credential.
 
+**Deployment modes** — on an 8.3 gateway running in a mode (Dev, Prod), the
+**Policy** tab sets what the module may do there: push, Designer commits,
+branch and layout switches, which deliveries, which remote hosts. Remotes,
+credentials and deliveries can be saved for one mode only. Only the policy is
+versioned, so a Prod override written on Dev travels with the branch.
+[docs/MODES.md](docs/MODES.md) has the setup.
+
 This build adds the gateway-side Versioning page, change badges, branches and
 delivery on top of upstream 2.1.0 ([CHANGELOG.md](CHANGELOG.md)). The
 Versioning page meets WCAG 2.1 AA, short of three platform controls with no

@@ -11,7 +11,7 @@ commit, push, pull with conflict resolution, branches, and snapshotting
 gateway resources (tags/themes/images) into the project. It also versions the
 gateway **data directory** (config-as-code) in a separate repo, via a gateway
 page (Platform → System → "Versioning") with auto-commit, history and restore.
-Built by AXONE-IO, maintained by Operametrix; this is Gaskony's fork.
+Built by AXONE-IO and Operametrix; this is Gaskony's fork.
 
 ## Build commands
 
@@ -19,14 +19,13 @@ Built by AXONE-IO, maintained by Operametrix; this is Gaskony's fork.
 rm -rf build/moduleContent && ./gradlew build   # -> build/GitIntegration-<ver>.modl
 ```
 
-Clear `build/moduleContent` first: after a version bump it keeps the previous
-version's jars and the `.modl` ships both. Prettier violations fail webpack — run
+Clear `build/moduleContent` first: after a version bump it keeps the old
+jars and the `.modl` ships both. Prettier violations fail webpack — run
 `node_modules/.bin/prettier --write "src/**/*.{ts,tsx}"` in `web-ui/`.
 
-Tests: `./gradlew test` covers the pure branch, layout and Git Ignore tick logic
-(`BranchHygieneTest`, `RepoLocatorTest`, `ProjectScopeTest`, `LayoutSwitchTest`,
-`BranchGraphTest`, `BranchSwitchTest`, `IgnoreRulesTest`); for the rest install
-the `.modl` and exercise the Designer and Versioning page in both layouts.
+Tests: `./gradlew test` covers the pure branch, layout, Git Ignore, policy and
+origin logic (`gateway/src/test`); for the rest install the `.modl` and exercise
+the Designer and Versioning page in both layouts.
 
 ## Architecture
 
@@ -108,6 +107,9 @@ No Vision client scope.
   (`ProjectScope`, `Repo.inProject`/`toProjectPath`); writers hold
   `DataDirGitManager.lock()`. Combined commits use `--only`, never for an
   `rm --cached` (it re-adds from disk).
+- **Modes (`docs/MODES.md`):** records save via `ModeStore.save` (`?saveTo=`);
+  credentials only via `GitManager.setAuthentication*` (policy and host checks);
+  config remote ops use `authOrigin`, so `origin` follows the mode's record.
 - **Image snapshot walks the store tree** (`getImages` lists one level and
   returns folders as entries with no bytes) **and import merges, never
   deletes** — the store is gateway-scoped, so clearing it first would make
@@ -117,7 +119,7 @@ No Vision client scope.
 
 - Eclipse JGit 7.8.0 — all git operations
 - Apache MINA sshd — SSH transport
-- Lombok — annotation processing (designer)
+- Lombok (designer)
 - React 18 + RTK Query + `@inductiveautomation/ignition-web-ui` — the
   `web-ui/` gateway page, bundled via `com.github.node-gradle.node` + webpack
 
