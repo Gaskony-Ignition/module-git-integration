@@ -169,6 +169,11 @@ public class GitBaseAction {
                             }
                         }
                         showMergeConflictPopup(projectName, userName, conflictingFiles);
+                    } else if (exMsg.startsWith("Not pulled:")) {
+                        // ErrorUtil's dialog is a fixed 350px and cut the file list off mid-path;
+                        // a message dialog grows to fit it.
+                        JOptionPane.showMessageDialog(context.getFrame(), exMsg, "Pull",
+                                JOptionPane.WARNING_MESSAGE);
                     } else {
                         ErrorUtil.showError(cause.getMessage(), cause);
                     }

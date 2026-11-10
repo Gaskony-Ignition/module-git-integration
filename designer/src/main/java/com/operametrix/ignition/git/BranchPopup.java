@@ -100,12 +100,22 @@ public class BranchPopup extends JDialog {
         JPanel localPanel = new JPanel(new BorderLayout());
         JButton createBtn = buildIconButton(VectorIcons.get("add"),
                 PolicyRefusals.label("Create Branch...", "BRANCH_SWITCH"), e -> onCreateBranchRequested());
-        createBtn.setEnabled(PolicyRefusals.reason("BRANCH_SWITCH") == null);
         JButton localRefreshBtn = buildIconButton(VectorIcons.get("refresh"), "Refresh", e -> onRefresh());
         JButton cleanupBtn = new JButton("Clean up...");
-        cleanupBtn.setToolTipText("Fetch, then delete local branches that are gone from the remote or already merged");
         cleanupBtn.setMargin(new Insets(1, 6, 1, 6));
         cleanupBtn.addActionListener(e -> onCleanupRequested());
+        // The popup is built once and reused, so follow the policy rather than reading it here once.
+        Runnable applyPolicy = () -> {
+            String refused = PolicyRefusals.reason("BRANCH_SWITCH");
+            createBtn.setEnabled(refused == null);
+            createBtn.setToolTipText(PolicyRefusals.label("Create Branch...", "BRANCH_SWITCH"));
+            cleanupBtn.setEnabled(refused == null);
+            cleanupBtn.setToolTipText(refused == null
+                    ? "Fetch, then delete local branches that are gone from the remote or already merged"
+                    : "Clean up (" + refused + ")");
+        };
+        applyPolicy.run();
+        PolicyRefusals.onChange(applyPolicy);
         localPanel.add(buildListHeader("Local Branches", cleanupBtn, createBtn, localRefreshBtn), BorderLayout.NORTH);
         localPanel.add(new JScrollPane(localBranchList), BorderLayout.CENTER);
 
