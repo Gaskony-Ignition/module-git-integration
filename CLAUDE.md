@@ -25,7 +25,7 @@ version's jars and the `.modl` ships both. Prettier violations fail webpack — 
 `node_modules/.bin/prettier --write "src/**/*.{ts,tsx}"` in `web-ui/`.
 
 Tests: `./gradlew test` covers the pure branch and layout logic (`BranchHygieneTest`,
-`RepoLocatorTest`, `ProjectScopeTest`, `LayoutSwitchTest`, and `IgnoreRulesTest` for the Git
+`RepoLocatorTest`, `ProjectScopeTest`, `LayoutSwitchTest`, `BranchGraphTest`, `BranchSwitchTest`, and `IgnoreRulesTest` for the Git
 Ignore tab's tick logic); for the rest install the `.modl` and
 exercise the Designer and the Versioning page — in both repository layouts.
 

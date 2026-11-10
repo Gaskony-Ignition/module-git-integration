@@ -25,6 +25,7 @@ const SettingsDrawer = ({
   onSave,
   saveDisabled,
   errorTitle,
+  large,
   children,
 }: {
   open: boolean;
@@ -36,6 +37,8 @@ const SettingsDrawer = ({
   saveDisabled?: boolean;
   /** Toast title on failure. Defaults to "Could not save <title>". */
   errorTitle?: string;
+  /** The wide drawer, for content that needs room (the branch graph). */
+  large?: boolean;
   children: React.ReactNode;
 }) => {
   const [saving, setSaving] = React.useState(false);
@@ -58,7 +61,7 @@ const SettingsDrawer = ({
       anchor="right"
       open={open}
       onClose={onClose}
-      size={DrawerTemplateSize.SMALL}
+      size={large ? DrawerTemplateSize.LARGE : DrawerTemplateSize.SMALL}
     >
       <DrawerTemplate
         title={title}

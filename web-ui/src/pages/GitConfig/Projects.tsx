@@ -18,6 +18,7 @@ import {
 import { errorToast } from "./errors";
 import { selectValue } from "./selectValue";
 import SettingsDrawer from "./SettingsDrawer";
+import BranchesView from "./BranchesView";
 
 const DELIVERY_LABEL: Record<Delivery, string> = {
   off: "Off",
@@ -49,6 +50,9 @@ const Projects = () => {
 
   const [target, setTarget] = React.useState<ProjectStatus | null>(null);
   const [open, setOpen] = React.useState(false);
+  const [drawerTab, setDrawerTab] = React.useState<"settings" | "branches">(
+    "settings"
+  );
   const [version, setVersion] = React.useState(false);
   const [url, setUrl] = React.useState("");
   const [credId, setCredId] = React.useState("");
@@ -83,6 +87,7 @@ const Projects = () => {
     setBranch(p.syncBranch || p.branch || "");
     setEvery(String(p.syncIntervalSeconds));
     setUser(p.syncUser);
+    setDrawerTab("settings");
     setOpen(true);
   };
 
@@ -217,7 +222,15 @@ const Projects = () => {
                       <span className="gitcfg-proj-title">{p.title}</span>
                     ) : null}
                   </td>
-                  <td>{p.branch || "—"}</td>
+                  <td>
+                    {p.branch || "—"}
+                    {p.ahead ? (
+                      <span className="gitcfg-ab">{` ↑${p.ahead}`}</span>
+                    ) : null}
+                    {p.behind ? (
+                      <span className="gitcfg-ab">{` ↓${p.behind}`}</span>
+                    ) : null}
+                  </td>
                   <td className="gitcfg-meta gitcfg-proj-remote">
                     {p.remoteUrl
                       ? p.remoteUrl
@@ -277,8 +290,32 @@ const Projects = () => {
         onClose={() => setOpen(false)}
         onSave={submit}
         errorTitle={target ? `Could not save ${target.name}` : undefined}
+        large={drawerTab === "branches"}
+        saveDisabled={drawerTab === "branches"}
       >
-        {target ? (
+        {target && target.versioned ? (
+          <div className="gitcfg-tabs" role="tablist">
+            {(
+              [
+                ["settings", "Settings"],
+                ["branches", "Branches"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                role="tab"
+                aria-selected={drawerTab === key}
+                className={drawerTab === key ? "is-active" : ""}
+                onClick={() => setDrawerTab(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {target && drawerTab === "branches" && target.versioned ? (
+          <BranchesView project={target.name} compact />
+        ) : target ? (
           <>
             <h4>Repository</h4>
             {combined ? (

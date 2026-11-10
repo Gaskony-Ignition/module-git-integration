@@ -126,6 +126,9 @@ export interface ProjectStatus {
   title: string;
   versioned: boolean;
   branch?: string | null;
+  // Against the branch's upstream; absent when it has none.
+  ahead?: number;
+  behind?: number;
   remoteName?: string | null;
   remoteUrl?: string | null;
   changes: number;
@@ -155,6 +158,62 @@ export interface DeliveryReq {
   branch?: string;
   intervalSeconds?: number;
   ignitionUser?: string;
+}
+export interface GraphCommit {
+  sha: string;
+  shortSha: string;
+  parents: string[];
+  author: string;
+  time: string;
+  subject: string;
+  lane: number;
+  // False only in a filtered Combined project view: the commit leaves the project alone.
+  touches: boolean;
+}
+export interface GraphEdge {
+  from: number;
+  fromLane: number;
+  to: number;
+  toLane: number;
+  lane: number;
+}
+export interface GraphRef {
+  name: string;
+  type: "local" | "remote" | "tag";
+  sha: string;
+  head: boolean;
+}
+export interface GraphBranch {
+  name: string;
+  upstream?: string | null;
+  gone: boolean;
+  ahead: number;
+  behind: number;
+  merged: boolean;
+  protectedReason?: string | null;
+  sha: string;
+  subject: string;
+  time: string;
+}
+export interface BranchGraphResp {
+  layout: Layout;
+  scope: "project" | "gateway" | "config";
+  branch?: string | null;
+  headSha?: string | null;
+  lanes: number;
+  truncated: boolean;
+  filtered: boolean;
+  commits: GraphCommit[];
+  edges: GraphEdge[];
+  refs: GraphRef[];
+  branches: GraphBranch[];
+}
+export interface BranchCheckoutResp {
+  ok: boolean;
+  message: string;
+  refused?: "dirty" | "followed" | "missing";
+  files?: string[];
+  branch?: string;
 }
 export interface ProjectsResp {
   layout?: Layout;
@@ -331,6 +390,30 @@ export const gitConfigApi = baseApi.injectEndpoints({
         body,
       }),
       invalidatesTags: ["credentials", "projects"],
+    }),
+    getBranchGraph: builder.query<
+      BranchGraphResp,
+      { project?: string; config?: boolean; limit?: number }
+    >({
+      query: ({ project, config, limit }) =>
+        `${BASE}/branch-graph?${
+          config
+            ? "repo=config"
+            : `project=${encodeURIComponent(project || "")}`
+        }&limit=${limit || 200}`,
+      providesTags: ["branches"],
+    }),
+
+    checkoutBranch: builder.mutation<
+      BranchCheckoutResp,
+      { project?: string; config?: boolean; branch: string }
+    >({
+      query: ({ project, config, branch }) => ({
+        url: `${BASE}/branch-checkout`,
+        method: "POST",
+        body: config ? { repo: "config", branch } : { project, branch },
+      }),
+      invalidatesTags: ["branches", "projects", "history", "status", "events"],
     }),
     getProjects: builder.query<ProjectsResp, void>({
       query: () => `${BASE}/projects`,
@@ -522,6 +605,8 @@ export const {
   useRemoveCredentialMutation,
   useCheckCredentialMutation,
   useGetProjectsQuery,
+  useGetBranchGraphQuery,
+  useCheckoutBranchMutation,
   useInitProjectMutation,
   useSetProjectRemoteMutation,
   useSetProjectImagesMutation,

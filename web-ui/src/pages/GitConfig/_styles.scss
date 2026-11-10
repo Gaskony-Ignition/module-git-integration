@@ -750,3 +750,147 @@ ul.gitcfg-hint {
     color: var(--warning-dark);
   }
 }
+
+// --- Branches view -------------------------------------------------------------------------
+// A graph and a branch list side by side. Each scrolls inside its own pane so the page never does.
+.gitcfg-branches-head {
+  margin: 0 0 var(--gitcfg-space-3);
+  color: var(--neutral-80);
+}
+
+.gitcfg-branches-body {
+  display: flex;
+  gap: var(--gitcfg-space-4);
+  align-items: flex-start;
+
+  .gitcfg-graph-pane,
+  .gitcfg-branch-list {
+    @include gitcfg-surface;
+    max-height: calc(100vh - 20rem);
+    min-height: 10rem;
+    overflow: auto;
+    min-width: 0;
+  }
+
+  .gitcfg-graph-pane {
+    flex: 3 1 0;
+  }
+
+  .gitcfg-branch-list {
+    flex: 2 1 0;
+    padding: 0 var(--gitcfg-space-3);
+  }
+
+  // The drawer has less height than the page.
+  &.is-compact {
+    flex-direction: column;
+
+    .gitcfg-graph-pane,
+    .gitcfg-branch-list {
+      width: 100%;
+      flex: none;
+      max-height: calc((100vh - 17rem) / 2);
+    }
+  }
+}
+
+.gitcfg-graph {
+  position: relative;
+  min-width: max-content;
+
+  svg {
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+}
+
+.gitcfg-graph-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: var(--gitcfg-space-2);
+    white-space: nowrap;
+    padding-right: var(--gitcfg-space-3);
+
+    &.is-dim {
+      opacity: 0.4;
+    }
+  }
+}
+
+.gitcfg-graph-subject {
+  display: inline-block;
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.gitcfg-ref {
+  appearance: none;
+  display: inline-block;
+  font: inherit;
+  font-size: var(--gitcfg-text-sm);
+  line-height: 1.4;
+  padding: 0 var(--gitcfg-space-2);
+  border: 1px solid var(--neutral-40);
+  border-radius: var(--gitcfg-radius);
+  background: var(--neutral-10);
+  color: var(--neutral-90);
+
+  &.is-head {
+    border-color: var(--primary);
+    font-weight: var(--font-weight-bold);
+  }
+}
+
+.gitcfg-ref-remote {
+  color: var(--neutral-70);
+}
+
+.gitcfg-ref-tag {
+  border-style: dashed;
+}
+
+button.gitcfg-ref {
+  cursor: pointer;
+}
+
+.gitcfg-badges {
+  display: block;
+
+  > * {
+    margin-right: var(--gitcfg-space-1);
+  }
+}
+
+.gitcfg-refusal {
+  @include gitcfg-surface;
+  border-color: var(--error);
+  background: var(--error-10);
+  padding: var(--gitcfg-space-2) var(--gitcfg-space-3);
+  margin-bottom: var(--gitcfg-space-3);
+
+  p {
+    margin: 0;
+  }
+
+  ul {
+    margin: var(--gitcfg-space-1) 0 0;
+    padding-left: var(--gitcfg-space-4);
+    max-height: 6rem;
+    overflow: auto;
+  }
+}
+
+// Ahead/behind beside a branch name.
+.gitcfg-ab {
+  font-family: var(--gitcfg-font-mono);
+  font-size: var(--gitcfg-text-sm);
+  color: var(--neutral-70);
+}

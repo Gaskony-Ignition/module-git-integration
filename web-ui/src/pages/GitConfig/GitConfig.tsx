@@ -18,14 +18,22 @@ import Projects from "./Projects";
 import Credentials from "./Credentials";
 import Logs from "./Logs";
 import ExcludedFiles from "./ExcludedFiles";
+import BranchesView from "./BranchesView";
 import "./_styles.scss";
 
-type Tab = "history" | "excluded" | "projects" | "credentials" | "logs";
+type Tab =
+  | "history"
+  | "branches"
+  | "excluded"
+  | "projects"
+  | "credentials"
+  | "logs";
 
 // Credentials sit on the far right because they are set up once; Projects answers the question
 // people arrive with, which is whether a given project is in git at all.
 const TABS: [Tab, string][] = [
   ["history", "Gateway History"],
+  ["branches", "Branches"],
   ["excluded", "Git Ignore"],
   ["projects", "Projects"],
   ["credentials", "Credentials"],
@@ -54,7 +62,8 @@ const GitConfig = () => {
     // Only the two config-repo tabs depend on the data-dir repository existing. Projects and
     // Credentials do not, and gating them on it put the credentials someone needs BEFORE setting
     // anything up behind the setup they cannot do without them.
-    const needsRepo = tab === "history" || tab === "excluded";
+    const needsRepo =
+      tab === "history" || tab === "branches" || tab === "excluded";
 
     const notInitialised = () => {
       return (
@@ -138,6 +147,8 @@ const GitConfig = () => {
           notInitialised()
         ) : tab === "history" ? (
           <HistoryList />
+        ) : tab === "branches" ? (
+          <BranchesView config />
         ) : tab === "excluded" ? (
           <ExcludedFiles />
         ) : tab === "projects" ? (

@@ -53,6 +53,7 @@ const baseApi = createApi({
     "projects",
     "events",
     "runner",
+    "branches",
   ],
   endpoints: () => ({}),
   keepUnusedDataFor: 0,

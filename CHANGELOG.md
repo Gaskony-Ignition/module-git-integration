@@ -8,6 +8,12 @@ upstream's; everything below is this fork.
 **Type:** MAJOR
 
 ### Added
+- **Branches on the gateway page.** A commit graph (lanes, ref chips, HEAD, gone/merged/ahead/behind
+  badges) beside a branch list, for each project (Projects tab, project drawer) and for the gateway
+  config (Versioning page). In Combined it shows the gateway repository and dims commits that leave
+  the project. The Projects list has a Branch column with ↑/↓. **Switch to this branch** changes the
+  branch from the page: refused with the file list when there is uncommitted work, or when a sync or
+  delivery follows another branch; it then loads the result and logs a `checkout` event.
 - **Branch clean-up in the Designer.** The local branch list marks branches `[gone]` (deleted on
   the remote), `[merged]` and `↑N` (commits on no remote), and the sync branch shows as protected.
   **Clean up…** fetches, then offers every gone or merged branch, ticked, and deletes the ones you

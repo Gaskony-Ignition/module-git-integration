@@ -17,7 +17,10 @@ import com.operametrix.ignition.git.records.GitUserSshKeyRecord;
 import com.operametrix.ignition.git.records.legacy.GitLegacyImporter;
 import com.operametrix.ignition.git.records.legacy.RetiredResourceCleanup;
 import com.operametrix.ignition.git.managers.ConfigAutoCommitter;
+import com.operametrix.ignition.git.managers.BranchGraph;
+import com.operametrix.ignition.git.managers.BranchSwitch;
 import com.operametrix.ignition.git.managers.ConfigSync;
+import com.operametrix.ignition.git.managers.IgnitionReformat;
 import com.operametrix.ignition.git.managers.CredentialCheck;
 import com.operametrix.ignition.git.managers.ProjectRecords;
 import com.operametrix.ignition.git.managers.DataDirGitManager;
@@ -49,7 +52,10 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Optional;
 
@@ -431,6 +437,13 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         routes.newRoute("/layout").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleSaveLayout).mount();
+
+        routes.newRoute("/branch-graph").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.READ).nocache()
+                .handler(this::handleBranchGraph).mount();
+        routes.newRoute("/branch-checkout").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleBranchCheckout).mount();
     }
 
     /**
@@ -535,6 +548,237 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);
+        }
+    }
+
+
+    /**
+     * The commit graph for one repository: {@code ?project=<name>} (in Combined, the gateway
+     * repository with commits outside {@code projects/<name>/} flagged) or {@code ?repo=config}.
+     */
+    private Object handleBranchGraph(RequestContext req, HttpServletResponse resp) {
+        try {
+            String project = req.getParameter("project");
+            boolean config = "config".equals(req.getParameter("repo"));
+            int limit = parseInt(req.getParameter("limit"), BranchGraph.DEFAULT_LIMIT);
+            boolean combined = GitManager.combined();
+            Path root;
+            String prefix = null;
+            Map<String, String> guarded;
+            if (config) {
+                root = GitManager.getDataFolderPath();
+                guarded = gatewayGuarded();
+            } else {
+                if (project == null || project.isBlank()) {
+                    throw new RuntimeException("A project or repo=config is required.");
+                }
+                RepoLocator.Repo repo = GitManager.repoFor(project.trim());
+                root = repo.root();
+                if (repo.scoped()) {
+                    prefix = repo.prefix();
+                    guarded = gatewayGuarded();
+                } else {
+                    guarded = new HashMap<>();
+                    GitSyncRecord sync = GitSyncRecord.findByProject(project.trim());
+                    if (sync != null && sync.isEnabled() && !sync.getBranch().isBlank()) {
+                        guarded.put(sync.getBranch(), "sync");
+                    }
+                }
+            }
+            if (!java.nio.file.Files.isDirectory(root.resolve(".git"))) {
+                throw new RuntimeException(config || combined
+                        ? "The gateway repository is not initialised."
+                        : "Project '" + project + "' is not under version control.");
+            }
+            BranchGraph.Result r;
+            try (org.eclipse.jgit.api.Git git = GitManager.getGit(root)) {
+                r = BranchGraph.build(git, limit, prefix, guarded);
+            }
+            JsonObject o = new JsonObject();
+            o.addProperty("layout", combined ? "combined" : "separate");
+            o.addProperty("scope", config ? "config" : combined ? "gateway" : "project");
+            o.addProperty("branch", r.branch());
+            o.addProperty("headSha", r.headSha());
+            o.addProperty("lanes", r.lanes());
+            o.addProperty("truncated", r.truncated());
+            o.addProperty("filtered", prefix != null);
+            JsonArray commits = new JsonArray();
+            for (BranchGraph.Commit c : r.commits()) {
+                JsonObject co = new JsonObject();
+                co.addProperty("sha", c.sha());
+                co.addProperty("shortSha", c.shortSha());
+                JsonArray parents = new JsonArray();
+                c.parents().forEach(parents::add);
+                co.add("parents", parents);
+                co.addProperty("author", c.author());
+                co.addProperty("time", c.time());
+                co.addProperty("subject", c.subject());
+                co.addProperty("lane", c.lane());
+                co.addProperty("touches", c.touches());
+                commits.add(co);
+            }
+            o.add("commits", commits);
+            JsonArray edges = new JsonArray();
+            for (BranchGraph.Edge e : r.edges()) {
+                JsonObject eo = new JsonObject();
+                eo.addProperty("from", e.from());
+                eo.addProperty("fromLane", e.fromLane());
+                eo.addProperty("to", e.to());
+                eo.addProperty("toLane", e.toLane());
+                eo.addProperty("lane", e.lane());
+                edges.add(eo);
+            }
+            o.add("edges", edges);
+            JsonArray refs = new JsonArray();
+            for (BranchGraph.RefInfo f : r.refs()) {
+                JsonObject fo = new JsonObject();
+                fo.addProperty("name", f.name());
+                fo.addProperty("type", f.type());
+                fo.addProperty("sha", f.sha());
+                fo.addProperty("head", f.head());
+                refs.add(fo);
+            }
+            o.add("refs", refs);
+            JsonArray branches = new JsonArray();
+            for (BranchGraph.Branch b : r.branches()) {
+                JsonObject bo = new JsonObject();
+                bo.addProperty("name", b.info().name());
+                bo.addProperty("upstream", b.info().upstream());
+                bo.addProperty("gone", b.info().gone());
+                bo.addProperty("ahead", b.info().ahead());
+                bo.addProperty("behind", b.behind());
+                bo.addProperty("merged", b.info().merged());
+                bo.addProperty("protectedReason", b.info().protectedReason());
+                bo.addProperty("sha", b.sha());
+                bo.addProperty("subject", b.subject());
+                bo.addProperty("time", b.time());
+                branches.add(bo);
+            }
+            o.add("branches", branches);
+            return o.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    /** Branches the gateway delivery follows, which a gateway-wide repository must keep. */
+    private static Map<String, String> gatewayGuarded() {
+        Map<String, String> out = new HashMap<>();
+        ConfigSync.Settings gw = ConfigSync.get();
+        if (!ConfigSync.MODE_OFF.equals(gw.mode()) && !gw.branch().isBlank()) {
+            out.put(gw.branch(), "delivery");
+        }
+        return out;
+    }
+
+    /**
+     * Switch the branch of one repository ({@code project} or {@code repo: "config"}). Refuses,
+     * with the files, when uncommitted work would be affected; never stashes.
+     */
+    private Object handleBranchCheckout(RequestContext req, HttpServletResponse resp) {
+        String project = null;
+        boolean config = false;
+        String branch = null;
+        String who = "Versioning page";
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            project = optString(body, "project");
+            config = "config".equals(optString(body, "repo"));
+            branch = optString(body, "branch");
+            if (branch == null || branch.isBlank()) {
+                throw new RuntimeException("A branch is required.");
+            }
+            if (!config && (project == null || project.isBlank())) {
+                throw new RuntimeException("A project or repo=config is required.");
+            }
+            branch = branch.trim();
+            boolean gateway = config || GitManager.combined();
+            Path root = gateway ? GitManager.getDataFolderPath() : GitManager.repoFor(project.trim()).root();
+            if (!java.nio.file.Files.isDirectory(root.resolve(".git"))) {
+                throw new RuntimeException("That repository is not initialised.");
+            }
+
+            String followed;
+            String where;
+            if (gateway) {
+                ConfigSync.Settings gw = ConfigSync.get();
+                followed = ConfigSync.MODE_OFF.equals(gw.mode()) ? null : gw.branch();
+                where = "Configure Versioning > Delivery";
+            } else {
+                GitSyncRecord sync = GitSyncRecord.findByProject(project.trim());
+                followed = sync != null && sync.isEnabled() ? sync.getBranch() : null;
+                where = "the Projects tab (Edit > Delivery)";
+            }
+
+            BranchSwitch.Result r;
+            synchronized (gateway ? DataDirGitManager.lock() : new Object()) {
+                ConfigAutoCommitter.hold(30_000);
+                try (org.eclipse.jgit.api.Git git = GitManager.getGit(root)) {
+                    r = BranchSwitch.switchTo(git, branch, followed, where, gateway, DIRTY,
+                            () -> DataDirGitManager.commitAllIfDirty(
+                                    "Config changes before switching branch"));
+                }
+            }
+
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", r.ok());
+            o.addProperty("message", r.message());
+            if (!r.ok()) {
+                o.addProperty("refused", r.refused());
+                JsonArray files = new JsonArray();
+                r.files().forEach(files::add);
+                o.add("files", files);
+                return o.toString();
+            }
+            o.addProperty("branch", r.branch());
+
+            // Only a real switch changes files; "already on it" must not rescan.
+            if (!r.message().startsWith("Already")) {
+                if (gateway) {
+                    ConfigAutoCommitter.hold(10_000);
+                    DataDirGitManager.applyConfigToRunningGateway();
+                    if (!config) {
+                        DataDirGitManager.applyProjects(null);
+                    } else if (GitManager.combined()) {
+                        DataDirGitManager.applyProjects(null);
+                    }
+                } else {
+                    GitProjectManager.importProject(project.trim());
+                    getContext().getProjectManager().requestScan();
+                }
+                GitEvent.Builder ev = GitEvent.of(GitEvent.CHECKOUT).user(who).branch(r.branch())
+                        .message("Switched to '" + r.branch() + "'" + (r.created() ? " (new tracking branch)" : "")
+                                + (gateway ? " for the whole gateway repository" : ""));
+                GitEvents.fire((gateway ? ev.config() : ev.project(project.trim())).success());
+            }
+            return o.toString();
+        } catch (Exception e) {
+            GitEvents.fire((config ? GitEvent.of(GitEvent.CHECKOUT).config()
+                    : GitEvent.of(GitEvent.CHECKOUT).project(project == null ? "" : project.trim()))
+                    .user(who).branch(branch == null ? "" : branch).failure(GitEvents.reason(e)));
+            return error(resp, e);
+        }
+    }
+
+    private static final BranchSwitch.Dirty DIRTY = new BranchSwitch.Dirty() {
+        public java.util.Set<String> real(org.eclipse.jgit.lib.Repository repo, org.eclipse.jgit.api.Status s) {
+            return IgnitionReformat.realChanges(repo, s);
+        }
+
+        public java.util.Set<String> reformatted(org.eclipse.jgit.lib.Repository repo, org.eclipse.jgit.api.Status s) {
+            return IgnitionReformat.reformatted(repo, s);
+        }
+    };
+
+    /** Ahead/behind of a repository's checked-out branch against its upstream; null with none. */
+    private static int[] aheadBehind(Path root) {
+        try (org.eclipse.jgit.api.Git git = GitManager.getGit(root)) {
+            org.eclipse.jgit.lib.Repository repo = git.getRepository();
+            String b = repo.getBranch();
+            org.eclipse.jgit.lib.BranchTrackingStatus st = org.eclipse.jgit.lib.BranchTrackingStatus.of(repo, b);
+            return st == null ? null : new int[]{st.getAheadCount(), st.getBehindCount()};
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -1314,12 +1558,25 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
 
             JsonArray arr = new JsonArray();
+            // Combined: every project is the one repository, so ask once.
+            Map<Path, int[]> tracking = new HashMap<>();
             for (GitProjectManager.ProjectStatus p : projects) {
                 JsonObject o = new JsonObject();
                 o.addProperty("name", p.name());
                 o.addProperty("title", p.title());
                 o.addProperty("versioned", p.versioned());
                 o.addProperty("branch", p.branch());
+                if (p.versioned() && p.branch() != null) {
+                    int[] ab = tracking.computeIfAbsent(GitManager.repoFor(p.name()).root(),
+                            r -> {
+                                int[] x = aheadBehind(r);
+                                return x == null ? new int[0] : x;
+                            });
+                    if (ab.length == 2) {
+                        o.addProperty("ahead", ab[0]);
+                        o.addProperty("behind", ab[1]);
+                    }
+                }
                 o.addProperty("remoteName", p.remoteName());
                 o.addProperty("remoteUrl", p.remoteUrl());
                 o.addProperty("changes", p.changes());

@@ -128,6 +128,16 @@ either way at any time.
 | Remote and credential | Per project, in the Designer's Remotes popup | One, set in Configure Versioning; the Designer shows it read-only |
 | Delivery | Per project on the Projects tab | Pulls set once in Configure Versioning › Delivery (Sync — pull, Sync — replace, Runner — repo updates); a project keeps Off or Runner — release |
 
+**Branches.** One gateway has one checked-out branch per project (Combined: one for
+everything), shared by everyone editing it, so the gateway page shows it. The
+Projects tab has a Branch column with ↑/↓ against the upstream, and each
+project's drawer has a **Branches** tab; the Versioning page has a **Branches**
+tab for the gateway config. Each draws the commit graph beside the branch list,
+with gone, merged, ahead and behind marked. In Combined the project view shows
+the gateway repository and dims commits that leave that project. **Switch to
+this branch** changes it from the page; it is refused, with the files, while
+there is uncommitted work or while a sync or delivery follows another branch.
+
 In Combined, a revert from the Designer is refused when the commit also changed
 files outside that project, rather than undoing config or another project's
 work from a window that cannot show it. Config's auto-commit and **Restore**
