@@ -138,12 +138,16 @@ the gateway repository and dims commits that leave that project. **Switch to
 this branch** changes it from the page; it is refused, with the files, while
 there is uncommitted work or while a sync or delivery follows another branch.
 
+![A project's Branches tab: commit graph and branch list](docs/images/versioning-branches.png)
+
 In Combined, a revert from the Designer is refused when the commit also changed
 files outside that project, rather than undoing config or another project's
 work from a window that cannot show it. Config's auto-commit and **Restore**
 leave `projects/` alone. A runner release and a deleted project are each
-committed for that project's folder only. The Designer reads the layout when it
-opens, so reopen it after a switch.
+committed for that project's folder only. An open Designer follows a layout or
+branch switch within ten seconds, without reopening.
+
+![The Repository layout setting](docs/images/versioning-layout.png)
 
 To switch: **Versioning → Configure Versioning → Repository layout**. It is
 refused, with nothing changed, while any project has uncommitted work.
@@ -179,6 +183,8 @@ branch's upstream, else HEAD) or `↑3` (three commits on no remote). Delete ref
 the checked-out branch and the branch a scheduled sync follows. A branch with
 unmerged or unpushed commits asks again, with the commit count, before **Delete
 anyway**. **Clean up…** fetches, then offers every gone or merged branch, ticked.
+
+![Branch list with gone and merged marks, and Clean up](docs/images/designer-branch-cleanup.png)
 
 Gateway config versioning: **Platform → System → Versioning → Initialize
 versioning**. Adjust what is covered under **Git Ignore**.

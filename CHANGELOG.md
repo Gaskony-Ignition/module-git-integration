@@ -13,7 +13,9 @@ upstream's; everything below is this fork.
   config (Versioning page). In Combined it shows the gateway repository and dims commits that leave
   the project. The Projects list has a Branch column with ↑/↓. **Switch to this branch** changes the
   branch from the page: refused with the file list when there is uncommitted work, or when a sync or
-  delivery follows another branch; it then loads the result and logs a `checkout` event.
+  delivery follows another branch; it then loads the result and logs a `checkout` event with the
+  signed-in user. An open Designer reloads the project within ten seconds, or, with unsaved edits,
+  says to save or discard them and update.
 - **Branch clean-up in the Designer.** The local branch list marks branches `[gone]` (deleted on
   the remote), `[merged]` and `↑N` (commits on no remote), and the sync branch shows as protected.
   **Clean up…** fetches, then offers every gone or merged branch, ticked, and deletes the ones you
@@ -42,6 +44,12 @@ upstream's; everything below is this fork.
   fetch, scheduled sync and the config repo's fetches).
 - **RPC:** `deleteBranch` takes a `force` flag and returns a refusal as text; new
   `getLocalBranchInfo` and `cleanupBranches`. `getLocalBranches` is unchanged.
+
+### Fixed
+- **A scheduled or runner pull that hits a merge conflict is undone.** It used to leave conflict
+  markers in the project's files and the repository mid-merge, so every later sync refused.
+  `/runner-sync` now answers 500 with `ok: false` for a failed pull, as it does in Combined, so the
+  workflow step fails.
 
 ## [3.11.3] - 2026-11-04
 
