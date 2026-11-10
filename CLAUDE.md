@@ -24,8 +24,9 @@ Clear `build/moduleContent` first: after a version bump it keeps the previous
 version's jars and the `.modl` ships both. Prettier violations fail webpack — run
 `node_modules/.bin/prettier --write "src/**/*.{ts,tsx}"` in `web-ui/`.
 
-Tests: `./gradlew test` covers the pure branch logic (`BranchHygieneTest`); for the rest install the `.modl` and exercise the Designer and the
-Versioning page.
+Tests: `./gradlew test` covers the pure branch and layout logic (`BranchHygieneTest`,
+`RepoLocatorTest`, `ProjectScopeTest`, `LayoutSwitchTest`); for the rest install the `.modl` and
+exercise the Designer and the Versioning page — in both repository layouts.
 
 ## Architecture
 
@@ -106,6 +107,11 @@ No Vision client scope.
   top of `_styles.scss`. No hex or font stack anywhere else. `.ia-card-header`
   and `.gitcfg-blank > div:first-child` reach into platform DOM — re-check
   both after a web-ui package upgrade.
+- **Every project git operation goes through `GitManager.repoFor(project)`**, never
+  `projects/<name>` directly: in the Combined layout the project is a prefix of the data-dir
+  repository. Paths handed to the Designer stay project-relative (`ProjectScope`, `Repo.inProject`/
+  `toProjectPath`), and anything that writes that repository holds `DataDirGitManager.lock()`.
+  Combined commits use `--only` — but never for an `rm --cached`, which `--only` re-adds from disk.
 - **Image snapshot walks the store tree** (`getImages` lists one level and
   returns folders as entries with no bytes) **and import merges, never
   deletes** — the store is gateway-scoped, so clearing it first would make

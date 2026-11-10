@@ -81,6 +81,22 @@ commit nothing. Untracked files go one by one, never `clean -d`, so gitignored d
 untracked directory survives. The setting lives in `.git/config`, not a resource: a resource would
 be versioned, and the branch's copy would overwrite it.
 
+## Combined layout: one delivery for the gateway
+
+In the Combined repository layout (see README) config and every project are one repository, so a
+pull cannot be per project. The gateway delivery in Configure Versioning then offers **Sync — pull**
+(merge the branch in on a timer, refused while anything on the gateway is uncommitted, a branch
+moved backwards not followed), **Sync — replace** as before but for the whole gateway, and **Runner —
+repo updates** (`POST /runner-sync` pulls the gateway branch whatever project the body names; 409
+unless this delivery is chosen). Each ends with a config scan and an import of every project the
+change touched. A project keeps **Off** or **Runner — release**: a release still replaces one
+project folder, and is then committed for that folder only.
+
+Per-project sync records and runner repo-update modes are kept, inactive, while Combined, and the
+drawer never rewrites them unless that project's delivery is changed — so switching back to
+Separate brings them back. The gateway's Pull and Runner modes are likewise kept but inactive while
+Separate.
+
 ## Local changes
 
 Pull and repo updates refuse rather than stash or force: silently reverting an

@@ -113,6 +113,46 @@ naming prop of their own: the gateway's own header logo, the History table's
 page-size selector and row-expand button, and the raw `.gitignore` editor's
 resize handle.
 
+## Repository layout
+
+Some teams want each project in its own repository; others want the whole
+gateway — config and every project — as one repository they can read, review
+and branch as a unit. A gateway setting picks one, and an admin can switch
+either way at any time.
+
+| | Separate (default) | Combined |
+| --- | --- | --- |
+| Repositories | One per project at `projects/<name>`, plus the config repository at the data directory | One at the data directory, holding `config/` and `projects/` |
+| Designer commit, diff, history, revert, badges | That project's repository | Limited to `projects/<name>/`; a commit never takes config or another project with it |
+| Branches, checkout, pull, push, fetch | Per project | Gateway-wide: checking out a branch switches config and every project, then reloads them |
+| Remote and credential | Per project, in the Designer's Remotes popup | One, set in Configure Versioning; the Designer shows it read-only |
+| Delivery | Per project on the Projects tab | Pulls set once in Configure Versioning › Delivery (Sync — pull, Sync — replace, Runner — repo updates); a project keeps Off or Runner — release |
+
+In Combined, a revert from the Designer is refused when the commit also changed
+files outside that project, rather than undoing config or another project's
+work from a window that cannot show it. Config's auto-commit and **Restore**
+leave `projects/` alone. A runner release and a deleted project are each
+committed for that project's folder only. The Designer reads the layout when it
+opens, so reopen it after a switch.
+
+To switch: **Versioning → Configure Versioning → Repository layout**. It is
+refused, with nothing changed, while any project has uncommitted work.
+
+- **Separate → Combined** moves each project's `.git` to
+  `var/git-archive/<name>-<time>.git` (kept, so its history and remotes can come
+  back), adds `projects/` to the gateway repository's `.gitignore` rules with
+  each project's `global-props/data.bin` left out, and commits every project in
+  one commit. History is not merged in.
+- **Combined → Separate** gives each project its own repository again — its
+  archived one if you tick *Restore each project's earlier history* and one
+  exists, with one commit for what changed meanwhile; otherwise a new repository
+  with one commit of its current files — and takes `projects/` back out of the
+  gateway repository.
+
+Per-project remotes, credentials and deliveries are kept while Combined and
+work again after switching back; the gateway's Pull and Runner deliveries stop
+while Separate.
+
 ## How to use it
 
 Install the signed `.modl` from the latest release through the gateway's

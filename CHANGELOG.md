@@ -12,11 +12,23 @@ upstream's; everything below is this fork.
   the remote), `[merged]` and `↑N` (commits on no remote), and the sync branch shows as protected.
   **Clean up…** fetches, then offers every gone or merged branch, ticked, and deletes the ones you
   keep ticked.
+- **Repository layout: Separate or Combined.** Separate is every earlier version's layout and stays
+  the default. Combined keeps config and every project in one repository at the data directory.
+  Designer commits, diffs, history, reverts and badges stay limited to the project's folder;
+  branches, pull, push and the remote become gateway-wide, and a checkout reloads config and every
+  changed project. Switch either way from **Configure Versioning › Repository layout**; refused
+  while anything is uncommitted. Going Combined archives each project's `.git` under
+  `var/git-archive`; going back can restore it.
+- **Gateway delivery: Sync — pull and Runner — repo updates** (Combined only), beside Sync — replace.
+  In Combined a project's own delivery is Off or Runner — release; a release and a project delete
+  are committed for that project's folder.
+- **RPC:** `getRepositoryLayout`. **REST:** `POST /layout`; `/status` and `/projects` carry `layout`.
 
 ### Changed
 - **Delete is safe by default.** An unmerged or unpushed branch is refused with the commit count;
   **Delete anyway** overrides that. The checked-out branch and the branch a scheduled sync follows
-  are never deleted. Before, anything but the current branch was force-deleted after one prompt.
+  are never deleted (in Combined, the branch the gateway delivery follows). Before, anything but
+  the current branch was force-deleted after one prompt.
 - **Fetch prunes.** Branches deleted on the remote leave the remote list on the next fetch (Designer
   fetch, scheduled sync and the config repo's fetches).
 - **RPC:** `deleteBranch` takes a `force` flag and returns a refusal as text; new
