@@ -27,10 +27,7 @@ public class GitSyncRecord {
             new ResourceType(GitProjectsConfigRecord.MODULE_ID, "git-sync");
 
     public static final ResourceTypeMeta<Config> META =
-            ResourceTypeMeta.newBuilder(Config.class)
-                    .resourceType(TYPE)
-                    .categoryName("Git Sync")
-                    .build();
+            ModeStore.overridable(Config.class, TYPE, "Git Sync");
 
     public static final class Handler extends NamedResourceHandler<Config> {
         public Handler(GatewayContext context) {
@@ -170,11 +167,7 @@ public class GitSyncRecord {
                 Config c = new Config(id, project, enabled, remoteName, branch, intervalSeconds,
                         ignitionUser, mode);
                 String key = String.valueOf(id);
-                if (handler.findResource(key).isPresent()) {
-                    handler.modify(key, c).join();
-                } else {
-                    handler.create(key, c).join();
-                }
+                ModeStore.save(handler, META, key, c);
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -222,5 +215,19 @@ public class GitSyncRecord {
             }
         }
         return out;
+    }
+
+    /** Where this record's effective value comes from: core, a mode, or null when unsaved. */
+    public String definedIn() {
+        return ModeStore.definedIn(TYPE, String.valueOf(id));
+    }
+
+    /** Deletes the active mode's override of this record; false when there is none. */
+    public boolean resetToCore() {
+        try {
+            return ModeStore.reset(handler, TYPE, String.valueOf(id));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

@@ -66,10 +66,7 @@ public class GitRunnerRecord {
     public static final ResourceType TYPE = new ResourceType(MODULE_ID, "git-runner");
 
     public static final ResourceTypeMeta<Config> META =
-            ResourceTypeMeta.newBuilder(Config.class)
-                    .resourceType(TYPE)
-                    .categoryName("Git Actions Runner")
-                    .build();
+            ModeStore.overridable(Config.class, TYPE, "Git Actions Runner");
 
     public static final class Handler extends NamedResourceHandler<Config> {
         public Handler(GatewayContext context) {
@@ -272,11 +269,21 @@ public class GitRunnerRecord {
         try {
             Config c = new Config(enabled, token, getIgnitionUser(), modes.toString(), optIn,
                     cleared);
-            if (handler.findResource(NAME).isPresent()) {
-                handler.modify(NAME, c).join();
-            } else {
-                handler.create(NAME, c).join();
-            }
+            ModeStore.save(handler, META, NAME, c);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Where this record's effective value comes from: core, a mode, or null when unsaved. */
+    public String definedIn() {
+        return ModeStore.definedIn(TYPE, NAME);
+    }
+
+    /** Deletes the active mode's override of this record; false when there is none. */
+    public boolean resetToCore() {
+        try {
+            return ModeStore.reset(handler, TYPE, NAME);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

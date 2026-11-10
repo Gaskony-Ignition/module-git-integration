@@ -81,7 +81,7 @@ public final class ProjectScope {
             git.add().setUpdate(true).addFilepattern(p).call();
             paths.add(p);
         }
-        CommitCommand commit = git.commit().setMessage(message);
+        CommitCommand commit = git.commit().setMessage(PolicyGate.trailer(message));
         if (amend) {
             commit.setAmend(true);
         }
@@ -146,7 +146,7 @@ public final class ProjectScope {
         if (s.getAdded().isEmpty() && s.getChanged().isEmpty() && s.getRemoved().isEmpty()) {
             return null;
         }
-        CommitCommand commit = git.commit().setMessage(message).setAuthor(authorName, "");
+        CommitCommand commit = git.commit().setMessage(PolicyGate.trailer(message)).setAuthor(authorName, "");
         if (repo.scoped()) {
             commit.setOnly(spec);
         }

@@ -75,6 +75,12 @@ public interface GitScriptInterface {
      */
     String getRepositoryLayout();
 
+    /**
+     * What the gateway's Git policy refuses here, one "ACTION\tshort reason" line each (PUSH,
+     * FORCE_PUSH, DESIGNER_COMMIT, BRANCH_SWITCH, LAYOUT_SWITCH). Empty when everything is allowed.
+     */
+    List<String> getPolicyRefusals();
+
     /** Check whether the given project is registered in the gateway's git configuration. */
     boolean isProjectRegistered(String projectName);
 

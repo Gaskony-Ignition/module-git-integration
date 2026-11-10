@@ -137,6 +137,7 @@ public final class ConfigSync {
             return "already running";
         }
         try {
+            PolicyGate.checkDelivery(s.mode());
             if (!MODE_REPLACE.equals(s.mode())) {
                 return pull(s);
             }

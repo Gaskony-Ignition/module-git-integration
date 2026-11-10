@@ -26,6 +26,40 @@ public final class IgnoreRules {
     public static final String ROOT_RULES_COMMENT =
             "# Only config/ is versioned by default; tick a data-root path on the Git Ignore tab to add it.";
 
+    /** The 3.10.0 rule that kept every record of this module out of the repository. */
+    public static final String OLD_RECORDS_RULE = "**/com.operametrix.ignition.git/";
+
+    /** Since 4.1.0: the same, apart from the Git policy. */
+    public static final List<String> RECORDS_RULES = List.of(
+            "**/com.operametrix.ignition.git/*",
+            "!**/com.operametrix.ignition.git/git-policy/");
+
+    /**
+     * Rewrites the 3.10.0 records line into {@link #RECORDS_RULES} in place. Only that exact managed
+     * line is touched; every other line, and a file that no longer has it, is left as it is.
+     *
+     * @return the new lines, or null when there is nothing to change
+     */
+    public static List<String> versionPolicy(List<String> lines) {
+        if (lines.stream().anyMatch(l -> l.trim().equals(RECORDS_RULES.get(1)))) {
+            return null;
+        }
+        int at = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).trim().equals(OLD_RECORDS_RULE)) {
+                at = i;
+                break;
+            }
+        }
+        if (at < 0) {
+            return null;
+        }
+        List<String> out = new java.util.ArrayList<>(lines);
+        out.remove(at);
+        out.addAll(at, RECORDS_RULES);
+        return out;
+    }
+
     /** Based on Inductive Automation's version-control-guide template, plus the root rules. */
     public static final List<String> TEMPLATE = List.of(
             "# Ignition data-directory config-as-code — managed by the Git module",
@@ -61,8 +95,10 @@ public final class IgnoreRules {
             "**/.alarms_*",
             // This module's own records: git credentials, remotes and deliveries belong to the
             // gateway they were set on. Versioned, a gateway following another's branch would take
-            // that gateway's remote and deliveries, and Sync - replace would delete its own.
-            "**/com.operametrix.ignition.git/",
+            // that gateway's remote and deliveries, and Sync - replace would delete its own. The
+            // Git policy is the exception (4.1.0): it is what a Prod override is written to travel in.
+            RECORDS_RULES.get(0),
+            RECORDS_RULES.get(1),
             "",
             ROOT_RULES_COMMENT,
             "/*",

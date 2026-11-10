@@ -34,10 +34,7 @@ public class GitUserSshKeyRecord {
             new ResourceType(GitProjectsConfigRecord.MODULE_ID, "git-user-ssh-key");
 
     public static final ResourceTypeMeta<Config> META =
-            ResourceTypeMeta.newBuilder(Config.class)
-                    .resourceType(TYPE)
-                    .categoryName("Git User SSH Keys")
-                    .build();
+            ModeStore.overridable(Config.class, TYPE, "Git User SSH Keys");
 
     public static final class Handler extends NamedResourceHandler<Config> {
         public Handler(GatewayContext context) {
@@ -159,11 +156,7 @@ public class GitUserSshKeyRecord {
                 }
                 Config c = new Config(id, ignitionUser, keyName, sshKey, sshKeySecret);
                 String name = String.valueOf(id);
-                if (handler.findResource(name).isPresent()) {
-                    handler.modify(name, c).join();
-                } else {
-                    handler.create(name, c).join();
-                }
+                ModeStore.save(handler, META, name, c);
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -219,5 +212,19 @@ public class GitUserSshKeyRecord {
             }
         }
         return out;
+    }
+
+    /** Where this record's effective value comes from: core, a mode, or null when unsaved. */
+    public String definedIn() {
+        return ModeStore.definedIn(TYPE, String.valueOf(id));
+    }
+
+    /** Deletes the active mode's override of this record; false when there is none. */
+    public boolean resetToCore() {
+        try {
+            return ModeStore.reset(handler, TYPE, String.valueOf(id));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

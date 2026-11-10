@@ -18,10 +18,7 @@ public class GitConfigRemoteRecord {
             new ResourceType(GitProjectsConfigRecord.MODULE_ID, "git-config-remote");
 
     public static final ResourceTypeMeta<Config> META =
-            ResourceTypeMeta.newBuilder(Config.class)
-                    .resourceType(TYPE)
-                    .categoryName("Git Config Remote")
-                    .build();
+            ModeStore.overridable(Config.class, TYPE, "Git Config Remote");
 
     public static final class Handler extends NamedResourceHandler<Config> {
         public Handler(GatewayContext context) {
@@ -88,11 +85,7 @@ public class GitConfigRemoteRecord {
     public void save() {
         try {
             Config c = new Config(SINGLETON_ID, uri, branch, sshKeyId, httpsCredentialId);
-            if (handler.findResource(SINGLETON_NAME).isPresent()) {
-                handler.modify(SINGLETON_NAME, c).join();
-            } else {
-                handler.create(SINGLETON_NAME, c).join();
-            }
+            ModeStore.save(handler, META, SINGLETON_NAME, c);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -113,5 +106,19 @@ public class GitConfigRemoteRecord {
         return handler.findResource(SINGLETON_NAME)
                 .map(d -> new GitConfigRemoteRecord(d.config()))
                 .orElse(null);
+    }
+
+    /** Where this record's effective value comes from: core, a mode, or null when unsaved. */
+    public String definedIn() {
+        return ModeStore.definedIn(TYPE, SINGLETON_NAME);
+    }
+
+    /** Deletes the active mode's override of this record; false when there is none. */
+    public boolean resetToCore() {
+        try {
+            return ModeStore.reset(handler, TYPE, SINGLETON_NAME);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

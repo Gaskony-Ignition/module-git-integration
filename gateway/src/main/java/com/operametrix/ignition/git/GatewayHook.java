@@ -8,7 +8,11 @@ import com.operametrix.ignition.git.automation.GitEvents;
 import com.operametrix.ignition.git.automation.SyncScheduler;
 import com.operametrix.ignition.git.records.GitConfigRemoteRecord;
 import com.operametrix.ignition.git.records.GitProjectsConfigRecord;
+import com.operametrix.ignition.git.records.GitPolicy;
+import com.operametrix.ignition.git.records.GitPolicyRecord;
 import com.operametrix.ignition.git.records.GitRunnerRecord;
+import com.operametrix.ignition.git.records.ModeStore;
+import com.operametrix.ignition.git.managers.PolicyGate;
 import com.operametrix.ignition.git.records.GitSyncRecord;
 import com.operametrix.ignition.git.records.GitRemoteCredentialsRecord;
 import com.operametrix.ignition.git.records.GitReposUsersRecord;
@@ -79,6 +83,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     private GitConfigRemoteRecord.Handler configRemoteHandler;
     private GitSyncRecord.Handler syncHandler;
     private GitRunnerRecord.Handler runnerHandler;
+    private GitPolicyRecord.Handler policyHandler;
     private ConfigAutoCommitter autoCommitter;
 
     /** Gateway context, available after {@link #setup(GatewayContext)} has run. */
@@ -100,6 +105,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         registry.register(GitConfigRemoteRecord.META);
         registry.register(GitSyncRecord.META);
         registry.register(GitRunnerRecord.META);
+        registry.register(GitPolicyRecord.META);
         // Metas for types this module no longer registers a live handler for, so the retired
         // resources under them can be found and deleted once in startup() — see the class javadoc.
         RetiredResourceCleanup.registerMetas(registry);
@@ -113,6 +119,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         configRemoteHandler = new GitConfigRemoteRecord.Handler(context);
         syncHandler = new GitSyncRecord.Handler(context);
         runnerHandler = new GitRunnerRecord.Handler(context);
+        policyHandler = new GitPolicyRecord.Handler(context);
 
         GitProjectsConfigRecord.setHandler(projectHandler);
         GitReposUsersRecord.setHandler(repoUserHandler);
@@ -122,6 +129,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         GitConfigRemoteRecord.setHandler(configRemoteHandler);
         GitSyncRecord.setHandler(syncHandler);
         GitRunnerRecord.setHandler(runnerHandler);
+        GitPolicyRecord.setHandler(policyHandler);
 
         scriptModule = new GatewayScriptModule(context);
 
@@ -153,6 +161,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         configRemoteHandler.startup();
         syncHandler.startup();
         runnerHandler.startup();
+        policyHandler.startup();
 
         // 3.5.0 handed Release to every project folder on a gateway whose runner was on. A stored
         // delivery is indistinguishable from a chosen one, so 3.7.0 forgets them all once and never
@@ -177,6 +186,21 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
         } catch (Exception e) {
             logger.error("Could not restrict the config repository to config/; check the Git Ignore tab.", e);
+        }
+
+        // 4.1.0: the Git policy is versioned with the config (every other record stays out), and a
+        // gateway always has one in core so a deployment mode has something to override.
+        try {
+            if (DataDirGitManager.versionPolicyOnce()) {
+                logger.info("Config repository now versions the Git policy.");
+            }
+        } catch (Exception e) {
+            logger.error("Could not version the Git policy; check the Git Ignore tab.", e);
+        }
+        try {
+            GitPolicyRecord.ensureCore();
+        } catch (Exception e) {
+            logger.error("Could not write the default Git policy.", e);
         }
 
         // Scheduled sync. Inert until a project has a sync record configured, so starting it
@@ -221,6 +245,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         SyncScheduler.shutdown();
         CredentialCheck.shutdown();
         if (runnerHandler != null) runnerHandler.shutdown();
+        if (policyHandler != null) policyHandler.shutdown();
         if (syncHandler != null) syncHandler.shutdown();
         if (autoCommitter != null) {
             context.getConfigurationManager().removeListener(autoCommitter);
@@ -305,7 +330,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
         routes.newRoute("/remote").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
-                .handler(this::handleSaveRemote).mount();
+                .handler(scoped(this::handleSaveRemote)).mount();
 
         routes.newRoute("/remote-remove").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
@@ -321,7 +346,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
         routes.newRoute("/credentials").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
-                .handler(this::handleAddCredential).mount();
+                .handler(scoped(this::handleAddCredential)).mount();
 
         routes.newRoute("/credential-remove").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
@@ -337,7 +362,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
         routes.newRoute("/project-init").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
-                .handler(this::handleProjectInit).mount();
+                .handler(scoped(this::handleProjectInit)).mount();
 
         routes.newRoute("/project-remote").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
@@ -367,7 +392,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
         routes.newRoute("/delivery").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
-                .handler(this::handleSaveDelivery).mount();
+                .handler(scoped(this::handleSaveDelivery)).mount();
 
         routes.newRoute("/sync-now").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
@@ -404,7 +429,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
         routes.newRoute("/runner").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
-                .handler(this::handleSaveRunner).mount();
+                .handler(scoped(this::handleSaveRunner)).mount();
 
         // OPEN_ROUTE on purpose and uniquely: a workflow step has no gateway session and no way
         // to obtain the X-CSRF-Token that requirePermission's strategy demands, so the route
@@ -444,6 +469,12 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         routes.newRoute("/branch-checkout").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleBranchCheckout).mount();
+        routes.newRoute("/policy").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(scoped(this::handleSavePolicy)).mount();
+        routes.newRoute("/mode-reset").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleModeReset).mount();
     }
 
     /**
@@ -509,6 +540,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             // page. Nothing else the UI fetches is both unconditional and uncached.
             o.addProperty("version", moduleVersion());
             o.addProperty("layout", GitManager.combined() ? "combined" : "separate");
+            o.add("policy", policyJson());
             JsonArray changes = new JsonArray();
             boolean dirty = false;
             if (init) {
@@ -693,6 +725,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             project = optString(body, "project");
             config = "config".equals(optString(body, "repo"));
             branch = optString(body, "branch");
+            PolicyGate.check(PolicyGate.Action.BRANCH_SWITCH);
             if (branch == null || branch.isBlank()) {
                 throw new RuntimeException("A branch is required.");
             }
@@ -872,6 +905,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             if (remote != null) {
                 o.addProperty("uri", remote.getUri());
                 o.addProperty("branch", remote.getBranch());
+                o.addProperty("from", remote.definedIn());
                 // Secret prefill: mode + (referenced) provider/secret + (https) username. The
                 // embedded secret itself is never returned — the drawer leaves it blank to keep it.
                 SecretConfig secret = null;
@@ -943,6 +977,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 c.addProperty("label", key.getKeyName());
                 c.addProperty("name", key.getKeyName());
                 c.add("check", checkJson(CredentialCheck.get("SSH", key.getId())));
+                c.addProperty("from", key.definedIn());
                 arr.add(c);
             }
             for (GitUserHttpsCredentialRecord cred : GitUserHttpsCredentialRecord.listAll()) {
@@ -953,6 +988,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 c.addProperty("host", cred.getHostPattern());
                 c.addProperty("username", cred.getUserName());
                 c.add("check", checkJson(CredentialCheck.get("HTTPS", cred.getId())));
+                c.addProperty("from", cred.definedIn());
                 arr.add(c);
             }
             JsonObject o = new JsonObject();
@@ -1019,6 +1055,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             if (uri == null || uri.isBlank()) {
                 throw new RuntimeException("A repository URI is required.");
             }
+            PolicyGate.checkHost(uri.trim());
             String branch = optString(body, "branch");
             if (branch == null || branch.isBlank()) {
                 branch = "main";
@@ -1119,6 +1156,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         try {
             JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
             String uri = optString(body, "uri");
+            PolicyGate.checkHost(uri);
             boolean ssh = uri != null && !uri.trim().toLowerCase().startsWith("http");
             boolean reference = "reference".equalsIgnoreCase(optString(body, "mode"));
             String username = optString(body, "username");
@@ -1320,6 +1358,153 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 ? body.get(key).getAsLong() : 0L;
     }
 
+    // ── Deployment modes and the Git policy (4.1.0) ────────────────────────────────────────────
+
+    private interface Handler {
+        Object handle(RequestContext req, HttpServletResponse resp);
+    }
+
+    /**
+     * A save route whose record writes go to {@code ?saveTo=} — core or the active mode. Left out,
+     * each record is saved where it is defined now. From the query string, never the body: the
+     * handlers read the body themselves.
+     */
+    private com.inductiveautomation.ignition.gateway.dataroutes.RouteHandler scoped(Handler h) {
+        return (req, resp) -> {
+            String target;
+            try {
+                target = ModeStore.target(queryParam(req, "saveTo"));
+            } catch (Exception e) {
+                return error(resp, e);
+            }
+            return ModeStore.writingTo(target, () -> h.handle(req, resp));
+        };
+    }
+
+    private static String queryParam(RequestContext req, String name) {
+        String q = req.getRequest().getQueryString();
+        if (q == null) {
+            return null;
+        }
+        for (String pair : q.split("&")) {
+            int eq = pair.indexOf('=');
+            String k = eq < 0 ? pair : pair.substring(0, eq);
+            if (k.equals(name)) {
+                return java.net.URLDecoder.decode(eq < 0 ? "" : pair.substring(eq + 1),
+                        java.nio.charset.StandardCharsets.UTF_8);
+            }
+        }
+        return null;
+    }
+
+    /** The active mode, the policy's fields with where they come from, and what it refuses. */
+    private static JsonObject policyJson() {
+        JsonObject o = new JsonObject();
+        String mode = ModeStore.activeMode().orElse(null);
+        o.addProperty("mode", mode);
+        o.addProperty("from", GitPolicyRecord.definedIn());
+        GitPolicy p = GitPolicyRecord.get();
+        o.addProperty("pushAllowed", p.push());
+        o.addProperty("designerCommit", p.commit());
+        o.addProperty("branchSwitch", p.branches());
+        o.addProperty("layoutSwitch", p.layout());
+        o.addProperty("forcePushAllowed", p.forcePush());
+        JsonArray deliveries = new JsonArray();
+        p.deliveries().forEach(deliveries::add);
+        o.add("deliveryModes", deliveries);
+        JsonArray hosts = new JsonArray();
+        p.hosts().forEach(hosts::add);
+        o.add("allowedRemoteHosts", hosts);
+        JsonObject refused = new JsonObject();
+        for (PolicyGate.Action a : PolicyGate.Action.values()) {
+            PolicyGate.Refused r = PolicyGate.decide(p, mode, a);
+            if (r != null) {
+                refused.addProperty(a.name(), r.getMessage());
+            }
+        }
+        for (String d : GitPolicy.DELIVERY_MODES) {
+            PolicyGate.Refused r = PolicyGate.decideDelivery(p, mode, d);
+            if (r != null) {
+                refused.addProperty("delivery:" + d, r.getMessage());
+            }
+        }
+        o.add("refused", refused);
+        return o;
+    }
+
+    private static List<String> trimmed(List<String> in) {
+        return in.stream().map(String::trim).filter(v -> !v.isEmpty()).toList();
+    }
+
+    private Object handleSavePolicy(RequestContext req, HttpServletResponse resp) {
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            // A field left out stays at its default (null), never "off".
+            java.util.function.Function<String, Boolean> flag = k ->
+                    body.has(k) && !body.get(k).isJsonNull() ? body.get(k).getAsBoolean() : null;
+            List<String> deliveries = body.has("deliveryModes") ? trimmed(stringList(body, "deliveryModes")) : null;
+            for (String d : deliveries == null ? List.<String>of() : deliveries) {
+                if (!GitPolicy.DELIVERY_MODES.contains(d)) {
+                    throw new IllegalArgumentException("Unknown delivery mode '" + d + "'.");
+                }
+            }
+            GitPolicyRecord.save(new GitPolicy(flag.apply("pushAllowed"),
+                    flag.apply("designerCommit"), flag.apply("branchSwitch"),
+                    flag.apply("layoutSwitch"), deliveries, trimmed(stringList(body, "allowedRemoteHosts")),
+                    flag.apply("forcePushAllowed")));
+            DataDirGitManager.commitAllIfDirty("Git policy changed");
+            return ok();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    /**
+     * Deletes the active mode's override of one record so core's value applies:
+     * {@code {"type":"policy"|"remote"|"runner"|"sync"|"credential", "id", "credType"}}.
+     */
+    private Object handleModeReset(RequestContext req, HttpServletResponse resp) {
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            String type = optString(body, "type");
+            boolean done;
+            switch (type == null ? "" : type) {
+                case "policy" -> done = GitPolicyRecord.reset();
+                case "remote" -> {
+                    GitConfigRemoteRecord r = GitConfigRemoteRecord.get();
+                    done = r != null && r.resetToCore();
+                }
+                case "runner" -> done = GitRunnerRecord.get().resetToCore();
+                case "sync" -> {
+                    GitSyncRecord r = GitSyncRecord.findByProject(optString(body, "project"));
+                    done = r != null && r.resetToCore();
+                }
+                case "credential" -> {
+                    long id = optLong(body, "id");
+                    if ("SSH".equalsIgnoreCase(optString(body, "credType"))) {
+                        GitUserSshKeyRecord r = GitUserSshKeyRecord.findById(id);
+                        done = r != null && r.resetToCore();
+                    } else {
+                        GitUserHttpsCredentialRecord r = GitUserHttpsCredentialRecord.findById(id);
+                        done = r != null && r.resetToCore();
+                    }
+                }
+                default -> throw new IllegalArgumentException("Unknown record type '" + type + "'.");
+            }
+            if (!done) {
+                throw new IllegalArgumentException("That record has no override in the active mode.");
+            }
+            // The config remote resolves differently now; point origin at it before anything runs.
+            if ("remote".equals(type)) {
+                DataDirGitManager.resyncOrigin();
+            }
+            DataDirGitManager.commitAllIfDirty("Reset " + type + " to core");
+            return ok();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
     private static String ok() {
         JsonObject o = new JsonObject();
         o.addProperty("ok", true);
@@ -1381,6 +1566,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
             int interval = body.has("intervalSeconds") && !body.get("intervalSeconds").isJsonNull()
                     ? body.get("intervalSeconds").getAsInt() : ConfigSync.DEFAULT_INTERVAL_SECONDS;
+            PolicyGate.checkDelivery(optString(body, "mode"));
             ConfigSync.save(optString(body, "mode"), optString(body, "branch"), interval);
             return ok();
         } catch (Exception e) {
@@ -1401,8 +1587,18 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     }
 
     private String error(HttpServletResponse resp, Exception e) {
-        logger.error("Config-versioning route error", e);
-        resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        if (e instanceof PolicyGate.Refused) {
+            // Expected, and already worded for the reader: no stack trace in the gateway log.
+            logger.info("Refused by the Git policy: {}", e.getMessage());
+            resp.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        } else if (e instanceof IllegalArgumentException) {
+            // A request the gateway cannot act on (an unknown mode or record type): the caller's.
+            logger.warn("Config-versioning route refused a request", e);
+            resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+        } else {
+            logger.error("Config-versioning route error", e);
+            resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        }
         JsonObject o = new JsonObject();
         o.addProperty("error", e.getMessage() == null ? e.toString() : e.getMessage());
         return o.toString();
@@ -1600,6 +1796,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.addProperty("syncIntervalSeconds", sync == null
                         ? GitSyncRecord.DEFAULT_INTERVAL_SECONDS : sync.getIntervalSeconds());
                 o.addProperty("syncUser", sync == null ? "" : sync.getIgnitionUser());
+                o.addProperty("syncFrom", sync == null ? null : sync.definedIn());
                 arr.add(o);
             }
             JsonObject out = new JsonObject();
@@ -1694,6 +1891,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             if (url == null || url.isBlank()) {
                 ok = scriptModule.initializeLocalProject(project, actor);
             } else {
+                PolicyGate.checkHost(url.trim());
                 long sshKeyId = body.has("sshKeyId") && !body.get("sshKeyId").isJsonNull()
                         ? body.get("sshKeyId").getAsLong() : 0L;
                 long httpsId = body.has("httpsCredentialId") && !body.get("httpsCredentialId").isJsonNull()
@@ -1868,6 +2066,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 .contains(delivery)) {
             throw new RuntimeException("Unknown delivery '" + delivery + "'.");
         }
+        PolicyGate.checkDelivery(delivery);
         return delivery;
     }
 
@@ -1947,6 +2146,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             o.addProperty("enabled", cfg.isEnabled());
             // Never the token itself: it is shown once, when generated.
             o.addProperty("hasToken", cfg.hasToken());
+            o.addProperty("from", cfg.definedIn());
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);

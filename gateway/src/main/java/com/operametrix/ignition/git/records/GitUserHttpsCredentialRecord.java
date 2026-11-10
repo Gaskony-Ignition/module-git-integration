@@ -30,10 +30,7 @@ public class GitUserHttpsCredentialRecord {
             new ResourceType(GitProjectsConfigRecord.MODULE_ID, "git-user-https-credential");
 
     public static final ResourceTypeMeta<Config> META =
-            ResourceTypeMeta.newBuilder(Config.class)
-                    .resourceType(TYPE)
-                    .categoryName("Git User HTTPS Credentials")
-                    .build();
+            ModeStore.overridable(Config.class, TYPE, "Git User HTTPS Credentials");
 
     public static final class Handler extends NamedResourceHandler<Config> {
         public Handler(GatewayContext context) {
@@ -156,11 +153,7 @@ public class GitUserHttpsCredentialRecord {
                 }
                 Config c = new Config(id, ignitionUser, hostPattern, userName, password);
                 String name = String.valueOf(id);
-                if (handler.findResource(name).isPresent()) {
-                    handler.modify(name, c).join();
-                } else {
-                    handler.create(name, c).join();
-                }
+                ModeStore.save(handler, META, name, c);
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -216,5 +209,19 @@ public class GitUserHttpsCredentialRecord {
             }
         }
         return out;
+    }
+
+    /** Where this record's effective value comes from: core, a mode, or null when unsaved. */
+    public String definedIn() {
+        return ModeStore.definedIn(TYPE, String.valueOf(id));
+    }
+
+    /** Deletes the active mode's override of this record; false when there is none. */
+    public boolean resetToCore() {
+        try {
+            return ModeStore.reset(handler, TYPE, String.valueOf(id));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

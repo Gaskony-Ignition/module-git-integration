@@ -9,7 +9,6 @@ import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.LsRemoteCommand;
 import org.eclipse.jgit.api.PushCommand;
-import org.eclipse.jgit.api.RemoteSetUrlCommand;
 import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.dircache.DirCache;
@@ -108,7 +107,7 @@ public class DataDirGitManager {
                 stageScope(git, false);
                 // Authored as the gateway (like the auto-commits), not the acting web user, so the
                 // whole config history is uniformly attributed to the gateway.
-                git.commit().setMessage("Initial config-as-code commit").setAuthor(gatewayAuthor(), "").call();
+                git.commit().setMessage(PolicyGate.trailer("Initial config-as-code commit")).setAuthor(gatewayAuthor(), "").call();
             } catch (Exception e) {
                 logger.error("Error initializing config versioning repo", e);
                 throw new RuntimeException(e);
@@ -261,8 +260,8 @@ public class DataDirGitManager {
                         rm.call();
                     }
                     git.add().addFilepattern(".gitignore").call();
-                    git.commit().setMessage("Only config/ is versioned by default ("
-                                    + untracked.size() + " data-root files untracked)")
+                    git.commit().setMessage(PolicyGate.trailer("Only config/ is versioned by default ("
+                                    + untracked.size() + " data-root files untracked)"))
                             .setAuthor(gatewayAuthor(), "").call();
                 }
                 Files.writeString(dataDir().resolve(ROOT_DENIED_MARKER),
@@ -272,6 +271,45 @@ public class DataDirGitManager {
                 throw new RuntimeException(e);
             }
             return untracked;
+        }
+    }
+
+    private static final String POLICY_VERSIONED_MARKER = ".git-module-policy-versioned";
+
+    /**
+     * 4.1.0, once: the records rule in an existing {@code .gitignore} is rewritten so the Git policy
+     * is versioned and every other record of this module stays out. The marker stops it running
+     * again, so a user who later edits those lines keeps their edit.
+     *
+     * @return whether the file was rewritten
+     */
+    public static boolean versionPolicyOnce() {
+        synchronized (DATA_DIR_LOCK) {
+            if (!isInitialized() || Files.exists(dataDir().resolve(POLICY_VERSIONED_MARKER))) {
+                return false;
+            }
+            boolean changed = false;
+            try {
+                Path gitignore = dataDir().resolve(".gitignore");
+                List<String> lines = Files.exists(gitignore) ? Files.readAllLines(gitignore) : List.of();
+                List<String> next = IgnoreRules.versionPolicy(lines);
+                if (next != null) {
+                    writeIgnoreFile(String.join("\n", next));
+                    try (Git git = GitManager.getGit(dataDir())) {
+                        git.add().addFilepattern(".gitignore").call();
+                        git.commit().setOnly(".gitignore")
+                                .setMessage(PolicyGate.trailer("Version the Git policy with the config"))
+                                .setAuthor(gatewayAuthor(), "").call();
+                    }
+                    changed = true;
+                }
+                Files.writeString(dataDir().resolve(POLICY_VERSIONED_MARKER),
+                        "Git policy carve-out added by Git Integration 4.1.0.\n");
+            } catch (Exception e) {
+                logger.error("Could not version the Git policy; check the Git Ignore tab.", e);
+                throw new RuntimeException(e);
+            }
+            return changed;
         }
     }
 
@@ -289,7 +327,7 @@ public class DataDirGitManager {
             }
             List<String> changed = getStatus().stream().map(ConfigChange::path).toList();
             try (Git git = GitManager.getGit(dataDir())) {
-                CommitCommand cc = git.commit().setMessage(message).setAuthor(gatewayAuthor(), "");
+                CommitCommand cc = git.commit().setMessage(PolicyGate.trailer(message)).setAuthor(gatewayAuthor(), "");
                 if (GitManager.combined()) {
                     // The same repository holds every project; stage exactly the config changes,
                     // so a Designer's uncommitted work is never swept into an auto-commit. A staged
@@ -372,49 +410,62 @@ public class DataDirGitManager {
             throw new RuntimeException("Branch cannot be empty.");
         }
         synchronized (DATA_DIR_LOCK) {
-            try (Git git = GitManager.getGit(dataDir())) {
-                URIish urIish = new URIish(uri.trim());
-                if (git.remoteList().call().stream().anyMatch(r -> ORIGIN.equals(r.getName()))) {
-                    RemoteSetUrlCommand setUrl = git.remoteSetUrl();
-                    setUrl.setRemoteName(ORIGIN);
-                    setUrl.setRemoteUri(urIish);
-                    setUrl.call();
-                } else {
-                    git.remoteAdd().setName(ORIGIN).setUri(urIish).call();
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
             GitConfigRemoteRecord record = GitConfigRemoteRecord.get();
             if (record == null) {
                 record = new GitConfigRemoteRecord();
+            } else if (isInitialized()) {
+                try (Git git = GitManager.getGit(dataDir())) {
+                    OriginSync.rememberIfUnset(git, record.getBranch());
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
             }
-            repointUpstreams(record.getBranch(), branch.trim());
             record.setUri(uri.trim());
             record.setBranch(branch.trim());
             record.setSshKeyId(sshKeyId);
             record.setHttpsCredentialId(httpsCredentialId);
             record.save();
+            // Origin follows the EFFECTIVE record, which is not the one just saved when it went
+            // to core under an active mode's override.
+            if (!isInitialized()) {
+                return;
+            }
+            try (Git git = GitManager.getGit(dataDir())) {
+                GitConfigRemoteRecord effective = GitConfigRemoteRecord.get();
+                if (effective != null) {
+                    syncOrigin(git, effective);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
-    /** A branch that pushed to the old configured branch pushes to the new one. */
-    private static void repointUpstreams(String oldBranch, String newBranch) {
-        if (oldBranch == null || oldBranch.isBlank() || oldBranch.equals(newBranch)) {
+    /** Origin from the effective record; see {@link OriginSync}. */
+    static void syncOrigin(Git git, GitConfigRemoteRecord remote) throws IOException {
+        OriginSync.apply(git, remote.getUri(), remote.getBranch());
+    }
+
+    /** {@link #syncOrigin} from outside, after the effective record changed (a reset to core). */
+    public static void resyncOrigin() {
+        GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+        if (remote == null || !isInitialized()) {
             return;
         }
-        try (Git git = GitManager.getGit(dataDir())) {
-            var c = git.getRepository().getConfig();
-            for (String b : c.getSubsections("branch")) {
-                if (ORIGIN.equals(c.getString("branch", b, "remote"))
-                        && (Constants.R_HEADS + oldBranch).equals(c.getString("branch", b, "merge"))) {
-                    c.setString("branch", b, "merge", Constants.R_HEADS + newBranch);
-                }
+        synchronized (DATA_DIR_LOCK) {
+            try (Git git = GitManager.getGit(dataDir())) {
+                syncOrigin(git, remote);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
             }
-            c.save();
-        } catch (Exception e) {
-            logger.warn("Could not move branch upstreams to " + newBranch, e);
         }
+    }
+
+    /** Origin set from the record, then the record's credential — never one without the other. */
+    private static void authOrigin(Git git, org.eclipse.jgit.api.TransportCommand<?, ?> cmd,
+                                   GitConfigRemoteRecord remote) throws Exception {
+        syncOrigin(git, remote);
+        GitManager.setAuthenticationFromIds(cmd, remote.getUri(), remote.getSshKeyId(), remote.getHttpsCredentialId());
     }
 
     public static void removeRemote() {
@@ -517,6 +568,7 @@ public class DataDirGitManager {
      * @return {@code [local branch, remote branch]}
      */
     public static String[] push() {
+        PolicyGate.check(PolicyGate.Action.PUSH);
         GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
         if (remote == null) {
             throw new RuntimeException("No remote configured.");
@@ -544,8 +596,7 @@ public class DataDirGitManager {
                 PushCommand push = git.push()
                         .setRemote(ORIGIN)
                         .setRefSpecs(new RefSpec("refs/heads/" + local + ":refs/heads/" + target));
-                GitManager.setAuthenticationFromIds(push, remote.getUri(),
-                        remote.getSshKeyId(), remote.getHttpsCredentialId());
+                authOrigin(git, push, remote);
                 for (PushResult result : push.call()) {
                     for (RemoteRefUpdate update : result.getRemoteUpdates()) {
                         RemoteRefUpdate.Status st = update.getStatus();
@@ -578,6 +629,10 @@ public class DataDirGitManager {
                 lastPushTime = System.currentTimeMillis();
                 lastPushError = null;
                 return new String[] {local, target};
+            } catch (PolicyGate.Refused e) {
+                lastPushTime = System.currentTimeMillis();
+                lastPushError = e.getMessage();
+                throw e;
             } catch (Exception e) {
                 String friendly = friendlyPushError(e);
                 lastPushTime = System.currentTimeMillis();
@@ -699,10 +754,19 @@ public class DataDirGitManager {
 
     /** Validate URI + credential with an ls-remote — touches no local or remote state. */
     public static void testRemote(String uri, long sshKeyId, long httpsCredentialId) {
+        GitConfigRemoteRecord saved = GitConfigRemoteRecord.get();
+        String mismatch = saved == null ? null
+                : PolicyGate.credentialMismatch(PolicyGate.hostOf(saved.getUri()), uri);
+        if (mismatch != null) {
+            throw new RuntimeException("The saved credential belongs to " + PolicyGate.hostOf(saved.getUri())
+                    + "; enter the secret again to test " + PolicyGate.hostOf(uri) + ".");
+        }
         try {
             LsRemoteCommand lsRemote = Git.lsRemoteRepository().setRemote(uri).setHeads(true);
             GitManager.setAuthenticationFromIds(lsRemote, uri, sshKeyId, httpsCredentialId);
             lsRemote.call();
+        } catch (PolicyGate.Refused e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
         }
@@ -715,6 +779,8 @@ public class DataDirGitManager {
             LsRemoteCommand lsRemote = Git.lsRemoteRepository().setRemote(uri).setHeads(true);
             GitManager.setAuthenticationRaw(lsRemote, uri, sshKeyPlaintext, httpsUser, httpsPassword);
             lsRemote.call();
+        } catch (PolicyGate.Refused e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
         }
@@ -760,8 +826,7 @@ public class DataDirGitManager {
 
                     FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
                             .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
-                    GitManager.setAuthenticationFromIds(fetch, remote.getUri(),
-                            remote.getSshKeyId(), remote.getHttpsCredentialId());
+                    authOrigin(git, fetch, remote);
                     fetch.call();
 
                     ObjectId remoteId = repo.resolve(trackingRef(branch));
@@ -853,8 +918,7 @@ public class DataDirGitManager {
 
                 FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
                         .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
-                GitManager.setAuthenticationFromIds(fetch, remote.getUri(),
-                        remote.getSshKeyId(), remote.getHttpsCredentialId());
+                authOrigin(git, fetch, remote);
                 fetch.call();
 
                 ObjectId tip = repo.resolve(trackingRef(branch));
@@ -981,6 +1045,7 @@ public class DataDirGitManager {
      * — a project's Designer work — refuses the switch and changes nothing.
      */
     public static LayoutSwitch.Result switchLayout(RepoLocator.Layout target, boolean restoreHistory, String user) {
+        PolicyGate.check(PolicyGate.Action.LAYOUT_SWITCH);
         if (!isInitialized()) {
             throw new RuntimeException("Config versioning is not initialised; initialise it first.");
         }
@@ -1055,8 +1120,7 @@ public class DataDirGitManager {
 
                 FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
                         .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
-                GitManager.setAuthenticationFromIds(fetch, remote.getUri(),
-                        remote.getSshKeyId(), remote.getHttpsCredentialId());
+                authOrigin(git, fetch, remote);
                 fetch.call();
                 ObjectId tip = repo.resolve(trackingRef(branch));
                 if (tip == null) {
@@ -1079,7 +1143,7 @@ public class DataDirGitManager {
                                         + " gateway; not applied (Sync — replace follows it)");
                             }
                         }
-                        var merge = git.merge().include(tip).setMessage("Merge " + ORIGIN + "/" + branch).call();
+                        var merge = git.merge().include(tip).setMessage(PolicyGate.trailer("Merge " + ORIGIN + "/" + branch)).call();
                         if (!merge.getMergeStatus().isSuccessful()) {
                             git.reset().setMode(ResetCommand.ResetType.HARD).call();
                             throw new RuntimeException("Pull failed: merge " + merge.getMergeStatus()
@@ -1162,7 +1226,7 @@ public class DataDirGitManager {
                     logger.infof("Restore to %s produced no changes; skipping commit.", shortHash);
                     return;
                 }
-                CommitCommand commit = git.commit().setMessage("Restore config to " + shortHash);
+                CommitCommand commit = git.commit().setMessage(PolicyGate.trailer("Restore config to " + shortHash));
                 commit.setAuthor(actingUser, GitManager.resolveUserEmail(actingUser));
                 commit.call();
             } catch (Exception e) {

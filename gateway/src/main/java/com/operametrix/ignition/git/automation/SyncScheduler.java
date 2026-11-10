@@ -142,6 +142,7 @@ public final class SyncScheduler {
             return "already running";
         }
         try {
+            com.operametrix.ignition.git.managers.PolicyGate.checkDelivery(cfg.isReplace() ? "replace" : "pull");
             return run(cfg);
         } catch (Exception e) {
             logger.warn("Git sync failed for project '{}'.", project, e);

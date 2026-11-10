@@ -182,6 +182,13 @@ public final class RunnerTrigger {
             return "there is no project '" + project + "' on this gateway; create it, then set its"
                     + " delivery on the Projects tab";
         }
+        com.operametrix.ignition.git.managers.PolicyGate.Refused policy =
+                com.operametrix.ignition.git.managers.PolicyGate.decideDelivery(
+                        com.operametrix.ignition.git.records.GitPolicyRecord.get(),
+                        com.operametrix.ignition.git.records.ModeStore.activeMode().orElse(null), "runner");
+        if (policy != null) {
+            return policy.getMessage();
+        }
         if (!mode.equals(GitRunnerRecord.get().chosenMode(project))) {
             return "'" + project + "' is not set to runner "
                     + (GitRunnerRecord.MODE_RELEASE.equals(mode) ? "release" : "repo updates")

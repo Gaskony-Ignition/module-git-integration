@@ -183,7 +183,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                     }
                     ConfigAutoCommitter.hold(30_000);
                     MergeResult merge = git.merge().include(tip)
-                            .setMessage("Merge " + remoteName + "/" + target).call();
+                            .setMessage(PolicyGate.trailer("Merge " + remoteName + "/" + target)).call();
                     if (merge.getMergeStatus() == MergeResult.MergeStatus.CONFLICTING) {
                         List<String> files = new ArrayList<>();
                         for (String f : git.status().call().getConflicting()) {
@@ -283,6 +283,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     private boolean doPush(String projectName, String userName, String remoteName, boolean pushAllBranches, boolean pushTags, boolean forcePush) throws Exception {
+        PolicyGate.check(forcePush ? PolicyGate.Action.FORCE_PUSH : PolicyGate.Action.PUSH);
         if (!projectHasRemote(projectName)) {
             throw new RuntimeException("No remote repository configured. Add a remote before pushing.");
         }
@@ -357,6 +358,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     private boolean doCommit(String projectName, String userName, List<String> changes, String message, boolean amend) {
+        PolicyGate.check(PolicyGate.Action.DESIGNER_COMMIT);
         if (message == null || message.trim().isEmpty()) {
             throw new RuntimeException("Commit message cannot be empty.");
         }
@@ -384,7 +386,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                 git.add().setUpdate(true).addFilepattern(change).call();
             }
 
-            CommitCommand commit = git.commit().setMessage(message);
+            CommitCommand commit = git.commit().setMessage(PolicyGate.trailer(message));
             if (amend) {
                 commit.setAmend(true);
             }
@@ -646,11 +648,13 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean createBranchImpl(String projectName, String branchName) throws Exception {
+        PolicyGate.check(PolicyGate.Action.BRANCH_SWITCH);
         return GitManager.createBranch(root(projectName), branchName);
     }
 
     @Override
     protected boolean checkoutBranchImpl(String projectName, String branchName) throws Exception {
+        PolicyGate.check(PolicyGate.Action.BRANCH_SWITCH);
         RepoLocator.Repo repo = GitManager.repoFor(projectName);
         if (repo.scoped()) {
             org.eclipse.jgit.lib.ObjectId before = headOf(repo.root());
@@ -669,6 +673,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected String deleteBranchImpl(String projectName, String branchName, boolean force) throws Exception {
+        PolicyGate.check(PolicyGate.Action.BRANCH_SWITCH);
         BranchHygiene.Result r = GitManager.deleteBranch(root(projectName), branchName, force,
                 protectedBranches(projectName));
         return r.ok() ? "" : BranchDeleteResult.encode(r.kind(), r.count(), r.message());
@@ -691,6 +696,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected Dataset cleanupBranchesImpl(String projectName, List<String> branchNames) throws Exception {
+        PolicyGate.check(PolicyGate.Action.BRANCH_SWITCH);
         DatasetBuilder builder = new DatasetBuilder();
         builder.colNames(List.of("branch", "ok", "reason"));
         builder.colTypes(List.of(String.class, Boolean.class, String.class));
@@ -732,6 +738,11 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     @Override
     protected String getRepositoryLayoutImpl() {
         return GitManager.combined() ? "combined" : "separate";
+    }
+
+    @Override
+    protected List<String> getPolicyRefusalsImpl() {
+        return PolicyGate.refusals();
     }
 
     @Override
@@ -801,6 +812,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean checkoutCommitImpl(String projectName, String commitHash) throws Exception {
+        PolicyGate.check(PolicyGate.Action.BRANCH_SWITCH);
         RepoLocator.Repo repo = GitManager.repoFor(projectName);
         if (repo.scoped()) {
             org.eclipse.jgit.lib.ObjectId before = headOf(repo.root());
@@ -819,6 +831,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean revertCommitImpl(String projectName, String userName, String commitHash) throws Exception {
+        PolicyGate.check(PolicyGate.Action.DESIGNER_COMMIT);
         RepoLocator.Repo repo = GitManager.repoFor(projectName);
         boolean result;
         synchronized (GitManager.lockFor(repo)) {
@@ -833,6 +846,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     @Override
     protected boolean initializeProjectImpl(String projectName, String repoUri, String ignitionUser,
                                              long sshKeyId, long httpsCredentialId) throws Exception {
+        PolicyGate.checkHost(repoUri);
         return initializeProject(projectName, repoUri, ignitionUser, sshKeyId, httpsCredentialId, null);
     }
 
@@ -917,7 +931,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                 disableSsl(git);
                 git.add().addFilepattern(".").call();
 
-                CommitCommand commit = git.commit().setMessage("Initial commit");
+                CommitCommand commit = git.commit().setMessage(PolicyGate.trailer("Initial commit"));
                 setCommitAuthor(commit, projectName, ignitionUser);
                 commit.call();
             }
@@ -972,6 +986,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     @Override
     protected boolean addRemoteImpl(String projectName, String remoteName, String remoteUrl,
                                      String ignitionUser) throws Exception {
+        PolicyGate.checkHost(remoteUrl);
         refuseInCombined("Adding a remote");
         Path projectPath = getProjectFolderPath(projectName);
         GitManager.addRemote(projectPath, remoteName, remoteUrl);
@@ -1008,6 +1023,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     @Override
     protected boolean setRemoteUrlImpl(String projectName, String remoteName, String newUrl,
                                         String ignitionUser) throws Exception {
+        PolicyGate.checkHost(newUrl);
         refuseInCombined("Changing a remote");
         Path projectPath = getProjectFolderPath(projectName);
         GitManager.setRemoteUrl(projectPath, remoteName, newUrl);
@@ -1064,6 +1080,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean completeMergeCommitImpl(String projectName, String userName) throws Exception {
+        PolicyGate.check(PolicyGate.Action.DESIGNER_COMMIT);
         RepoLocator.Repo repo = GitManager.repoFor(projectName);
         if (repo.scoped()) {
             boolean result;
@@ -1109,10 +1126,11 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     private void setupGitFromCurrentFolder(String projectName, String userName, Git git) throws Exception {
+        PolicyGate.check(PolicyGate.Action.PUSH);
         try {
             git.add().addFilepattern(".").call();
 
-            CommitCommand commit = git.commit().setMessage("Initial commit");
+            CommitCommand commit = git.commit().setMessage(PolicyGate.trailer("Initial commit"));
             setCommitAuthor(commit, projectName, userName);
             commit.call();
 

@@ -77,4 +77,51 @@ class IgnoreRulesTest {
         assertThat(excluded("projects", true)).isTrue();
         assertThat(IgnoreRules.decide(rules, "projects/A/project.json", false).fromAncestor()).isTrue();
     }
+
+    @Test
+    void onlyTheGitPolicyOfThisModuleIsVersioned() {
+        String base = "config/resources/core/com.operametrix.ignition.git";
+        assertThat(excluded(base, true)).isFalse();
+        assertThat(excluded(base + "/git-policy", true)).isFalse();
+        assertThat(excluded(base + "/git-policy/policy/config.json", false)).isFalse();
+        assertThat(excluded("config/resources/Prod/com.operametrix.ignition.git/git-policy/policy/config.json", false))
+                .isFalse();
+        assertThat(excluded(base + "/git-config-remote", true)).isTrue();
+        assertThat(excluded(base + "/git-user-https-credential/1/config.json", false)).isTrue();
+        assertThat(excluded("config/resources/Prod/com.operametrix.ignition.git/git-runner/runner/config.json", false))
+                .isTrue();
+        // Other modules' records are untouched by the carve-out.
+        assertThat(excluded("config/resources/core/ignition/git-policy/x.json", false)).isFalse();
+    }
+
+    @Test
+    void theMigrationRewritesOnlyTheManagedLineAndIsIdempotent() {
+        List<String> old = List.of("# head", "**/db/*", "**/com.operametrix.ignition.git/", "", "/*",
+                "# --- managed by the Versioning page below this line ---", "/mine.txt");
+        List<String> once = IgnoreRules.versionPolicy(old);
+        assertThat(once).containsExactly("# head", "**/db/*", "**/com.operametrix.ignition.git/*",
+                "!**/com.operametrix.ignition.git/git-policy/", "", "/*",
+                "# --- managed by the Versioning page below this line ---", "/mine.txt");
+        assertThat(IgnoreRules.versionPolicy(once)).isNull();
+        // A user who already took the line out keeps their file as it is.
+        assertThat(IgnoreRules.versionPolicy(List.of("**/db/*", "/mine.txt"))).isNull();
+        // A new repository's template is already in the new form.
+        assertThat(IgnoreRules.versionPolicy(IgnoreRules.TEMPLATE)).isNull();
+    }
+
+    @Test
+    void aMigratedFileDecidesTheTreeLikeTheTemplate() throws Exception {
+        List<String> old = new ArrayList<>(IgnoreRules.TEMPLATE);
+        int at = old.indexOf(IgnoreRules.RECORDS_RULES.get(0));
+        old.remove(at + 1);
+        old.set(at, IgnoreRules.OLD_RECORDS_RULE);
+        Path gitignore = data.resolve(".gitignore");
+        Files.writeString(gitignore, String.join("\n", IgnoreRules.versionPolicy(old)) + "\n");
+        rules = IgnoreRules.parse(gitignore);
+        assertThat(excluded("config/resources/core/com.operametrix.ignition.git/git-policy/policy/config.json", false))
+                .isFalse();
+        assertThat(excluded("config/resources/core/com.operametrix.ignition.git/git-sync/1/config.json", false))
+                .isTrue();
+        assertThat(excluded("config/resources/core/ignition/security-levels/config.json", false)).isFalse();
+    }
 }

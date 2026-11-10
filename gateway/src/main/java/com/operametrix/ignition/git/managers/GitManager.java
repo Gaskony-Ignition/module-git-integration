@@ -133,6 +133,7 @@ public class GitManager {
      */
     public static void setAuthentication(TransportCommand<?, ?> command, String projectName,
                                           String userName, String remoteName) throws Exception {
+        Path root = repoFor(projectName).root();
         if (combined()) {
             // One remote for the whole gateway, with the credential set on the Versioning page.
             GitConfigRemoteRecord gw = GitConfigRemoteRecord.get();
@@ -140,11 +141,20 @@ public class GitManager {
                 throw new Exception("No remote is set for the gateway repository. Set one on the"
                         + " Versioning page (Configure Versioning).");
             }
+            if ("origin".equals(remoteName)) {
+                try (Git git = getGit(root)) {
+                    DataDirGitManager.syncOrigin(git, gw);
+                }
+            }
+            // A Designer can add another remote to the gateway repository; the gateway's credential
+            // must not follow it to a different host.
+            guardUrls(remoteUrls(root, remoteName), PolicyGate.hostOf(gw.getUri()));
             setAuthenticationFromIds(command, gw.getUri(), gw.getSshKeyId(), gw.getHttpsCredentialId());
             return;
         }
         GitRemoteCredentialsRecord creds = getRemoteCredentialsRecord(projectName, userName, remoteName);
-        String url = getRemoteUrl(getProjectFolderPath(projectName), remoteName);
+        List<String> urls = remoteUrls(root, remoteName);
+        String url = urls.isEmpty() ? null : urls.get(0);
         boolean isSsh = url != null && !url.toLowerCase().startsWith("http");
 
         if (isSsh) {
@@ -153,21 +163,53 @@ public class GitManager {
                 throw new Exception("No SSH credential assigned to remote '" + remoteName
                         + "'. Open the Remotes popup and pick an SSH key for this remote.");
             }
+            guardUrls(urls, null);
             command.setTransportConfigCallback(new SshTransportConfigCallback(sshKey));
         } else {
-            String[] httpsCreds = resolveHttpsCredentials(creds);
-            if (httpsCreds == null) {
+            GitUserHttpsCredentialRecord httpRecord = creds == null || creds.getHttpsCredentialId() <= 0
+                    ? null : GitUserHttpsCredentialRecord.findById(creds.getHttpsCredentialId());
+            if (httpRecord == null) {
                 throw new Exception("No HTTPS credential assigned to remote '" + remoteName
                         + "'. Open the Remotes popup and pick an HTTPS credential for this remote.");
             }
+            guardUrls(urls, httpRecord.getHostPattern());
             command.setCredentialsProvider(
-                    new UsernamePasswordCredentialsProvider(httpsCreds[0], httpsCreds[1]));
+                    new UsernamePasswordCredentialsProvider(httpRecord.getUserName(), httpRecord.getPassword()));
+        }
+    }
+
+    /** Every URL a remote contacts: its fetch URL and any push URL. */
+    static List<String> remoteUrls(Path root, String remoteName) throws Exception {
+        List<String> out = new ArrayList<>();
+        try (Git git = getGit(root)) {
+            for (RemoteConfig config : git.remoteList().call()) {
+                if (config.getName().equals(remoteName)) {
+                    config.getURIs().forEach(u -> out.add(u.toString()));
+                    config.getPushURIs().forEach(u -> out.add(u.toString()));
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Before any credential is attached: the policy's allowed hosts, and the credential's own host.
+     * Refuses rather than sending a secret somewhere it was not set up for.
+     */
+    private static void guardUrls(List<String> urls, String boundHost) throws Exception {
+        for (String u : urls) {
+            PolicyGate.checkHost(u);
+            String mismatch = PolicyGate.credentialMismatch(boundHost, u);
+            if (mismatch != null) {
+                throw new Exception(mismatch);
+            }
         }
     }
 
     /**
      * Auth from explicit credential ids — the data-dir config remote, which has no
      * project/user context (auth type follows the URL scheme, like {@link #setAuthentication}).
+     * {@code url} must be the URL the command contacts; the caller sets origin from the record first.
      */
     public static void setAuthenticationFromIds(TransportCommand<?, ?> command, String url,
                                                 long sshKeyId, long httpsCredentialId) throws Exception {
@@ -177,6 +219,7 @@ public class GitManager {
             if (keyRecord == null || keyRecord.getSSHKey() == null || keyRecord.getSSHKey().isEmpty()) {
                 throw new Exception("No SSH credential assigned to the config remote. Pick one in the Remote card.");
             }
+            guardUrls(List.of(url), null);
             command.setTransportConfigCallback(new SshTransportConfigCallback(keyRecord.getSSHKey()));
         } else {
             GitUserHttpsCredentialRecord httpRecord =
@@ -184,6 +227,7 @@ public class GitManager {
             if (httpRecord == null) {
                 throw new Exception("No HTTPS credential assigned to the config remote. Pick one in the Remote card.");
             }
+            guardUrls(url == null ? List.of() : List.of(url), httpRecord.getHostPattern());
             command.setCredentialsProvider(
                     new UsernamePasswordCredentialsProvider(httpRecord.getUserName(), httpRecord.getPassword()));
         }
@@ -196,6 +240,7 @@ public class GitManager {
     public static void setAuthenticationRaw(TransportCommand<?, ?> command, String url,
                                             String sshKeyPlaintext, String httpsUser,
                                             String httpsPassword) throws Exception {
+        PolicyGate.checkHost(url);
         boolean isSsh = url != null && !url.toLowerCase().startsWith("http");
         if (isSsh) {
             if (sshKeyPlaintext == null || sshKeyPlaintext.isEmpty()) {
@@ -215,19 +260,6 @@ public class GitManager {
         GitUserSshKeyRecord keyRecord = GitUserSshKeyRecord.findById(creds.getSshKeyId());
         return keyRecord == null ? null : keyRecord.getSSHKey();
     }
-
-    /** @return [username, password] or null if no credentials found */
-    private static String[] resolveHttpsCredentials(GitRemoteCredentialsRecord creds) {
-        if (creds == null || creds.getHttpsCredentialId() <= 0) {
-            return null;
-        }
-        GitUserHttpsCredentialRecord httpRecord =
-                GitUserHttpsCredentialRecord.findById(creds.getHttpsCredentialId());
-        return httpRecord == null
-                ? null
-                : new String[]{httpRecord.getUserName(), httpRecord.getPassword()};
-    }
-
 
     public static void setCommitAuthor(CommitCommand command, String projectName, String userName) {
         try {
@@ -1404,7 +1436,7 @@ public class GitManager {
                         status.getConflicting().size() + " unresolved conflict(s) remain.");
             }
             CommitCommand commit = git.commit();
-            commit.setMessage(readMergeMessage(git.getRepository()));
+            commit.setMessage(PolicyGate.trailer(readMergeMessage(git.getRepository())));
             setCommitAuthor(commit, projectName, userName);
             commit.call();
             return true;

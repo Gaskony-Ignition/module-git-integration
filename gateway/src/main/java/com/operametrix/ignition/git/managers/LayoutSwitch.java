@@ -181,7 +181,7 @@ public final class LayoutSwitch {
                 if (Files.isDirectory(dataDir.resolve("projects"))) {
                     gw.add().addFilepattern("projects").call();
                 }
-                commit = gw.commit().setMessage("Combine projects into gateway repo")
+                commit = gw.commit().setMessage(PolicyGate.trailer("Combine projects into gateway repo"))
                         .setAuthor(author).setCommitter(author).call().getName();
             }
             RepoLocator.writeLayout(dataDir, RepoLocator.Layout.COMBINED);
@@ -236,7 +236,7 @@ public final class LayoutSwitch {
                         g.add().setUpdate(true).addFilepattern(".").call();
                         Status s = g.status().call();
                         if (!s.getAdded().isEmpty() || !s.getChanged().isEmpty() || !s.getRemoved().isEmpty()) {
-                            g.commit().setMessage("Changes made while in the gateway repository")
+                            g.commit().setMessage(PolicyGate.trailer("Changes made while in the gateway repository"))
                                     .setAuthor(author).setCommitter(author).call();
                         }
                     }
@@ -244,7 +244,7 @@ public final class LayoutSwitch {
                     created.add(dir.resolve(".git"));
                     try (Git g = Git.init().setDirectory(dir.toFile()).call()) {
                         g.add().addFilepattern(".").call();
-                        g.commit().setMessage("Initial commit (from the gateway repository)")
+                        g.commit().setMessage(PolicyGate.trailer("Initial commit (from the gateway repository)"))
                                 .setAuthor(author).setCommitter(author).call();
                     }
                 }
@@ -265,7 +265,7 @@ public final class LayoutSwitch {
                     }
                     gw.add().addFilepattern(".gitignore").call();
                 }
-                commit = gw.commit().setMessage("Separate projects into their own repositories")
+                commit = gw.commit().setMessage(PolicyGate.trailer("Separate projects into their own repositories"))
                         .setAuthor(author).setCommitter(author).call().getName();
             }
             RepoLocator.writeLayout(dataDir, RepoLocator.Layout.SEPARATE);
