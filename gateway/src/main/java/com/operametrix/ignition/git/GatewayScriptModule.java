@@ -176,8 +176,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                     List<String> blocking = ProjectScope.blockingChanges(r, repo, tip, dirty);
                     if (!blocking.isEmpty()) {
                         throw new RuntimeException("Not pulled: the pull would change " + blocking.size()
-                                + " file(s) with uncommitted changes outside this project, in config or"
-                                + " another project's Designer. Commit or discard them first:\n"
+                                + " file(s)\nwith uncommitted changes outside this project,\nin config or"
+                                + " another project's Designer.\nCommit or discard them first:\n"
                                 + String.join("\n", blocking.subList(0, Math.min(20, blocking.size())))
                                 + (blocking.size() > 20 ? "\n..." : ""));
                     }
