@@ -2,6 +2,7 @@ package com.operametrix.ignition.git.automation;
 
 import com.operametrix.ignition.git.GatewayHook;
 import com.operametrix.ignition.git.managers.GitManager;
+import com.operametrix.ignition.git.managers.PullGuard;
 import com.operametrix.ignition.git.managers.GitProjectManager;
 import com.operametrix.ignition.git.managers.IgnitionReformat;
 import com.operametrix.ignition.git.records.GitSyncRecord;
@@ -208,8 +209,8 @@ public final class SyncScheduler {
 
             ObjectId tracked = repo.resolve("refs/remotes/" + remoteName + "/" + branch);
             if (tracked == null) {
-                throw new IllegalStateException(
-                        "remote '" + remoteName + "' has no branch '" + branch + "'");
+                // Unattended: say so and stay put; switching branches is a person's decision.
+                throw new IllegalStateException(PullGuard.missingBranch(branch, remoteName));
             }
 
             ObjectId before = repo.resolve("HEAD");

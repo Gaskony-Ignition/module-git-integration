@@ -79,6 +79,21 @@ public final class GitEvents {
      * {@code toString()} names the exception class rather than what went wrong.
      */
     public static String reason(Throwable t) {
+        // Our own messages first (they already say it plainly), then JGit's in plain words.
+        if (t.getMessage() != null && t.getMessage().contains(com.operametrix.ignition.git.PullText.GONE_PREFIX)) {
+            // The Designer's encoded "upstream gone": the log wants only its sentence.
+            String m = t.getMessage();
+            return m.substring(m.lastIndexOf('\t') + 1);
+        }
+        int d = t.getMessage() == null ? -1
+                : t.getMessage().indexOf(com.operametrix.ignition.git.managers.PullGuard.DETAILS);
+        if (d > 0) {
+            return t.getMessage().substring(0, d);
+        }
+        String plain = com.operametrix.ignition.git.managers.PullGuard.plainOrNull(t);
+        if (plain != null) {
+            return plain;
+        }
         Throwable cur = t;
         while (cur.getCause() != null && cur.getCause() != cur) {
             cur = cur.getCause();

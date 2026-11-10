@@ -3,6 +3,7 @@ package com.operametrix.ignition.git.actions;
 import com.operametrix.ignition.git.BranchDeleteResult;
 import com.operametrix.ignition.git.InitProgressDialog;
 import com.operametrix.ignition.git.PolicyRefusals;
+import com.operametrix.ignition.git.PullText;
 import com.inductiveautomation.ignition.client.util.gui.ErrorUtil;
 import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceId;
@@ -90,7 +91,7 @@ public class GitBaseAction {
                     }
                 } catch (Exception e) {
                     Throwable cause = e.getCause() != null ? e.getCause() : e;
-                    ErrorUtil.showError(cause.getMessage(), cause);
+                    showPlainError(cause);
                 } finally {
                     if (instance != null) {
                         instance.refreshCommitPanel();
@@ -119,7 +120,7 @@ public class GitBaseAction {
                     get();
                 } catch (Exception e) {
                     Throwable cause = e.getCause() != null ? e.getCause() : e;
-                    ErrorUtil.showError(cause.getMessage(), cause);
+                    showPlainError(cause);
                 } finally {
                     if (instance != null) {
                         instance.refreshCommitPanel();
@@ -132,6 +133,15 @@ public class GitBaseAction {
     }
 
     public static void handlePullAction(String remoteName, boolean importTags, boolean importTheme, boolean importImages) {
+        handlePullAction(remoteName, importTags, importTheme, importImages, null);
+    }
+
+    /**
+     * @param leftBranch a branch this pull was switched away from because its remote branch was
+     *                   deleted; once the pull succeeds, deleting it locally is offered
+     */
+    private static void handlePullAction(String remoteName, boolean importTags, boolean importTheme,
+                                         boolean importImages, String leftBranch) {
         if (!rpc.hasRemoteRepository(projectName)) {
             JOptionPane.showMessageDialog(context.getFrame(),
                     "No remote repository configured. Add a remote before pulling.",
@@ -155,6 +165,9 @@ public class GitBaseAction {
                     progress.setStatus("Syncing project to Designer...");
                     pullProjectFromGateway();
                     progress.complete();
+                    if (leftBranch != null) {
+                        SwingUtilities.invokeLater(() -> offerDeleteLeftBranch(leftBranch));
+                    }
                 } catch (Exception e) {
                     progress.complete();
                     Throwable cause = e.getCause() != null ? e.getCause() : e;
@@ -169,16 +182,21 @@ public class GitBaseAction {
                             }
                         }
                         showMergeConflictPopup(projectName, userName, conflictingFiles);
+                    } else if (exMsg.contains(PullText.GONE_PREFIX)) {
+                        String gone = exMsg.substring(exMsg.indexOf(PullText.GONE_PREFIX));
+                        SwingUtilities.invokeLater(() -> offerSwitchAfterGone(gone, remoteName,
+                                importTags, importTheme, importImages));
                     } else if (exMsg.startsWith("Not pulled:")) {
                         // ErrorUtil's dialog is a fixed 350px and cut the file list off mid-path;
                         // a message dialog grows to fit it.
                         JOptionPane.showMessageDialog(context.getFrame(), exMsg, "Pull",
                                 JOptionPane.WARNING_MESSAGE);
                     } else {
-                        ErrorUtil.showError(cause.getMessage(), cause);
+                        showPlainError(cause);
                     }
                 } finally {
                     if (instance != null) {
+                        instance.refreshBranchLabel();
                         instance.refreshCommitPanel();
                         instance.refreshHistoryPanel();
                     }
@@ -186,6 +204,131 @@ public class GitBaseAction {
             }
         }.execute();
         progress.setVisible(true);
+    }
+
+    /**
+     * The gateway's plain message, with the original exception under Details when it sent one
+     * (after {@link PullText#DETAILS}), instead of a raw JGit exception as the headline.
+     */
+    public static void showPlainError(Throwable cause) {
+        String m = cause.getMessage() == null ? cause.toString() : cause.getMessage();
+        if (m.contains("Using an existing repository")) {
+            // The layout refusal is a paragraph with the fix in it; ErrorUtil's fixed-width box cuts it.
+            JOptionPane.showMessageDialog(context.getFrame(), wrap(m, 90), "Repository layout",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        int d = m.indexOf(PullText.DETAILS);
+        if (d > 0) {
+            ErrorUtil.showError(m.substring(0, d), new Exception(m.substring(d + PullText.DETAILS.length())));
+        } else {
+            ErrorUtil.showError(m, cause);
+        }
+    }
+
+    private static String wrap(String text, int width) {
+        StringBuilder out = new StringBuilder();
+        int col = 0;
+        for (String word : text.split(" ")) {
+            if (col > 0 && col + word.length() > width) {
+                out.append('\n');
+                col = 0;
+            } else if (col > 0) {
+                out.append(' ');
+                col++;
+            }
+            out.append(word);
+            col += word.length();
+        }
+        return out.toString();
+    }
+
+    /**
+     * The checked-out branch's remote branch was deleted (usually merged). Offers to switch to the
+     * remote's default branch and pull it; switching is the Designer user's decision, never the
+     * gateway's.
+     */
+    private static void offerSwitchAfterGone(String text, String remoteName, boolean importTags,
+                                             boolean importTheme, boolean importImages) {
+        String[] p = text.substring(PullText.GONE_PREFIX.length()).split("\t", 4);
+        String branch = p[0];
+        String target = p.length > 2 ? p[2] : "";
+        String message = p.length > 3 ? p[3] : text;
+        java.awt.Frame frame = context.getFrame();
+        if (target.isEmpty()) {
+            JOptionPane.showMessageDialog(frame, message + "\n\nThe remote has no main or master branch to"
+                    + " switch to. Pick a branch with the Branch button.", "Pull", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        String refused = PolicyRefusals.reason("BRANCH_SWITCH");
+        if (refused != null) {
+            JOptionPane.showMessageDialog(frame, message + "\n\n" + refused, "Pull",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        String scope = gatewayWide()
+                ? "\n\nThis gateway keeps every project and its config in one repository, so this"
+                + " switches all of them."
+                : "";
+        Object[] options = {"Switch to " + target + " and pull", "Cancel"};
+        int choice = JOptionPane.showOptionDialog(frame, message + scope, "Pull",
+                JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE, null, options, options[0]);
+        if (choice != 0) {
+            return;
+        }
+        try {
+            closeAllEditorTabs();
+            rpc.checkoutBranch(projectName, target);
+        } catch (Exception ex) {
+            showPlainError(ex.getCause() != null ? ex.getCause() : ex);
+            return;
+        }
+        handlePullAction(remoteName, importTags, importTheme, importImages, branch);
+    }
+
+    /**
+     * After switching away from a branch whose remote branch is gone: delete it locally when it is
+     * merged (the gateway's non-force delete decides), else say what deleting it would lose.
+     */
+    private static void offerDeleteLeftBranch(String branch) {
+        java.awt.Frame frame = context.getFrame();
+        try {
+            com.inductiveautomation.ignition.common.Dataset info = rpc.getLocalBranchInfo(projectName);
+            boolean merged = false;
+            int ahead = 0;
+            boolean found = false;
+            for (int r = 0; r < info.getRowCount(); r++) {
+                if (branch.equals(info.getValueAt(r, "name"))) {
+                    found = true;
+                    merged = Boolean.TRUE.equals(info.getValueAt(r, "merged"));
+                    Object a = info.getValueAt(r, "ahead");
+                    ahead = a instanceof Number ? ((Number) a).intValue() : 0;
+                }
+            }
+            if (!found) {
+                return;
+            }
+            String current = rpc.getCurrentBranch(projectName);
+            if (!merged) {
+                JOptionPane.showMessageDialog(frame, branch + " is not merged into " + current
+                        + (ahead > 0 ? ": deleting it would lose " + ahead + " commit(s) that are on no remote" : "")
+                        + ".\nIt was kept. Delete it from the Branch list if you no longer need it.",
+                        "Pull", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            int c = JOptionPane.showConfirmDialog(frame, branch + " is merged into " + current
+                    + ".\nDelete the local branch " + branch + "?", "Pull", JOptionPane.YES_NO_OPTION);
+            if (c != JOptionPane.YES_OPTION) {
+                return;
+            }
+            BranchDeleteResult refused = BranchDeleteResult.parse(rpc.deleteBranch(projectName, branch, false));
+            if (refused != null) {
+                JOptionPane.showMessageDialog(frame, refused.message(), "Delete branch",
+                        JOptionPane.WARNING_MESSAGE);
+            }
+        } catch (Exception ex) {
+            showPlainError(ex.getCause() != null ? ex.getCause() : ex);
+        }
     }
 
     public static void handleCheckoutAction(String branchName) {
@@ -474,7 +617,7 @@ public class GitBaseAction {
                     get();
                 } catch (Exception e) {
                     Throwable cause = e.getCause() != null ? e.getCause() : e;
-                    ErrorUtil.showError(cause.getMessage(), cause);
+                    showPlainError(cause);
                 } finally {
                     if (instance != null) {
                         instance.refreshHistoryPanel();

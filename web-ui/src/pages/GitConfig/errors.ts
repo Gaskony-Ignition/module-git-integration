@@ -7,11 +7,23 @@
 
 type ToastApi = { notify: (props: any) => unknown };
 
+// The gateway puts the raw exception after this marker, behind its plain message.
+const DETAILS = "\n\nDetails: ";
+
 /** Pull the gateway's message out of an RTK Query error object, with sensible fallbacks. */
-export const errorMessage = (e: any): string =>
-  (e && e.data && e.data.error) ||
-  (e && e.error) ||
-  "The operation failed. Check the gateway logs for details.";
+export const errorMessage = (e: any): string => {
+  const m: string =
+    (e && e.data && e.data.error) ||
+    (e && e.error) ||
+    "The operation failed. Check the gateway logs for details.";
+  const d = m.indexOf(DETAILS);
+  if (d > 0) {
+    // The plain message on screen; the raw exception for whoever opens the console.
+    console.warn(m.slice(d + DETAILS.length));
+    return m.slice(0, d);
+  }
+  return m;
+};
 
 /**
  * Build a `.catch(...)` handler that shows the error as a sticky toast titled `title`.
