@@ -84,6 +84,23 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         }
     }
 
+    /**
+     * Combined: the gateway repository's branch usually has no upstream (it was made by
+     * {@code git init}, and the remote added afterwards), so pull and push use the branch set for
+     * the gateway remote, as the Versioning page's Push does. Null when the checked-out branch has
+     * an upstream of its own, or no gateway remote is set.
+     */
+    private static String gatewayBranchWithoutUpstream(Git git) throws java.io.IOException {
+        String branch = git.getRepository().getBranch();
+        if (branch != null && new org.eclipse.jgit.lib.BranchConfig(git.getRepository().getConfig(), branch)
+                .getTrackingBranch() != null) {
+            return null;
+        }
+        com.operametrix.ignition.git.records.GitConfigRemoteRecord gw =
+                com.operametrix.ignition.git.records.GitConfigRemoteRecord.get();
+        return gw == null || gw.getBranch() == null || gw.getBranch().isBlank() ? null : gw.getBranch();
+    }
+
     /** Read-only in Combined: the one remote belongs to the gateway, set on the Versioning page. */
     private static void refuseInCombined(String what) {
         if (GitManager.combined()) {
@@ -159,6 +176,10 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             synchronized (GitManager.lockFor(repo)) {
                 try (Git git = getGit(repo.root())) {
                     PullCommand pull = git.pull().setRemote(remoteName);
+                    String upstream = gatewayBranchWithoutUpstream(git);
+                    if (upstream != null) {
+                        pull.setRemoteBranchName(upstream);
+                    }
                     setAuthentication(pull, projectName, userName, remoteName);
                     PullResult result = pull.call();
                     if (!result.isSuccessful()) {
@@ -267,6 +288,11 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             PushCommand push = git.push();
             push.setRemote(remoteName);
             setAuthentication(push, projectName, userName, remoteName);
+            String upstream = GitManager.combined() ? gatewayBranchWithoutUpstream(git) : null;
+            if (upstream != null && !pushAllBranches) {
+                // The Versioning page's Push does the same: HEAD to the gateway remote's branch.
+                push.setRefSpecs(new RefSpec("HEAD:refs/heads/" + upstream));
+            }
 
             if (pushAllBranches) {
                 push.setPushAll();
