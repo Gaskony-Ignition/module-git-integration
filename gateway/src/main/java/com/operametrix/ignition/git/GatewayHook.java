@@ -538,7 +538,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 throw new RuntimeException("Unknown layout '" + layout + "'.");
             }
             LayoutSwitch.Result r = DataDirGitManager.switchLayout("combined".equals(layout)
-                    ? RepoLocator.Layout.COMBINED : RepoLocator.Layout.SEPARATE, optBool(body, "restoreHistory"));
+                    ? RepoLocator.Layout.COMBINED : RepoLocator.Layout.SEPARATE, optBool(body, "restoreHistory"),
+                    webUser(req).orElse(null));
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             o.addProperty("layout", layout);
@@ -661,6 +662,13 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         }
     }
 
+    /** The signed-in gateway user behind a page request, for the Logs tab. */
+    private static java.util.Optional<String> webUser(RequestContext req) {
+        return WebUiSession.find(req)
+                .flatMap(s -> s.getUserContext().getWebAuthUser())
+                .map(u -> u.getUserName());
+    }
+
     /** Branches the gateway delivery follows, which a gateway-wide repository must keep. */
     private static Map<String, String> gatewayGuarded() {
         Map<String, String> out = new HashMap<>();
@@ -679,7 +687,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         String project = null;
         boolean config = false;
         String branch = null;
-        String who = "Versioning page";
+        String who = webUser(req).orElse("Versioning page");
         try {
             JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
             project = optString(body, "project");

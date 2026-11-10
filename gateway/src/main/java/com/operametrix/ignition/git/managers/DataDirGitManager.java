@@ -980,7 +980,7 @@ public class DataDirGitManager {
      * committed first, as the auto-committer would within seconds anyway; anything else uncommitted
      * — a project's Designer work — refuses the switch and changes nothing.
      */
-    public static LayoutSwitch.Result switchLayout(RepoLocator.Layout target, boolean restoreHistory) {
+    public static LayoutSwitch.Result switchLayout(RepoLocator.Layout target, boolean restoreHistory, String user) {
         if (!isInitialized()) {
             throw new RuntimeException("Config versioning is not initialised; initialise it first.");
         }
@@ -1005,7 +1005,7 @@ public class DataDirGitManager {
                         }
                     }
                 }
-                GitEvents.fire(GitEvent.of("layout").config().user(gatewayAuthor()).commit(r.commit())
+                GitEvents.fire(GitEvent.of("layout").config().user(user != null ? user : gatewayAuthor()).commit(r.commit())
                         .message(target == RepoLocator.Layout.COMBINED
                                 ? "Combined " + r.projects().size() + " project(s) into the gateway repository"
                                 : "Separated " + r.projects().size() + " project(s) into their own repositories"
