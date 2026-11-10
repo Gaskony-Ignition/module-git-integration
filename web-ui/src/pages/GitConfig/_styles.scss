@@ -732,8 +732,13 @@ ul.gitcfg-hint {
   &.success {
     color: var(--white) !important; // measured 4.76:1 on --success
   }
-  &.error {
+  &.error.alt {
     color: #c81616 !important; // measured 5.24:1 on --error-10, same hue as --error
+  }
+  // The solid error chip (a gone branch, a deleted file) is filled #de1b1b, so the red above was
+  // red on red there.
+  &.error:not(.alt) {
+    color: var(--white) !important; // 6.4:1 on #de1b1b
   }
   &.warning {
     color: #7d5c00 !important; // measured 5.58:1 on --warning-10, same hue as --warning-dark
