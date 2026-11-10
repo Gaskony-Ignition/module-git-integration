@@ -57,6 +57,11 @@ const Projects = () => {
   const [branch, setBranch] = React.useState("");
   const [every, setEvery] = React.useState("300");
   const [user, setUser] = React.useState("");
+  const [initialDelivery, setInitialDelivery] = React.useState<Delivery>("off");
+
+  // Combined: one gateway repository, so the remote, branch and pulls are the gateway's. A
+  // project keeps only Off or a runner release, which replaces this one project.
+  const combined = data?.layout === "combined";
 
   const credentials = creds?.credentials ?? [];
   const projects = data?.projects ?? [];
@@ -70,7 +75,11 @@ const Projects = () => {
     setUrl(p.remoteUrl || "");
     setCredId("");
     setImagePrefix(p.imagePrefix || "");
-    setDelivery(p.delivery);
+    // A pulling delivery is kept but inactive in Combined; the drawer offers Off or release.
+    const shown =
+      combined && p.delivery !== "runner-release" ? "off" : p.delivery;
+    setDelivery(shown);
+    setInitialDelivery(shown);
     setBranch(p.syncBranch || p.branch || "");
     setEvery(String(p.syncIntervalSeconds));
     setUser(p.syncUser);
@@ -89,6 +98,18 @@ const Projects = () => {
       intervalSeconds: Number(every) || 300,
       ignitionUser: user.trim(),
     };
+
+    if (combined) {
+      if (imagePrefix !== (target.imagePrefix || "")) {
+        await setImages({ project: target.name, imagePrefix }).unwrap();
+      }
+      // Saved only when changed, so an inactive pulling delivery survives a switch back.
+      if (delivery !== initialDelivery) {
+        await saveDelivery({ project: target.name, delivery }).unwrap();
+      }
+      toasts.notifySuccess(`Saved ${target.name}`);
+      return;
+    }
 
     // One request: the gateway clones, then sets the delivery, so leaving the page mid-save
     // cannot leave the project linked with Delivery Off.
@@ -135,6 +156,9 @@ const Projects = () => {
   };
 
   const deliveryCell = (p: ProjectStatus) => {
+    if (combined && p.delivery !== "runner-release") {
+      return <span className="gitcfg-off">Gateway delivery</span>;
+    }
     if (p.delivery === "off") return <span className="gitcfg-off">Off</span>;
     const label = isSync(p.delivery)
       ? `${DELIVERY_LABEL[p.delivery]} · ${p.syncIntervalSeconds}s`
@@ -151,10 +175,19 @@ const Projects = () => {
       <div className="gitcfg-page-head">
         <div>
           <h3>Projects</h3>
-          <p>
-            Each project&apos;s repository, and how changes reach it. Delivery
-            is Off until you choose one.
-          </p>
+          {combined ? (
+            <p>
+              Every project is in the gateway repository (Combined layout). The
+              branch, remote and pulls are the gateway&apos;s, set in Configure
+              Versioning; a project&apos;s own delivery is Off or a runner
+              release.
+            </p>
+          ) : (
+            <p>
+              Each project&apos;s repository, and how changes reach it. Delivery
+              is Off until you choose one.
+            </p>
+          )}
         </div>
       </div>
 
@@ -214,7 +247,7 @@ const Projects = () => {
                     >
                       Edit
                     </Button>
-                    {isSync(p.delivery) ? (
+                    {isSync(p.delivery) && !combined ? (
                       <Button
                         colorClass="secondary"
                         disabled={syncing}
@@ -248,7 +281,13 @@ const Projects = () => {
         {target ? (
           <>
             <h4>Repository</h4>
-            {!target.versioned ? (
+            {combined ? (
+              <p className="gitcfg-hint">
+                Versioned in the gateway repository. Its remote and credential
+                are the gateway&apos;s, set in Configure Versioning.
+              </p>
+            ) : null}
+            {!target.versioned && !combined ? (
               <label className="gitcfg-check">
                 <input
                   type="checkbox"
@@ -258,7 +297,7 @@ const Projects = () => {
                 <span>Put this project under version control</span>
               </label>
             ) : null}
-            {version ? (
+            {version && !combined ? (
               <>
                 <TextInput
                   label={
@@ -334,16 +373,23 @@ const Projects = () => {
               value={delivery}
               // Without a remote only Off and a runner release are possible; the rest stay
               // listed but disabled so it is clear they exist.
-              values={(Object.keys(DELIVERY_LABEL) as Delivery[]).map((d) => ({
-                label: DELIVERY_LABEL[d],
-                value: d,
-                disabled: !hasRemote && needsRemote(d) && d !== delivery,
-              }))}
+              values={(Object.keys(DELIVERY_LABEL) as Delivery[])
+                .filter((d) => !combined || !needsRemote(d))
+                .map((d) => ({
+                  label: DELIVERY_LABEL[d],
+                  value: d,
+                  disabled: !hasRemote && needsRemote(d) && d !== delivery,
+                }))}
               onChange={(e: unknown) =>
                 setDelivery((selectValue(e) as Delivery) || "off")
               }
             />
-            {!hasRemote ? (
+            {combined ? (
+              <p className="gitcfg-hint">
+                Repo updates and sync are set once for the whole gateway in
+                Configure Versioning › Delivery.
+              </p>
+            ) : !hasRemote ? (
               <p className="gitcfg-hint">
                 Repo updates and sync need a remote.
               </p>

@@ -11,7 +11,12 @@ export interface StatusResp {
   changes: ConfigChange[];
   // The installed module's version, e.g. "3.7.0". Shown under the page title.
   version?: string;
+  // Separate: a repository per project. Combined: one gateway repository (4.0.0).
+  layout?: Layout;
 }
+export type Layout = "separate" | "combined";
+// The gateway repository's delivery. pull and runner only work in the Combined layout.
+export type ConfigDeliveryMode = "off" | "replace" | "pull" | "runner";
 export interface Commit {
   hash: string;
   shortHash: string;
@@ -86,7 +91,7 @@ export interface RemoteResp {
   lastPush?: { time: number; ok: boolean; error?: string };
   // Follow a remote branch: the config is replaced by it on a timer (3.10.0).
   delivery?: {
-    mode: "off" | "replace";
+    mode: ConfigDeliveryMode;
     branch: string;
     intervalSeconds: number;
     last?: { time: number; ok: boolean; message: string; commit: string };
@@ -149,6 +154,7 @@ export interface DeliveryReq {
   ignitionUser?: string;
 }
 export interface ProjectsResp {
+  layout?: Layout;
   projects: ProjectStatus[];
   // Top-level folders in the gateway image store, offered as choices.
   imageFolders?: string[];
@@ -393,7 +399,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
     }),
     saveConfigDelivery: builder.mutation<
       unknown,
-      { mode: "off" | "replace"; branch: string; intervalSeconds: number }
+      { mode: ConfigDeliveryMode; branch: string; intervalSeconds: number }
     >({
       query: (body) => ({
         url: `${BASE}/config-delivery`,
@@ -401,6 +407,21 @@ export const gitConfigApi = baseApi.injectEndpoints({
         body,
       }),
       invalidatesTags: ["remote"],
+    }),
+    // Switch the repository layout; refused (nothing changed) while anything is uncommitted.
+    saveLayout: builder.mutation<
+      { layout: Layout; projects: number; restored: number; archived: number },
+      { layout: Layout; restoreHistory: boolean }
+    >({
+      query: (body) => ({ url: `${BASE}/layout`, method: "POST", body }),
+      invalidatesTags: [
+        "status",
+        "history",
+        "remote",
+        "projects",
+        "tree",
+        "events",
+      ],
     }),
     configSyncNow: builder.mutation<{ result: string }, void>({
       query: () => ({
@@ -508,6 +529,7 @@ export const {
   useUpdateFromRemoteMutation,
   useSaveConfigDeliveryMutation,
   useConfigSyncNowMutation,
+  useSaveLayoutMutation,
   useGetTreeQuery,
   useSearchTreeQuery,
   useGetIgnoreQuery,

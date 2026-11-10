@@ -29,9 +29,27 @@ import {
   useDeinitMutation,
   useSaveConfigDeliveryMutation,
   useConfigSyncNowMutation,
+  useGetStatusQuery,
+  useSaveLayoutMutation,
+  ConfigDeliveryMode,
+  Layout,
 } from "./GitConfig.service";
 
 const DEFAULT_BRANCH = "main";
+
+const DELIVERY_OPTIONS: {
+  label: string;
+  value: ConfigDeliveryMode;
+  combinedOnly: boolean;
+}[] = [
+  { label: "Off", value: "off", combinedOnly: false },
+  { label: "Sync — pull", value: "pull", combinedOnly: true },
+  { label: "Sync — replace", value: "replace", combinedOnly: false },
+  { label: "Runner — repo updates", value: "runner", combinedOnly: true },
+];
+
+const asMode = (v: string): ConfigDeliveryMode =>
+  v === "replace" || v === "pull" || v === "runner" ? v : "off";
 
 const errText = (e: any): string =>
   (e && e.data && e.data.error) || "Request failed";
@@ -67,7 +85,14 @@ const ConfigDrawer = ({
   const [saveDelivery] = useSaveConfigDeliveryMutation();
   const [syncNow, { isLoading: syncing }] = useConfigSyncNowMutation();
   const toasts = useToastNotifications();
-  const [deliveryMode, setDeliveryMode] = useState<"off" | "replace">("off");
+  const [deliveryMode, setDeliveryMode] = useState<ConfigDeliveryMode>("off");
+  const { data: status } = useGetStatusQuery();
+  const [saveLayout, { isLoading: switching }] = useSaveLayoutMutation();
+  const layout: Layout =
+    status?.layout === "combined" ? "combined" : "separate";
+  const combined = layout === "combined";
+  const [confirmLayout, setConfirmLayout] = useState(false);
+  const [restoreHistory, setRestoreHistory] = useState(true);
   const [deliveryBranch, setDeliveryBranch] = useState("");
   const [deliveryEvery, setDeliveryEvery] = useState("300");
 
@@ -114,7 +139,7 @@ const ConfigDrawer = ({
       secretName: remote.secretName || "",
     });
     setFeedback(null);
-    setDeliveryMode(remote.delivery?.mode === "replace" ? "replace" : "off");
+    setDeliveryMode(asMode(remote.delivery?.mode || "off"));
     setDeliveryBranch(
       remote.delivery?.branch || remote.branch || DEFAULT_BRANCH
     );
@@ -193,7 +218,11 @@ const ConfigDrawer = ({
           name="uri"
           id="cfg-uri"
           label="Repository URI"
-          description="SSH or HTTPS URL of the config repository's remote."
+          description={
+            combined
+              ? "SSH or HTTPS URL of the gateway repository's remote: config and every project."
+              : "SSH or HTTPS URL of the config repository's remote."
+          }
           input={
             <TextInput placeholder="ssh://git@host/org/gateway-config.git" />
           }
@@ -329,21 +358,39 @@ const ConfigDrawer = ({
           <SelectInput
             label="How changes reach this gateway"
             value={deliveryMode}
-            values={[
-              { label: "Off", value: "off" },
-              { label: "Sync — replace", value: "replace" },
-            ]}
-            onChange={(e: unknown) =>
-              setDeliveryMode(selectValue(e) === "replace" ? "replace" : "off")
-            }
+            values={DELIVERY_OPTIONS.filter(
+              (o) => combined || !o.combinedOnly || o.value === deliveryMode
+            ).map((o) => ({
+              label: o.label,
+              value: o.value,
+              disabled: o.combinedOnly && !combined,
+            }))}
+            onChange={(e: unknown) => setDeliveryMode(asMode(selectValue(e)))}
           />
-          {deliveryMode === "replace" ? (
+          {combined ? (
+            <p className="gitcfg-hint">
+              Combined layout: this delivery moves config and every project.
+            </p>
+          ) : null}
+          {deliveryMode !== "off" ? (
             <>
-              <p className="gitcfg-hint">
-                Replace makes the gateway config match the branch exactly. Local
-                commits and uncommitted changes are discarded, and a branch
-                moved backwards is followed.
-              </p>
+              {deliveryMode === "replace" ? (
+                <p className="gitcfg-hint">
+                  Replace makes the gateway {combined ? "" : "config "}match the
+                  branch exactly. Local commits and uncommitted changes are
+                  discarded, and a branch moved backwards is followed.
+                </p>
+              ) : deliveryMode === "pull" ? (
+                <p className="gitcfg-hint">
+                  Pull merges the branch in, and refuses while anything on the
+                  gateway is uncommitted.
+                </p>
+              ) : (
+                <p className="gitcfg-hint">
+                  A runner workflow calls the gateway to pull the branch; no
+                  timer.
+                </p>
+              )}
               <LabelledTextInput
                 label="Branch"
                 value={deliveryBranch}
@@ -351,13 +398,15 @@ const ConfigDrawer = ({
                   setDeliveryBranch(e.target.value)
                 }
               />
-              <LabelledTextInput
-                label="Check every (seconds, minimum 30)"
-                value={deliveryEvery}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setDeliveryEvery(e.target.value)
-                }
-              />
+              {deliveryMode !== "runner" ? (
+                <LabelledTextInput
+                  label="Check every (seconds, minimum 30)"
+                  value={deliveryEvery}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setDeliveryEvery(e.target.value)
+                  }
+                />
+              ) : null}
             </>
           ) : null}
           {remote?.delivery?.last ? (
@@ -366,7 +415,7 @@ const ConfigDrawer = ({
               {remote.delivery.last.message}
             </p>
           ) : null}
-          {remote?.delivery?.mode === "replace" ? (
+          {remote?.delivery?.mode && remote.delivery.mode !== "off" ? (
             <div className="gitcfg-actions">
               <Button
                 colorClass="secondary"
@@ -385,9 +434,44 @@ const ConfigDrawer = ({
         </Card>
       ) : null}
 
+      <Card title="Repository layout">
+        <p className="gitcfg-hint">
+          {combined
+            ? "Combined: one repository holds config/ and projects/. Branches, the remote and pulls are gateway-wide — checking out a branch switches config and every project."
+            : "Separate: each project is its own repository with its own remote, branches and delivery; this repository holds config only."}
+        </p>
+        {combined ? (
+          <label className="gitcfg-check">
+            <input
+              type="checkbox"
+              checked={restoreHistory}
+              onChange={(e) => setRestoreHistory(e.target.checked)}
+            />
+            <span>
+              Restore each project&apos;s earlier history, where one was kept
+            </span>
+          </label>
+        ) : null}
+        <div className="gitcfg-actions">
+          <Button
+            colorClass="secondary"
+            disabled={switching}
+            onClick={() => setConfirmLayout(true)}
+          >
+            {switching
+              ? "Switching…"
+              : combined
+              ? "Switch to Separate…"
+              : "Switch to Combined…"}
+          </Button>
+        </div>
+      </Card>
+
       <Card title="Danger Zone" className="gitcfg-danger-card">
         <p className="gitcfg-off">
-          {"This action will permanently delete the gateway's versioning"}
+          {combined
+            ? "Switch the layout to Separate before deleting versioning: this repository holds every project too."
+            : "This action will permanently delete the gateway's versioning"}
         </p>
         <Button
           colorClass="destructive"
@@ -438,6 +522,38 @@ const ConfigDrawer = ({
         onConfirm={() => {
           setConfirmRemoveRemote(false);
           removeRemote();
+        }}
+      />
+
+      <Modal
+        open={confirmLayout}
+        type="confirm"
+        title={combined ? "Switch to Separate" : "Switch to Combined"}
+        modalConfig={{
+          confirmationText: combined
+            ? "Each project gets its own repository again: its earlier history if you ticked that and one was kept, otherwise a new repository with one commit of its current files. Project remotes and deliveries come back as they were; the gateway's pull and runner delivery stop. Refused if anything is uncommitted."
+            : "Every project joins this repository in one commit. Each project's own .git is kept under var/git-archive, so its history and remotes can come back. Branches, the remote and pulls become gateway-wide, and project deliveries other than a runner release stop. Refused if anything is uncommitted.",
+          primaryText: "Switch",
+          secondaryText: "Cancel",
+          warningGeneral: true,
+        }}
+        onClose={() => setConfirmLayout(false)}
+        onConfirm={() => {
+          setConfirmLayout(false);
+          saveLayout({
+            layout: combined ? "separate" : "combined",
+            restoreHistory,
+          })
+            .unwrap()
+            .then((r) =>
+              toasts.notifySuccess(
+                r.layout === "combined"
+                  ? `Combined ${r.projects} project(s) into the gateway repository`
+                  : `Separated ${r.projects} project(s)` +
+                      (r.restored ? `, ${r.restored} with earlier history` : "")
+              )
+            )
+            .catch(errorToast(toasts, "Could not switch the layout"));
         }}
       />
 
