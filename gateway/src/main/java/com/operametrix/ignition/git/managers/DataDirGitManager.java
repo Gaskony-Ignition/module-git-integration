@@ -133,6 +133,16 @@ public class DataDirGitManager {
         return GitManager.getDataFolderPath();
     }
 
+    /** The lock every write to the data-directory repository takes (projects too, in Combined). */
+    public static Object lock() {
+        return DATA_DIR_LOCK;
+    }
+
+    /** In Combined, {@code projects/} belongs to the Designer's commits, not to config's. */
+    private static boolean isConfigPath(String path) {
+        return !GitManager.combined() || !(path.equals("projects") || path.startsWith("projects/"));
+    }
+
     /** v1 "is config versioning enabled" signal — the repo state lives entirely in {@code .git}. */
     public static boolean isInitialized() {
         return Files.exists(dataDir().resolve(".git"));
@@ -197,7 +207,10 @@ public class DataDirGitManager {
 
                 Set<String> survivors = GitManager.filterJsonOrderingChanges(repo, dataDir(), byPath.keySet());
                 for (Map.Entry<String, String> e : byPath.entrySet()) {
-                    if (survivors.contains(e.getKey()) && !isNestedRepo(e.getKey())) {
+                    // A staged removal under projects/ comes from a Git Ignore exclusion (git rm
+                    // --cached); nothing else stages one without committing it, so it is config's.
+                    if (survivors.contains(e.getKey()) && !isNestedRepo(e.getKey())
+                            && (isConfigPath(e.getKey()) || s.getRemoved().contains(e.getKey()))) {
                         changes.add(new ConfigChange(e.getKey(), e.getValue()));
                     }
                 }
@@ -331,9 +344,30 @@ public class DataDirGitManager {
             }
             List<String> changed = getStatus().stream().map(ConfigChange::path).toList();
             try (Git git = GitManager.getGit(dataDir())) {
-                stageScope(git, false);
-                stageScope(git, true);
-                var commit = git.commit().setMessage(message).setAuthor(gatewayAuthor(), "").call();
+                CommitCommand cc = git.commit().setMessage(message).setAuthor(gatewayAuthor(), "");
+                if (GitManager.combined()) {
+                    // The same repository holds every project; stage exactly the config changes,
+                    // so a Designer's uncommitted work is never swept into an auto-commit. A staged
+                    // project file that is not a removal (a Git Ignore exclusion's rm --cached) is
+                    // unstaged rather than committed. Not `commit --only`: that takes each path's
+                    // working-tree file, which would put an excluded file straight back.
+                    for (String path : changed) {
+                        git.add().addFilepattern(path).call();
+                        git.add().setUpdate(true).addFilepattern(path).call();
+                    }
+                    Status staged = git.status().call();
+                    for (Set<String> set : List.of(staged.getAdded(), staged.getChanged())) {
+                        for (String path : set) {
+                            if (!isConfigPath(path)) {
+                                git.reset().addPath(path).call();
+                            }
+                        }
+                    }
+                } else {
+                    stageScope(git, false);
+                    stageScope(git, true);
+                }
+                var commit = cc.call();
                 GitEvents.fire(GitEvent.of(GitEvent.AUTOCOMMIT).config()
                         .user(gatewayAuthor()).commit(commit.getName())
                         .message(message).files(changed).success());
@@ -445,6 +479,10 @@ public class DataDirGitManager {
         synchronized (DATA_DIR_LOCK) {
             if (!isInitialized()) {
                 throw new RuntimeException("Config versioning is not initialized.");
+            }
+            if (GitManager.combined()) {
+                throw new RuntimeException("This repository holds every project too (Combined layout)."
+                        + " Switch the layout back to Separate first, then delete versioning.");
             }
             try {
                 GitConfigRemoteRecord record = GitConfigRemoteRecord.get();
@@ -763,6 +801,9 @@ public class DataDirGitManager {
                     }
 
                     applyConfigToRunningGateway();
+                    if (GitManager.combined()) {
+                        applyProjects(changedBetween(repo, head, remoteId));
+                    }
                     return remoteId.abbreviate(7).name();
                 }
             } catch (RuntimeException e) {
@@ -859,6 +900,9 @@ public class DataDirGitManager {
                     mark.update();
 
                     applyConfigToRunningGateway();
+                    if (GitManager.combined()) {
+                        applyProjects(files);
+                    }
                     ConfigAutoCommitter.hold(6_000);
                     return new ReplaceResult(true, tip.name(), discardedCommits, discardedChanges, files,
                             rolledBack);
@@ -867,6 +911,184 @@ public class DataDirGitManager {
                 throw e;
             } catch (Exception e) {
                 logger.error("Config branch follow failed", e);
+                throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * Combined layout: commit one project's folder exactly as it is on disk (a runner release
+     * replaced it, or the project was deleted). Nothing outside {@code projects/<name>/}.
+     *
+     * @return the short hash, or "" when there was nothing to commit
+     */
+    public static String commitProjectFolder(String project, String message) {
+        synchronized (DATA_DIR_LOCK) {
+            RepoLocator.Repo repo = GitManager.repoFor(project);
+            try (Git git = GitManager.getGit(repo.root())) {
+                RevCommit c = ProjectScope.commitAll(git, repo, message, gatewayAuthor());
+                return c == null ? "" : c.abbreviate(7).name();
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    /**
+     * Combined layout: projects tracked in the gateway repository whose folder has gone, so their
+     * removal is recorded. The Designer's commits are limited to its own project and config's
+     * auto-commit leaves {@code projects/} alone, so nothing else would ever commit it.
+     */
+    public static List<String> trackedProjects() {
+        java.util.Set<String> out = new java.util.TreeSet<>();
+        if (!isInitialized() || !GitManager.combined()) {
+            return List.of();
+        }
+        synchronized (DATA_DIR_LOCK) {
+            try (Git git = GitManager.getGit(dataDir())) {
+                DirCache cache = git.getRepository().readDirCache();
+                for (int i = 0; i < cache.getEntryCount(); i++) {
+                    String p = cache.getEntry(i).getPathString();
+                    int slash = p.indexOf('/', 9);
+                    if (p.startsWith("projects/") && slash > 9) {
+                        out.add(p.substring(9, slash));
+                    }
+                }
+            } catch (Exception e) {
+                logger.warn("Could not list the projects in the gateway repository", e);
+            }
+        }
+        return new ArrayList<>(out);
+    }
+
+    /**
+     * Switch the repository layout (Versioning page, admin only). Config's own pending changes are
+     * committed first, as the auto-committer would within seconds anyway; anything else uncommitted
+     * — a project's Designer work — refuses the switch and changes nothing.
+     */
+    public static LayoutSwitch.Result switchLayout(RepoLocator.Layout target, boolean restoreHistory) {
+        if (!isInitialized()) {
+            throw new RuntimeException("Config versioning is not initialised; initialise it first.");
+        }
+        synchronized (DATA_DIR_LOCK) {
+            ConfigAutoCommitter.hold(30_000);
+            try {
+                commitAllIfDirty("Config changes before switching the repository layout");
+                org.eclipse.jgit.lib.PersonIdent author = new org.eclipse.jgit.lib.PersonIdent(gatewayAuthor(), "");
+                String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss").format(new java.util.Date());
+                LayoutSwitch.Result r = target == RepoLocator.Layout.COMBINED
+                        ? LayoutSwitch.toCombined(dataDir(), author, stamp, IgnitionReformat::realChanges)
+                        : LayoutSwitch.toSeparate(dataDir(), author, stamp, restoreHistory,
+                                IgnitionReformat::realChanges);
+                if (target == RepoLocator.Layout.SEPARATE) {
+                    // The Designer only offers git to a registered project; a repository made here
+                    // needs the same marker an init from the Designer writes.
+                    for (String p : r.projects()) {
+                        if (com.operametrix.ignition.git.records.GitProjectsConfigRecord.findByProjectName(p) == null) {
+                            var rec = new com.operametrix.ignition.git.records.GitProjectsConfigRecord();
+                            rec.setProjectName(p);
+                            rec.save();
+                        }
+                    }
+                }
+                GitEvents.fire(GitEvent.of("layout").config().user(gatewayAuthor()).commit(r.commit())
+                        .message(target == RepoLocator.Layout.COMBINED
+                                ? "Combined " + r.projects().size() + " project(s) into the gateway repository"
+                                : "Separated " + r.projects().size() + " project(s) into their own repositories"
+                                        + (r.restored().isEmpty() ? "" : " (" + r.restored().size() + " with their earlier history)"))
+                        .files(r.projects()).success());
+                return r;
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+            } finally {
+                ConfigAutoCommitter.hold(6_000);
+            }
+        }
+    }
+
+    /** Outcome of one {@link #pullFromBranch} run. */
+    public record PullResult(boolean changed, String commit, List<String> files, String note) {}
+
+    /**
+     * Combined layout's "Sync — pull" and runner repo updates: fetch the branch and merge it into
+     * the gateway repository, then load what changed. Refuses while anything (config or any
+     * project) has a real uncommitted change, and does not follow a branch moved backwards —
+     * as a project's Pull does in the Separate layout.
+     */
+    public static PullResult pullFromBranch(String branch) {
+        GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+        if (remote == null) {
+            throw new RuntimeException("No remote is configured to pull from.");
+        }
+        if (branch == null || branch.isBlank()) {
+            throw new RuntimeException("No branch is set to follow.");
+        }
+        synchronized (DATA_DIR_LOCK) {
+            try (Git git = GitManager.getGit(dataDir())) {
+                Repository repo = git.getRepository();
+                Status status = git.status().call();
+                Set<String> edits = IgnitionReformat.realChanges(repo, status);
+                if (!edits.isEmpty()) {
+                    return new PullResult(false, "", List.of(), "local changes present ("
+                            + edits.size() + " uncommitted); not pulling");
+                }
+                Set<String> reformatted = IgnitionReformat.reformatted(repo, status);
+                if (!reformatted.isEmpty()) {
+                    git.checkout().addPaths(new ArrayList<>(reformatted)).call();
+                }
+
+                FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
+                        .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
+                GitManager.setAuthenticationFromIds(fetch, remote.getUri(),
+                        remote.getSshKeyId(), remote.getHttpsCredentialId());
+                fetch.call();
+                ObjectId tip = repo.resolve(trackingRef(branch));
+                if (tip == null) {
+                    throw new RuntimeException("Branch '" + branch + "' was not found on the remote.");
+                }
+                ObjectId before = repo.resolve(Constants.HEAD);
+                ConfigAutoCommitter.hold(30_000);
+                try {
+                    if (!branch.equals(repo.getBranch())) {
+                        boolean exists = repo.findRef("refs/heads/" + branch) != null;
+                        git.checkout().setName(branch).setCreateBranch(!exists)
+                                .setUpstreamMode(org.eclipse.jgit.api.CreateBranchCommand.SetupUpstreamMode.TRACK)
+                                .setStartPoint(exists ? null : ORIGIN + "/" + branch).call();
+                    }
+                    ObjectId local = repo.resolve(Constants.HEAD);
+                    if (!tip.equals(local)) {
+                        try (RevWalk walk = new RevWalk(repo)) {
+                            if (local != null && walk.isMergedInto(walk.parseCommit(tip), walk.parseCommit(local))) {
+                                return new PullResult(false, "", List.of(), "remote branch is behind this"
+                                        + " gateway; not applied (Sync — replace follows it)");
+                            }
+                        }
+                        var merge = git.merge().include(tip).setMessage("Merge " + ORIGIN + "/" + branch).call();
+                        if (!merge.getMergeStatus().isSuccessful()) {
+                            git.reset().setMode(ResetCommand.ResetType.HARD).call();
+                            throw new RuntimeException("Pull failed: merge " + merge.getMergeStatus()
+                                    + "; nothing was changed.");
+                        }
+                    }
+                    ObjectId after = repo.resolve(Constants.HEAD);
+                    if (after == null || after.equals(before)) {
+                        return new PullResult(false, "", List.of(), "up to date");
+                    }
+                    List<String> files = changedBetween(repo, before, after);
+                    applyConfigToRunningGateway();
+                    applyProjects(files);
+                    return new PullResult(true, after.getName(), files, "");
+                } finally {
+                    ConfigAutoCommitter.hold(6_000);
+                }
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                logger.error("Gateway pull failed", e);
                 throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
             }
         }
@@ -950,7 +1172,11 @@ public class DataDirGitManager {
                 throw new RuntimeException(e);
             }
 
-            GitManager.restoreTree(dataDir(), commitHash);
+            if (GitManager.combined()) {
+                restoreOutsideProjects(commitHash);
+            } else {
+                GitManager.restoreTree(dataDir(), commitHash);
+            }
 
             try (Git git = GitManager.getGit(dataDir())) {
                 Status s = git.status().call();
@@ -968,6 +1194,91 @@ public class DataDirGitManager {
             }
         }
         applyConfigToRunningGateway();
+    }
+
+    /**
+     * {@link GitManager#restoreTree} for the Combined layout: everything but {@code projects/}, which
+     * the Designer owns. Restoring the whole tree would throw away every project's uncommitted
+     * work and delete projects created since that commit.
+     */
+    private static void restoreOutsideProjects(String commitHash) {
+        try (Git git = GitManager.getGit(dataDir())) {
+            Repository repo = git.getRepository();
+            ObjectId targetId = repo.resolve(commitHash);
+            ObjectId headId = repo.resolve(Constants.HEAD);
+            if (targetId == null || headId == null) {
+                throw new RuntimeException("Commit not found: " + commitHash);
+            }
+            try (RevWalk walk = new RevWalk(repo)) {
+                RevCommit target = walk.parseCommit(targetId);
+                for (String path : changedBetween(repo, targetId, headId)) {
+                    if (isConfigPath(path) && TreeWalk.forPath(repo, path, target.getTree()) == null) {
+                        git.rm().addFilepattern(path).call();
+                    }
+                }
+                var checkout = git.checkout().setStartPoint(target);
+                boolean any = false;
+                try (TreeWalk tw = new TreeWalk(repo)) {
+                    tw.addTree(target.getTree());
+                    tw.setRecursive(false);
+                    while (tw.next()) {
+                        if (isConfigPath(tw.getPathString())) {
+                            checkout.addPath(tw.getPathString());
+                            any = true;
+                        }
+                    }
+                }
+                if (any) {
+                    checkout.call();
+                }
+                // File by file, never a directory clean: see restoreTree.
+                java.util.Set<String> strays = new java.util.HashSet<>();
+                for (String p : git.status().call().getUntracked()) {
+                    if (isConfigPath(p)) {
+                        strays.add(p);
+                    }
+                }
+                if (!strays.isEmpty()) {
+                    git.clean().setPaths(strays).call();
+                }
+            }
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("Error restoring config to " + commitHash, e);
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Load changed project files into the running gateway (Combined: a pull, branch follow or
+     * checkout of the gateway repository can change any project). Ignition does not notice files
+     * changing under {@code projects/} on its own.
+     *
+     * @param changedPaths repo-relative paths, or null for every project
+     */
+    public static void applyProjects(List<String> changedPaths) {
+        try {
+            java.util.Set<String> names = new java.util.TreeSet<>();
+            if (changedPaths == null) {
+                names.addAll(getContext().getProjectManager().getNames());
+            } else {
+                for (String p : changedPaths) {
+                    if (p.startsWith("projects/") && p.indexOf('/', 9) > 9) {
+                        names.add(p.substring(9, p.indexOf('/', 9)));
+                    }
+                }
+            }
+            for (String name : names) {
+                if (getContext().getProjectManager().getNames().contains(name)
+                        && Files.isRegularFile(GitManager.getProjectFolderPath(name).resolve("project.json"))) {
+                    GitProjectManager.importProject(name);
+                }
+            }
+            getContext().getProjectManager().requestScan();
+        } catch (Exception e) {
+            logger.warn("Could not load the changed projects into the gateway", e);
+        }
     }
 
     /** Apply on-disk config to the running gateway in-process (no restart). */

@@ -57,6 +57,8 @@ public class BranchPopup extends JDialog {
     private DefaultListModel<Row> localModel;
     private DefaultListModel<String> remoteModel;
     private String currentBranch = "";
+    private final JLabel gatewayWideNote = new JLabel(
+            "Branches are gateway-wide in this layout: one checked-out branch for config and every project.");
 
     public BranchPopup(String currentBranch, List<Row> localBranches, List<String> remoteBranches, Component parent) {
         super(SwingUtilities.getWindowAncestor(parent));
@@ -129,6 +131,8 @@ public class BranchPopup extends JDialog {
         listsPanel.add(localPanel);
         listsPanel.add(remotePanel);
         main.add(listsPanel, BorderLayout.CENTER);
+        gatewayWideNote.setVisible(false);
+        main.add(gatewayWideNote, BorderLayout.NORTH);
 
         return main;
     }
@@ -277,6 +281,11 @@ public class BranchPopup extends JDialog {
         });
         button.addActionListener(action);
         return button;
+    }
+
+    /** Combined layout: the branch is the whole gateway's, not this project's. */
+    public void setGatewayWide(boolean gatewayWide) {
+        gatewayWideNote.setVisible(gatewayWide);
     }
 
     public void setData(String currentBranch, List<Row> localBranches, List<String> remoteBranches) {

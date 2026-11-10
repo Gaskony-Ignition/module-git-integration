@@ -51,16 +51,58 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     // Best-effort by design: an event carries context, so failing to read the branch must degrade
     // the event rather than fail the git operation that raised it.
 
+    /** The working tree a project's git operations run in (the data dir, in Combined). */
+    private static Path root(String projectName) {
+        return GitManager.repoFor(projectName).root();
+    }
+
+    /**
+     * Combined layout: what a pull, checkout or merge of the gateway repository changed reaches
+     * every project and config, not only the one whose Designer asked. Config is rescanned and
+     * the changed projects reloaded.
+     */
+    private static void afterGatewayWide(String projectName, org.eclipse.jgit.lib.ObjectId before) {
+        try (Git git = getGit(root(projectName))) {
+            org.eclipse.jgit.lib.ObjectId after = git.getRepository().resolve("HEAD");
+            List<String> changed = before == null || after == null ? null
+                    : ProjectScope.changedBetween(git.getRepository(), before, after);
+            if (changed == null || changed.stream().anyMatch(p -> !p.startsWith("projects/"))) {
+                ConfigAutoCommitter.hold(10_000);
+                DataDirGitManager.applyConfigToRunningGateway();
+            }
+            DataDirGitManager.applyProjects(changed);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static org.eclipse.jgit.lib.ObjectId headOf(Path root) {
+        try (Git git = getGit(root)) {
+            return git.getRepository().resolve("HEAD");
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Read-only in Combined: the one remote belongs to the gateway, set on the Versioning page. */
+    private static void refuseInCombined(String what) {
+        if (GitManager.combined()) {
+            throw new RuntimeException(what + " is not available here: this gateway keeps every project"
+                    + " in one repository (Combined layout), with one remote set on the gateway's"
+                    + " Versioning page (Configure Versioning).");
+        }
+    }
+
     private String branchQuietly(String projectName) {
         try {
-            return GitManager.getCurrentBranch(getProjectFolderPath(projectName));
+            return GitManager.getCurrentBranch(root(projectName));
         } catch (Exception e) {
             return "";
         }
     }
 
     private String headQuietly(String projectName) {
-        try (Git git = Git.open(getProjectFolderPath(projectName).toFile())) {
+        try (Git git = getGit(root(projectName))) {
             org.eclipse.jgit.lib.ObjectId head = git.getRepository().resolve("HEAD");
             return head == null ? "" : head.getName();
         } catch (Exception e) {
@@ -71,7 +113,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     /** The remote's URL, so a trigger can derive owner/repo; falls back to its name. */
     private String remoteUrlQuietly(String projectName, String remoteName) {
         try {
-            String url = GitManager.getRemoteUrl(getProjectFolderPath(projectName), remoteName);
+            String url = GitManager.getRemoteUrl(root(projectName), remoteName);
             return url == null || url.isBlank() ? remoteName : url;
         } catch (Exception e) {
             return remoteName;
@@ -109,6 +151,33 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
         if (!projectHasRemote(projectName)) {
             throw new RuntimeException("No remote repository configured. Add a remote before pulling.");
+        }
+
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        if (repo.scoped()) {
+            org.eclipse.jgit.lib.ObjectId before = headOf(repo.root());
+            synchronized (GitManager.lockFor(repo)) {
+                try (Git git = getGit(repo.root())) {
+                    PullCommand pull = git.pull().setRemote(remoteName);
+                    setAuthentication(pull, projectName, userName, remoteName);
+                    PullResult result = pull.call();
+                    if (!result.isSuccessful()) {
+                        if (result.getMergeResult() != null && result.getMergeResult().getMergeStatus()
+                                == MergeResult.MergeStatus.CONFLICTING) {
+                            List<String> files = new ArrayList<>();
+                            for (String f : git.status().call().getConflicting()) {
+                                files.add(repo.toProjectPath(f));
+                            }
+                            throw new RuntimeException("MERGE_CONFLICT:" + String.join("\n", files));
+                        }
+                        throw new RuntimeException("Pull failed: " + (result.getMergeResult() != null
+                                ? result.getMergeResult().getMergeStatus().toString() : "unknown status"));
+                    }
+                }
+            }
+            afterGatewayWide(projectName, before);
+            importSnapshots(projectName, importTags, importTheme, importImages);
+            return true;
         }
 
         try (Git git = getGit(getProjectFolderPath(projectName))) {
@@ -157,6 +226,19 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         return true;
     }
 
+    private static void importSnapshots(String projectName, boolean importTags, boolean importTheme,
+                                        boolean importImages) throws Exception {
+        if (importTags) {
+            GitTagManager.importTagManager(projectName);
+        }
+        if (importTheme) {
+            GitThemeManager.importTheme(projectName);
+        }
+        if (importImages) {
+            GitImageManager.importImages(projectName);
+        }
+    }
+
     @Override
     protected boolean pushImpl(String projectName, String userName, String remoteName, boolean pushAllBranches, boolean pushTags, boolean forcePush) throws Exception {
         try {
@@ -181,7 +263,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             throw new RuntimeException("No remote repository configured. Add a remote before pushing.");
         }
 
-        try (Git git = getGit(getProjectFolderPath(projectName))) {
+        try (Git git = getGit(root(projectName))) {
             PushCommand push = git.push();
             push.setRemote(remoteName);
             setAuthentication(push, projectName, userName, remoteName);
@@ -243,6 +325,21 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         if (!amend && (changes == null || changes.isEmpty())) {
             throw new RuntimeException("Nothing to commit — select at least one file.");
         }
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        if (repo.scoped()) {
+            synchronized (GitManager.lockFor(repo)) {
+                try (Git git = getGit(repo.root())) {
+                    ProjectScope.commit(git, repo, changes, message, amend, userName,
+                            GitManager.resolveUserEmail(userName));
+                } catch (RuntimeException e) {
+                    throw e;
+                } catch (Exception e) {
+                    logger.error(e.toString(), e);
+                    throw new RuntimeException(e);
+                }
+            }
+            return true;
+        }
         try (Git git = getGit(getProjectFolderPath(projectName))) {
             for (String change : changes) {
                 git.add().addFilepattern(change).call();
@@ -264,7 +361,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     public Dataset getUncommitedChangesImpl(String projectName, String userName) {
-        Path projectPath = getProjectFolderPath(projectName);
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        Path projectPath = repo.root();
         Dataset ds;
         List<String> changes = new ArrayList<>();
         DatasetBuilder builder = new DatasetBuilder();
@@ -272,14 +370,16 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         builder.colTypes(List.of(String.class, String.class, String.class, String.class));
 
         try (Git git = getGit(projectPath)) {
-            Status status = git.status().call();
+            ProjectScope.requireNoNestedRepo(repo);
+            Status status = ProjectScope.status(git, repo);
 
-            Set<String> missing = status.getMissing();
-            Set<String> uncommittedChanges = GitManager.filterJsonOrderingChanges(
-                    git.getRepository(), projectPath, status.getUncommittedChanges());
-            Set<String> untracked = status.getUntracked();
-            Set<String> modified = GitManager.filterJsonOrderingChanges(
-                    git.getRepository(), projectPath, status.getChanged());
+            // Filtered on repo paths (they read HEAD), then made project-relative for the Designer.
+            Set<String> missing = repo.inProject(status.getMissing());
+            Set<String> uncommittedChanges = repo.inProject(GitManager.filterJsonOrderingChanges(
+                    git.getRepository(), projectPath, status.getUncommittedChanges()));
+            Set<String> untracked = repo.inProject(status.getUntracked());
+            Set<String> modified = repo.inProject(GitManager.filterJsonOrderingChanges(
+                    git.getRepository(), projectPath, status.getChanged()));
 
             // Build union of all changed files for cross-category sibling detection
             Set<String> allChanged = new HashSet<>();
@@ -316,6 +416,10 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     public boolean isRegisteredUserImpl(String projectName, String userName) {
+        if (GitManager.combined()) {
+            // No per-user records: the gateway repository authenticates with its own credential.
+            return DataDirGitManager.isInitialized();
+        }
         boolean registered;
         try {
             GitProjectsConfigRecord gitProjectsConfigRecord = getGitProjectConfigRecord(projectName);
@@ -353,7 +457,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         // repo exists. If it is missing there is no persisted URL to re-clone from — the
         // project must be re-registered through the setup wizard.
         Path path = getProjectFolderPath(projectName).resolve(".git");
-        if (!Files.exists(path)) {
+        if (!GitManager.combined() && !Files.exists(path)) {
             logger.warn("Git working directory missing for registered project '" + projectName
                     + "'. Re-run repository setup to reconstruct it.");
         }
@@ -488,26 +592,37 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected List<String> getLocalBranchesImpl(String projectName) throws Exception {
-        return GitManager.listLocalBranches(getProjectFolderPath(projectName));
+        return GitManager.listLocalBranches(root(projectName));
     }
 
     @Override
     protected List<String> getRemoteBranchesImpl(String projectName) throws Exception {
-        return GitManager.listRemoteBranches(getProjectFolderPath(projectName));
+        return GitManager.listRemoteBranches(root(projectName));
     }
 
     @Override
     protected String getCurrentBranchImpl(String projectName) throws Exception {
-        return GitManager.getCurrentBranch(getProjectFolderPath(projectName));
+        return GitManager.getCurrentBranch(root(projectName));
     }
 
     @Override
     protected boolean createBranchImpl(String projectName, String branchName) throws Exception {
-        return GitManager.createBranch(getProjectFolderPath(projectName), branchName);
+        return GitManager.createBranch(root(projectName), branchName);
     }
 
     @Override
     protected boolean checkoutBranchImpl(String projectName, String branchName) throws Exception {
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        if (repo.scoped()) {
+            org.eclipse.jgit.lib.ObjectId before = headOf(repo.root());
+            boolean result;
+            synchronized (GitManager.lockFor(repo)) {
+                ConfigAutoCommitter.hold(30_000);
+                result = GitManager.checkoutBranch(repo.root(), branchName);
+            }
+            afterGatewayWide(projectName, before);
+            return result;
+        }
         boolean result = GitManager.checkoutBranch(getProjectFolderPath(projectName), branchName);
         GitProjectManager.importProject(projectName);
         return result;
@@ -515,14 +630,14 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected String deleteBranchImpl(String projectName, String branchName, boolean force) throws Exception {
-        BranchHygiene.Result r = GitManager.deleteBranch(getProjectFolderPath(projectName), branchName, force,
+        BranchHygiene.Result r = GitManager.deleteBranch(root(projectName), branchName, force,
                 protectedBranches(projectName));
         return r.ok() ? "" : BranchDeleteResult.encode(r.kind(), r.count(), r.message());
     }
 
     @Override
     protected Dataset getLocalBranchInfoImpl(String projectName) throws Exception {
-        List<BranchHygiene.Info> infos = GitManager.localBranchInfo(getProjectFolderPath(projectName),
+        List<BranchHygiene.Info> infos = GitManager.localBranchInfo(root(projectName),
                 protectedBranches(projectName));
         DatasetBuilder builder = new DatasetBuilder();
         builder.colNames(List.of("name", "upstream", "gone", "ahead", "merged", "protectedReason"));
@@ -543,7 +658,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         Map<String, String> guarded = protectedBranches(projectName);
         for (String name : branchNames) {
             try {
-                BranchHygiene.Result r = GitManager.deleteBranch(getProjectFolderPath(projectName), name, false,
+                BranchHygiene.Result r = GitManager.deleteBranch(root(projectName), name, false,
                         guarded);
                 builder.addRow(name, r.ok(), r.ok() ? "" : r.message());
             } catch (Exception e) {
@@ -554,9 +669,20 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         return ds != null ? ds : new BasicDataset();
     }
 
-    /** Branches the project's scheduled sync follows: deleting one would break it. */
+    /**
+     * Branches a delivery follows: deleting one would break it. Separate: the project's scheduled
+     * sync (its delivery branch is stored on the same record). Combined: the gateway delivery's
+     * branch, since a project has no delivery of its own there.
+     */
     private static Map<String, String> protectedBranches(String projectName) {
         Map<String, String> out = new HashMap<>();
+        if (GitManager.combined()) {
+            ConfigSync.Settings gw = ConfigSync.get();
+            if (!ConfigSync.MODE_OFF.equals(gw.mode()) && !gw.branch().isBlank()) {
+                out.put(gw.branch(), "delivery");
+            }
+            return out;
+        }
         GitSyncRecord sync = GitSyncRecord.findByProject(projectName);
         if (sync != null && sync.isEnabled() && !sync.getBranch().isBlank()) {
             out.put(sync.getBranch(), "sync");
@@ -565,7 +691,16 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     @Override
+    protected String getRepositoryLayoutImpl() {
+        return GitManager.combined() ? "combined" : "separate";
+    }
+
+    @Override
     protected boolean isProjectRegisteredImpl(String projectName) {
+        if (GitManager.combined()) {
+            return DataDirGitManager.isInitialized()
+                    && Files.isRegularFile(getProjectFolderPath(projectName).resolve("project.json"));
+        }
         try {
             getGitProjectConfigRecord(projectName);
             return true;
@@ -581,7 +716,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected Dataset getCommitHistoryImpl(String projectName, int skip, int limit) {
-        java.util.List<String[]> commits = GitManager.getCommitLog(getProjectFolderPath(projectName), skip, limit);
+        java.util.List<String[]> commits = GitManager.getCommitLog(GitManager.repoFor(projectName), skip, limit);
         DatasetBuilder builder = new DatasetBuilder();
         builder.colNames(java.util.List.of("hash", "shortHash", "author", "date", "message", "refs"));
         builder.colTypes(java.util.List.of(String.class, String.class, String.class, String.class, String.class, String.class));
@@ -594,18 +729,31 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected List<String> getCommitFilesImpl(String projectName, String commitHash) {
-        List<String> files = GitManager.getCommitFileList(getProjectFolderPath(projectName), commitHash);
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        List<String> files = new ArrayList<>();
+        for (String entry : GitManager.getCommitFileList(repo.root(), commitHash)) {
+            int colon = entry.indexOf(':');
+            String path = entry.substring(colon + 1);
+            if (repo.contains(path)) {
+                files.add(entry.substring(0, colon + 1) + repo.toProjectPath(path));
+            }
+        }
         return GitManager.filterMetadataOnlyCommitFiles(files);
     }
 
     @Override
     protected List<String> getCommitFileDiffImpl(String projectName, String commitHash, String filePath) {
-        return GitManager.getCommitFileDiffContent(getProjectFolderPath(projectName), commitHash, filePath);
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        return GitManager.getCommitFileDiffContent(repo.root(), commitHash, repo.toRepoPath(filePath));
     }
 
     @Override
     protected boolean discardChangesImpl(String projectName, List<String> paths) {
-        boolean result = GitManager.discardChanges(getProjectFolderPath(projectName), paths);
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        boolean result;
+        synchronized (GitManager.lockFor(repo)) {
+            result = GitManager.discardChanges(repo.root(), paths.stream().map(repo::toRepoPath).toList());
+        }
         if (result) {
             GitProjectManager.importProject(projectName);
         }
@@ -614,6 +762,17 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean checkoutCommitImpl(String projectName, String commitHash) throws Exception {
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        if (repo.scoped()) {
+            org.eclipse.jgit.lib.ObjectId before = headOf(repo.root());
+            boolean result;
+            synchronized (GitManager.lockFor(repo)) {
+                ConfigAutoCommitter.hold(30_000);
+                result = GitManager.checkoutCommit(repo.root(), commitHash);
+            }
+            afterGatewayWide(projectName, before);
+            return result;
+        }
         boolean result = GitManager.checkoutCommit(getProjectFolderPath(projectName), commitHash);
         GitProjectManager.importProject(projectName);
         return result;
@@ -621,7 +780,11 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean revertCommitImpl(String projectName, String commitHash) throws Exception {
-        boolean result = GitManager.revertCommit(getProjectFolderPath(projectName), commitHash);
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        boolean result;
+        synchronized (GitManager.lockFor(repo)) {
+            result = GitManager.revertCommit(repo, commitHash);
+        }
         if (result) {
             GitProjectManager.importProject(projectName);
         }
@@ -637,6 +800,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     /** As {@link #initializeProjectImpl}, cloning {@code branch} instead of the remote's default. */
     public boolean initializeProject(String projectName, String repoUri, String ignitionUser,
                                      long sshKeyId, long httpsCredentialId, String branch) throws Exception {
+        refuseInCombined("Linking a project to its own repository");
         // Check project not already registered
         if (isProjectRegisteredImpl(projectName)) {
             throw new Exception("Project '" + projectName + "' is already registered.");
@@ -691,6 +855,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean initializeLocalProjectImpl(String projectName, String ignitionUser) throws Exception {
+        refuseInCombined("Creating a repository for one project");
         if (isProjectRegisteredImpl(projectName)) {
             throw new Exception("Project '" + projectName + "' is already registered.");
         }
@@ -749,12 +914,12 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
      * config, so user-named (non-origin) remotes added later are recognized.
      */
     private boolean projectHasRemote(String projectName) throws Exception {
-        return !GitManager.listRemotes(getProjectFolderPath(projectName)).isEmpty();
+        return !GitManager.listRemotes(root(projectName)).isEmpty();
     }
 
     @Override
     protected Dataset listRemotesImpl(String projectName) throws Exception {
-        List<String[]> remotes = GitManager.listRemotes(getProjectFolderPath(projectName));
+        List<String[]> remotes = GitManager.listRemotes(root(projectName));
         DatasetBuilder builder = new DatasetBuilder();
         builder.colNames(List.of("name", "url"));
         builder.colTypes(List.of(String.class, String.class));
@@ -768,6 +933,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     @Override
     protected boolean addRemoteImpl(String projectName, String remoteName, String remoteUrl,
                                      String ignitionUser) throws Exception {
+        refuseInCombined("Adding a remote");
         Path projectPath = getProjectFolderPath(projectName);
         GitManager.addRemote(projectPath, remoteName, remoteUrl);
 
@@ -785,6 +951,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     @Override
     protected boolean removeRemoteImpl(String projectName, String remoteName,
                                         String ignitionUser) throws Exception {
+        refuseInCombined("Removing a remote");
         Path projectPath = getProjectFolderPath(projectName);
         GitManager.removeRemote(projectPath, remoteName);
 
@@ -802,6 +969,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     @Override
     protected boolean setRemoteUrlImpl(String projectName, String remoteName, String newUrl,
                                         String ignitionUser) throws Exception {
+        refuseInCombined("Changing a remote");
         Path projectPath = getProjectFolderPath(projectName);
         GitManager.setRemoteUrl(projectPath, remoteName, newUrl);
 
@@ -822,16 +990,32 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected List<String> getConflictingFilesImpl(String projectName) {
-        return GitManager.getConflictingFiles(getProjectFolderPath(projectName));
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        // Every conflict, not only this project's: a merge cannot be completed with one hidden.
+        // Files outside the project come back with a leading "/" (see RepoLocator.Repo).
+        return GitManager.getConflictingFiles(repo.root()).stream().map(repo::toProjectPath).toList();
     }
 
     @Override
     protected boolean resolveConflictImpl(String projectName, String filePath, String stage) {
-        return GitManager.resolveConflict(getProjectFolderPath(projectName), filePath, stage);
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        return GitManager.resolveConflict(repo.root(), repo.toRepoPath(filePath), stage);
     }
 
     @Override
     protected boolean abortMergeImpl(String projectName) {
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        if (repo.scoped()) {
+            org.eclipse.jgit.lib.ObjectId before = headOf(repo.root());
+            boolean result;
+            synchronized (GitManager.lockFor(repo)) {
+                ConfigAutoCommitter.hold(30_000);
+                result = GitManager.abortMerge(repo.root());
+            }
+            // HEAD does not move, but the conflicted files on disk go back to it, config included.
+            afterGatewayWide(projectName, null);
+            return result;
+        }
         boolean result = GitManager.abortMerge(getProjectFolderPath(projectName));
         if (result) {
             GitProjectManager.importProject(projectName);
@@ -841,6 +1025,15 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean completeMergeCommitImpl(String projectName, String userName) throws Exception {
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        if (repo.scoped()) {
+            boolean result;
+            synchronized (GitManager.lockFor(repo)) {
+                result = GitManager.completeMergeCommit(repo.root(), projectName, userName);
+            }
+            afterGatewayWide(projectName, null);
+            return result;
+        }
         boolean result = GitManager.completeMergeCommit(getProjectFolderPath(projectName), projectName, userName);
         if (result) {
             GitProjectManager.importProject(projectName);
@@ -850,7 +1043,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected List<String> getConflictDiffImpl(String projectName, String filePath) {
-        return GitManager.getConflictDiffContent(getProjectFolderPath(projectName), filePath);
+        RepoLocator.Repo repo = GitManager.repoFor(projectName);
+        return GitManager.getConflictDiffContent(repo.root(), repo.toRepoPath(filePath));
     }
 
     @Override
@@ -859,7 +1053,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             throw new RuntimeException("No remote repository configured. Add a remote before fetching.");
         }
 
-        try (Git git = getGit(getProjectFolderPath(projectName))) {
+        try (Git git = getGit(root(projectName))) {
             FetchCommand fetch = git.fetch();
             fetch.setRemote(remoteName);
             fetch.setUnshallow(true);
@@ -1090,6 +1284,11 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     protected boolean setRemoteCredentialRefImpl(String projectName, String remoteName,
                                                   String ignitionUser, long sshKeyId,
                                                   long httpsCredentialId) {
+        if (GitManager.combined()) {
+            logger.warn("Not attaching a credential to project '" + projectName + "': the Combined layout"
+                    + " uses the gateway repository's credential (Configure Versioning).");
+            return false;
+        }
         try {
             GitRemoteCredentialsRecord creds = getRemoteCredentialsRecord(
                     projectName, ignitionUser, remoteName);
@@ -1118,6 +1317,12 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         builder.colNames(List.of("sshKeyId", "httpsCredentialId"));
         builder.colTypes(List.of(Long.class, Long.class));
         try {
+            if (GitManager.combined()) {
+                com.operametrix.ignition.git.records.GitConfigRemoteRecord gw =
+                        com.operametrix.ignition.git.records.GitConfigRemoteRecord.get();
+                builder.addRow(gw == null ? 0L : gw.getSshKeyId(), gw == null ? 0L : gw.getHttpsCredentialId());
+                return builder.build();
+            }
             GitRemoteCredentialsRecord creds = getRemoteCredentialsRecord(
                     projectName, ignitionUser, remoteName);
             long sshKeyId = creds != null ? creds.getSshKeyId() : 0L;

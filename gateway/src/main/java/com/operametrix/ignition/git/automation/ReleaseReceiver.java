@@ -119,6 +119,11 @@ public final class ReleaseReceiver {
             deleteRecursively(staged.resolve(".git"));
 
             boolean[] kept = replace(project, staged, work);
+            // Combined: the release is recorded in the gateway repository, limited to this project.
+            String committed = GitManager.combined()
+                    ? com.operametrix.ignition.git.managers.DataDirGitManager.commitProjectFolder(project,
+                            "Release " + (version.isEmpty() ? project : project + " " + version))
+                    : null;
 
             GitProjectManager.importProject(project);
             try {
@@ -142,6 +147,9 @@ public final class ReleaseReceiver {
             o.addProperty("files", files);
             o.addProperty("keptRepository", kept[0]);
             o.addProperty("keptProjectProperties", kept[1]);
+            if (committed != null) {
+                o.addProperty("commit", committed);
+            }
             return o.toString();
         } catch (Refused r) {
             resp.setStatus(r.status);

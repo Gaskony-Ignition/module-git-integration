@@ -177,6 +177,16 @@ public class GitBaseAction {
     }
 
     public static void handleCheckoutAction(String branchName) {
+        if (gatewayWide()) {
+            int choice = JOptionPane.showConfirmDialog(context.getFrame(),
+                    "Check out " + branchName + "?\n\nThis gateway keeps every project and its config in one"
+                            + " repository, so this switches the gateway config and every project on it,"
+                            + " not only this one.",
+                    "Checkout Branch", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (choice != JOptionPane.YES_OPTION) {
+                return;
+            }
+        }
         try {
             closeAllEditorTabs();
             rpc.checkoutBranch(projectName, branchName);
@@ -404,7 +414,11 @@ public class GitBaseAction {
                 "Check out commit " + shortHash + "?\n\n"
                         + "This will put the repository in 'detached HEAD' state.\n"
                         + "Any new commits will not belong to a branch.\n"
-                        + "To keep changes, create a new branch first.",
+                        + "To keep changes, create a new branch first."
+                        + (gatewayWide()
+                                ? "\n\nThis gateway keeps every project and its config in one repository,"
+                                + " so this switches the gateway config and every project on it."
+                                : ""),
                 "Checkout Commit", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
 
         if (choice != JOptionPane.YES_OPTION) return;

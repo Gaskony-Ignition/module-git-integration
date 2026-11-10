@@ -97,7 +97,9 @@ public final class SyncScheduler {
             } catch (Throwable t) {
                 logger.error("Config branch follow tick failed.", t);
             }
-            for (GitSyncRecord cfg : GitSyncRecord.listEnabled()) {
+            // Combined layout: per-project syncs are kept but inactive; the gateway delivery
+            // (ConfigSync, above) moves the one repository.
+            for (GitSyncRecord cfg : GitManager.combined() ? List.<GitSyncRecord>of() : GitSyncRecord.listEnabled()) {
                 // A delete the listener missed would otherwise fail here on every tick.
                 if (com.operametrix.ignition.git.managers.ProjectRecords.isGone(cfg.getProject())) {
                     com.operametrix.ignition.git.managers.ProjectRecords.reconcile();
@@ -132,6 +134,10 @@ public final class SyncScheduler {
     /** Runs one repository's sync. Safe to call outside the timer (the Sync now button). */
     public static String syncNow(GitSyncRecord cfg) {
         String project = cfg.getProject();
+        if (GitManager.combined()) {
+            throw new IllegalStateException("A project has no delivery of its own in the Combined layout;"
+                    + " the gateway's delivery (Configure Versioning) moves every project.");
+        }
         if (!inFlight.add(project)) {
             return "already running";
         }

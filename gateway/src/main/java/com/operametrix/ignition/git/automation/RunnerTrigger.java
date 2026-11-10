@@ -57,6 +57,10 @@ public final class RunnerTrigger {
             return "{\"error\":\"body is not JSON\"}";
         }
 
+        if (GitManager.combined()) {
+            return combined(resp, project);
+        }
+
         if (project == null || project.isBlank()) {
             resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             return "{\"error\":\"no project named\"}";
@@ -98,6 +102,30 @@ public final class RunnerTrigger {
             o.addProperty("error", String.valueOf(e.getMessage()));
             return o.toString();
         }
+    }
+
+    /**
+     * Combined layout: there is one repository, so a repo update pulls the gateway's branch whatever
+     * project the workflow names. Opt-in is the gateway delivery set to Runner — repo updates.
+     */
+    private static Object combined(HttpServletResponse resp, String project) {
+        if (!com.operametrix.ignition.git.managers.ConfigSync.get().runner()) {
+            resp.setStatus(HttpServletResponse.SC_CONFLICT);
+            return "{\"error\":\"this gateway keeps every project in one repository; set its delivery to"
+                    + " Runner - repo updates (Configure Versioning) first\"}";
+        }
+        String result = com.operametrix.ignition.git.managers.ConfigSync.syncNow();
+        logger.info("Runner requested a pull of the gateway repository: {}", result);
+        JsonObject o = new JsonObject();
+        o.addProperty("ok", !result.startsWith("failed"));
+        if (project != null) {
+            o.addProperty("project", project);
+        }
+        o.addProperty("result", result);
+        if (result.startsWith("failed")) {
+            resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        }
+        return o.toString();
     }
 
     /**

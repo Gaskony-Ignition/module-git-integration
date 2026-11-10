@@ -274,6 +274,7 @@ public class GitActionManager {
 
             if (branchPopup != null) {
                 branchPopup.setData(currentBranch, localBranches, remoteBranches);
+                branchPopup.setGatewayWide(gatewayWide());
                 branchPopup.setVisible(true);
                 branchPopup.toFront();
             } else {
@@ -403,6 +404,7 @@ public class GitActionManager {
                         progress.setVisible(true);
                     }
                 };
+                branchPopup.setGatewayWide(gatewayWide());
             }
         } catch (Exception e) {
             logger.error("Error showing branch popup", e);
@@ -506,7 +508,37 @@ public class GitActionManager {
         });
     }
 
+    /** Combined layout: one repository for the gateway, so branches and remotes are gateway-wide. */
+    public static boolean gatewayWide() {
+        try {
+            return "combined".equals(rpc.getRepositoryLayout());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public static void showRemotesPopup(String projectName, String userName) {
+        if (gatewayWide()) {
+            // Read-only: the remote and its credential belong to the gateway repository.
+            StringBuilder text = new StringBuilder("This gateway keeps every project and its config in one"
+                    + " repository, with one remote.\nIt is set on the gateway's Versioning page"
+                    + " (Platform > System > Versioning > Configure Versioning).\n");
+            try {
+                Dataset remotes = rpc.listRemotes(projectName);
+                for (int i = 0; i < remotes.getRowCount(); i++) {
+                    text.append("\n").append(remotes.getValueAt(i, "name")).append("   ")
+                            .append(remotes.getValueAt(i, "url"));
+                }
+                if (remotes.getRowCount() == 0) {
+                    text.append("\nNo remote is set yet.");
+                }
+            } catch (Exception e) {
+                logger.error("Error listing remotes", e);
+            }
+            JOptionPane.showMessageDialog(context.getFrame(), text.toString(), "Remotes",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
         try {
             Dataset remotes = rpc.listRemotes(projectName);
             Dataset sshKeys = rpc.listUserSshKeys(userName);

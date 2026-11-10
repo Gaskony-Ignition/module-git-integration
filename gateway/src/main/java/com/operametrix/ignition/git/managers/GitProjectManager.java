@@ -93,6 +93,9 @@ public class GitProjectManager {
         } catch (Exception ignored) {
             // A project.json we cannot parse is still a project; the folder name will do.
         }
+        if (GitManager.combined()) {
+            return combinedStatusOf(name, title);
+        }
         if (!Files.isDirectory(dir.resolve(".git"))) {
             return new ProjectStatus(name, title, false, null, null, null, 0, null);
         }
@@ -107,6 +110,32 @@ public class GitProjectManager {
             }
             // Ignition's rewrite of files it imported is not an edit; see IgnitionReformat.
             int changes = IgnitionReformat.realChanges(git.getRepository(), git.status().call()).size();
+            return new ProjectStatus(name, title, true, branch, remoteName, remoteUrl, changes, null);
+        } catch (Exception e) {
+            logger.warn("Could not read the git state of project '" + name + "'", e);
+            return new ProjectStatus(name, title, true, null, null, null, -1, e.getMessage());
+        }
+    }
+
+    /** Combined: every project is in the gateway repository; its branch and remote are the gateway's. */
+    private static ProjectStatus combinedStatusOf(String name, String title) {
+        if (!DataDirGitManager.isInitialized()) {
+            return new ProjectStatus(name, title, false, null, null, null, 0, null);
+        }
+        RepoLocator.Repo repo = GitManager.repoFor(name);
+        try {
+            ProjectScope.requireNoNestedRepo(repo);
+        } catch (IllegalStateException e) {
+            return new ProjectStatus(name, title, true, null, null, null, -1, e.getMessage());
+        }
+        try (org.eclipse.jgit.api.Git git = GitManager.getGit(repo.root())) {
+            String branch = git.getRepository().getBranch();
+            Set<String> remotes = git.getRepository().getRemoteNames();
+            String remoteName = remotes.contains("origin") ? "origin" : remotes.stream().findFirst().orElse(null);
+            String remoteUrl = remoteName == null ? null
+                    : git.getRepository().getConfig().getString("remote", remoteName, "url");
+            int changes = repo.inProject(IgnitionReformat.realChanges(git.getRepository(),
+                    ProjectScope.status(git, repo))).size();
             return new ProjectStatus(name, title, true, branch, remoteName, remoteUrl, changes, null);
         } catch (Exception e) {
             logger.warn("Could not read the git state of project '" + name + "'", e);

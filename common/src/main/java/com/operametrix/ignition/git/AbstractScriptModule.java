@@ -84,6 +84,11 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     }
 
     @Override
+    public String getRepositoryLayout() {
+        return getRepositoryLayoutImpl();
+    }
+
+    @Override
     public Dataset getLocalBranchInfo(String projectName) throws Exception {
         return getLocalBranchInfoImpl(projectName);
     }
@@ -261,6 +266,7 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     protected abstract boolean checkoutBranchImpl(String projectName, String branchName) throws Exception;
     protected abstract String deleteBranchImpl(String projectName, String branchName, boolean force) throws Exception;
     protected abstract Dataset getLocalBranchInfoImpl(String projectName) throws Exception;
+    protected abstract String getRepositoryLayoutImpl();
     protected abstract Dataset cleanupBranchesImpl(String projectName, List<String> branchNames) throws Exception;
     protected abstract boolean isProjectRegisteredImpl(String projectName);
     protected abstract boolean initializeProjectImpl(String projectName, String repoUri, String ignitionUser,

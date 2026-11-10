@@ -69,6 +69,12 @@ public interface GitScriptInterface {
     /** Safe-delete each name. Dataset columns: branch, ok, reason. */
     Dataset cleanupBranches(String projectName, List<String> branchNames) throws Exception;
 
+    /**
+     * The gateway's repository layout: "separate" (each project its own repository) or "combined"
+     * (one gateway repository; branches, remotes and delivery are gateway-wide).
+     */
+    String getRepositoryLayout();
+
     /** Check whether the given project is registered in the gateway's git configuration. */
     boolean isProjectRegistered(String projectName);
 

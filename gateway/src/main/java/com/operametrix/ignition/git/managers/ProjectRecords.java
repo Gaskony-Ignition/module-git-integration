@@ -90,6 +90,14 @@ public final class ProjectRecords implements ResourceCollectionListener {
             for (String project : gone) {
                 forget(project);
             }
+            // Combined: a deleted project's folder removal goes into the gateway repository.
+            for (String project : DataDirGitManager.trackedProjects()) {
+                if (isGone(project)) {
+                    String c = DataDirGitManager.commitProjectFolder(project, "Remove deleted project " + project);
+                    logger.info("Project '{}' was deleted; recorded its removal in the gateway repository ({}).",
+                            project, c);
+                }
+            }
             GitRunnerRecord runner = GitRunnerRecord.get();
             List<String> dropped = runner.pruneMissing(getContext().getProjectManager().getNames());
             if (!dropped.isEmpty()) {

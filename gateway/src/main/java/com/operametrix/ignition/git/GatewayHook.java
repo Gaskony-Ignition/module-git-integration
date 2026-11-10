@@ -21,6 +21,9 @@ import com.operametrix.ignition.git.managers.ConfigSync;
 import com.operametrix.ignition.git.managers.CredentialCheck;
 import com.operametrix.ignition.git.managers.ProjectRecords;
 import com.operametrix.ignition.git.managers.DataDirGitManager;
+import com.operametrix.ignition.git.managers.GitManager;
+import com.operametrix.ignition.git.managers.LayoutSwitch;
+import com.operametrix.ignition.git.managers.RepoLocator;
 import com.inductiveautomation.ignition.common.gson.Gson;
 import com.inductiveautomation.ignition.common.gson.JsonArray;
 import com.inductiveautomation.ignition.common.gson.JsonElement;
@@ -425,6 +428,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         routes.newRoute("/ignore").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleSaveIgnore).mount();
+        routes.newRoute("/layout").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleSaveLayout).mount();
     }
 
     /**
@@ -489,6 +495,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             // Every tab is drawn after this call, so it is what puts the module's version on the
             // page. Nothing else the UI fetches is both unconditional and uncached.
             o.addProperty("version", moduleVersion());
+            o.addProperty("layout", GitManager.combined() ? "combined" : "separate");
             JsonArray changes = new JsonArray();
             boolean dirty = false;
             if (init) {
@@ -503,6 +510,28 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
             o.addProperty("dirty", dirty);
             o.add("changes", changes);
+            return o.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    /** Repository layout switch: {@code {"layout":"separate"|"combined","restoreHistory":bool}}. */
+    private Object handleSaveLayout(RequestContext req, HttpServletResponse resp) {
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            String layout = optString(body, "layout");
+            if (!"separate".equals(layout) && !"combined".equals(layout)) {
+                throw new RuntimeException("Unknown layout '" + layout + "'.");
+            }
+            LayoutSwitch.Result r = DataDirGitManager.switchLayout("combined".equals(layout)
+                    ? RepoLocator.Layout.COMBINED : RepoLocator.Layout.SEPARATE, optBool(body, "restoreHistory"));
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", true);
+            o.addProperty("layout", layout);
+            o.addProperty("projects", r.projects().size());
+            o.addProperty("restored", r.restored().size());
+            o.addProperty("archived", r.archived().size());
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);
@@ -1301,6 +1330,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 arr.add(o);
             }
             JsonObject out = new JsonObject();
+            out.addProperty("layout", GitManager.combined() ? "combined" : "separate");
             out.add("projects", arr);
             out.add("imageFolders", imageStoreFolders());
             return out.toString();
@@ -1569,6 +1599,22 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     }
 
     private static void applyDelivery(JsonObject body, String project, String delivery, String actor) {
+        if (GitManager.combined()) {
+            // One repository: pulls are the gateway's delivery. A release still replaces one
+            // project. The project's sync record is left as it was, for a switch back to Separate.
+            if (!delivery.equals("off") && !delivery.equals("runner-release")) {
+                throw new RuntimeException("In the Combined layout a project's delivery is Off or Runner —"
+                        + " release; pulls are set once for the gateway (Configure Versioning › Delivery).");
+            }
+            GitRunnerRecord runner = GitRunnerRecord.get();
+            if (delivery.equals("off")) {
+                runner.clearMode(project);
+            } else {
+                runner.setMode(project, GitRunnerRecord.MODE_RELEASE);
+            }
+            runner.save();
+            return;
+        }
         boolean pulls = delivery.startsWith("sync-") || delivery.equals("runner-repo");
         if (pulls) {
             // The list only holds folders with a root project.json, so a missing row is not

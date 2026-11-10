@@ -1,6 +1,7 @@
 package com.operametrix.ignition.git.managers;
 
 import com.operametrix.ignition.git.SshTransportConfigCallback;
+import com.operametrix.ignition.git.records.GitConfigRemoteRecord;
 import com.operametrix.ignition.git.records.GitProjectsConfigRecord;
 import com.operametrix.ignition.git.records.GitRemoteCredentialsRecord;
 import com.operametrix.ignition.git.records.GitReposUsersRecord;
@@ -89,6 +90,28 @@ public class GitManager {
         return getContext().getSystemManager().getDataDir().toPath();
     }
 
+    public static RepoLocator.Layout layout() {
+        return RepoLocator.readLayout(getDataFolderPath());
+    }
+
+    public static boolean combined() {
+        return layout() == RepoLocator.Layout.COMBINED;
+    }
+
+    /** The repository a project's git operations run against, and its path prefix there. */
+    public static RepoLocator.Repo repoFor(String projectName) {
+        return RepoLocator.forProject(getDataFolderPath(), projectName, layout());
+    }
+
+    /**
+     * What a mutation of this project's repository synchronises on. In Combined the repository is
+     * the config repository too, so project and config writes take the same lock; in Separate
+     * nothing is shared and nothing waits.
+     */
+    public static Object lockFor(RepoLocator.Repo repo) {
+        return repo.scoped() ? DataDirGitManager.lock() : new Object();
+    }
+
 
     public static void clearDirectory(Path folderPath) {
         try {
@@ -110,6 +133,16 @@ public class GitManager {
      */
     public static void setAuthentication(TransportCommand<?, ?> command, String projectName,
                                           String userName, String remoteName) throws Exception {
+        if (combined()) {
+            // One remote for the whole gateway, with the credential set on the Versioning page.
+            GitConfigRemoteRecord gw = GitConfigRemoteRecord.get();
+            if (gw == null) {
+                throw new Exception("No remote is set for the gateway repository. Set one on the"
+                        + " Versioning page (Configure Versioning).");
+            }
+            setAuthenticationFromIds(command, gw.getUri(), gw.getSshKeyId(), gw.getHttpsCredentialId());
+            return;
+        }
         GitRemoteCredentialsRecord creds = getRemoteCredentialsRecord(projectName, userName, remoteName);
         String url = getRemoteUrl(getProjectFolderPath(projectName), remoteName);
         boolean isSsh = url != null && !url.toLowerCase().startsWith("http");
@@ -767,7 +800,8 @@ public class GitManager {
             filePath = findDataFile(projectPath, resourcePath);
         }
 
-        return getWorkingTreeDiffContent(projectPath, filePath);
+        RepoLocator.Repo repo = repoFor(projectName);
+        return getWorkingTreeDiffContent(repo.root(), repo.toRepoPath(filePath));
     }
 
     /** {@code [oldContent, newContent]} of one file, HEAD vs working tree (JSON-normalized). */
@@ -870,8 +904,13 @@ public class GitManager {
      * @return list of String arrays: [fullHash, shortHash, author, date, message, refs]
      */
     public static List<String[]> getCommitLog(Path projectFolderPath, int skip, int limit) {
+        return getCommitLog(new RepoLocator.Repo(projectFolderPath, ""), skip, limit);
+    }
+
+    /** As above, limited to the project's folder when the repository is shared. */
+    public static List<String[]> getCommitLog(RepoLocator.Repo scope, int skip, int limit) {
         List<String[]> commits = new ArrayList<>();
-        try (Git git = getGit(projectFolderPath)) {
+        try (Git git = getGit(scope.root())) {
             Repository repo = git.getRepository();
 
             // Build a map of commit hash → branch names for ref decorations
@@ -888,6 +927,7 @@ public class GitManager {
             }
 
             LogCommand logCmd = git.log().setSkip(skip).setMaxCount(limit);
+            ProjectScope.limitLog(logCmd, scope);
 
             // Include the upstream remote-tracking branch so fetched commits
             // appear in the history even before merging/pulling.
@@ -1120,7 +1160,11 @@ public class GitManager {
      * and an error is thrown so the repo is never left in a conflicted state.
      */
     public static boolean revertCommit(Path projectFolderPath, String commitHash) {
-        try (Git git = getGit(projectFolderPath)) {
+        return revertCommit(new RepoLocator.Repo(projectFolderPath, ""), commitHash);
+    }
+
+    public static boolean revertCommit(RepoLocator.Repo scope, String commitHash) {
+        try (Git git = getGit(scope.root())) {
             Repository repo = git.getRepository();
             ObjectId commitId = repo.resolve(commitHash);
             if (commitId == null) {
@@ -1153,6 +1197,10 @@ public class GitManager {
                 }
             }
 
+            if (scope.scoped()) {
+                ProjectScope.revertScoped(git, scope, commitHash);
+                return true;
+            }
             RevCommit result = git.revert().include(commitId).call();
             if (result == null) {
                 // Revert produced conflicts — abort to avoid leaving repo in conflicted state

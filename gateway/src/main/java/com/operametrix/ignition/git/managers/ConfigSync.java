@@ -26,13 +26,28 @@ public final class ConfigSync {
     public static final int DEFAULT_INTERVAL_SECONDS = 300;
     public static final String MODE_OFF = "off";
     public static final String MODE_REPLACE = "replace";
+    /** Combined layout only: merge the branch in, refusing over local changes. */
+    public static final String MODE_PULL = "pull";
+    /** Combined layout only: pull when a runner calls {@code /runner-sync}, no timer. */
+    public static final String MODE_RUNNER = "runner";
 
     private static final String SECTION = "gitmodule";
     private static final String SUBSECTION = "configsync";
 
+    /**
+     * The gateway repository's delivery. Pull and runner are kept but inactive in the Separate
+     * layout, where each project has its own delivery.
+     */
     public record Settings(String mode, String branch, int intervalSeconds) {
+        /** Whether the timer runs it. */
         public boolean enabled() {
-            return MODE_REPLACE.equals(mode) && !branch.isBlank();
+            return !branch.isBlank() && (MODE_REPLACE.equals(mode)
+                    || (MODE_PULL.equals(mode) && GitManager.combined()));
+        }
+
+        /** Whether a runner's repo-update call may run it. */
+        public boolean runner() {
+            return MODE_RUNNER.equals(mode) && !branch.isBlank() && GitManager.combined();
         }
     }
 
@@ -64,7 +79,8 @@ public final class ConfigSync {
             String mode = c.getString(SECTION, SUBSECTION, "mode");
             String branch = c.getString(SECTION, SUBSECTION, "branch");
             int interval = c.getInt(SECTION, SUBSECTION, "interval", DEFAULT_INTERVAL_SECONDS);
-            return new Settings(MODE_REPLACE.equals(mode) ? MODE_REPLACE : MODE_OFF,
+            boolean known = MODE_REPLACE.equals(mode) || MODE_PULL.equals(mode) || MODE_RUNNER.equals(mode);
+            return new Settings(known ? mode : MODE_OFF,
                     branch == null ? "" : branch, Math.max(MIN_INTERVAL_SECONDS, interval));
         } catch (Exception e) {
             logger.warn("Could not read the config branch-follow settings.", e);
@@ -77,14 +93,18 @@ public final class ConfigSync {
             throw new RuntimeException("Config versioning is not initialised.");
         }
         String b = branch == null ? "" : branch.trim();
-        boolean replace = MODE_REPLACE.equals(mode);
-        if (replace && b.isEmpty()) {
+        boolean follows = MODE_REPLACE.equals(mode) || MODE_PULL.equals(mode) || MODE_RUNNER.equals(mode);
+        if (follows && b.isEmpty()) {
             throw new RuntimeException("A branch to follow is required.");
+        }
+        if ((MODE_PULL.equals(mode) || MODE_RUNNER.equals(mode)) && !GitManager.combined()) {
+            throw new RuntimeException("Pull and runner delivery for the whole gateway need the Combined"
+                    + " layout; in Separate each project has its own delivery on the Projects tab.");
         }
         try {
             StoredConfig c = config();
             c.load();
-            c.setString(SECTION, SUBSECTION, "mode", replace ? MODE_REPLACE : MODE_OFF);
+            c.setString(SECTION, SUBSECTION, "mode", follows ? mode : MODE_OFF);
             c.setString(SECTION, SUBSECTION, "branch", b);
             c.setInt(SECTION, SUBSECTION, "interval", Math.max(MIN_INTERVAL_SECONDS, intervalSeconds));
             c.save();
@@ -110,13 +130,16 @@ public final class ConfigSync {
     /** One run; safe to call from the Sync now button as well as the timer. */
     public static String syncNow() {
         Settings s = get();
-        if (!s.enabled()) {
+        if (!s.enabled() && !s.runner()) {
             throw new RuntimeException("Branch follow is off.");
         }
         if (!running.compareAndSet(false, true)) {
             return "already running";
         }
         try {
+            if (!MODE_REPLACE.equals(s.mode())) {
+                return pull(s);
+            }
             DataDirGitManager.ReplaceResult r = DataDirGitManager.replaceFromBranch(s.branch());
             if (!r.changed()) {
                 return "up to date";
@@ -137,6 +160,31 @@ public final class ConfigSync {
             return "failed: " + reason;
         } finally {
             running.set(false);
+        }
+    }
+
+    private static String pull(Settings s) {
+        try {
+            DataDirGitManager.PullResult r = DataDirGitManager.pullFromBranch(s.branch());
+            if (!r.changed()) {
+                if (!r.note().equals("up to date")) {
+                    GitEvents.fire(GitEvent.of(GitEvent.SYNC).config().branch(s.branch()).failure(r.note()));
+                    lastRun = new LastRun(System.currentTimeMillis(), false, r.note(), "");
+                }
+                return r.note();
+            }
+            String message = "Pulled " + r.commit().substring(0, 7) + " from " + s.branch() + ": "
+                    + r.files().size() + " changed file(s)";
+            GitEvents.fire(GitEvent.of(GitEvent.SYNC).config().branch(s.branch())
+                    .commit(r.commit()).message(message).files(r.files()).success());
+            lastRun = new LastRun(System.currentTimeMillis(), true, message, r.commit());
+            return message;
+        } catch (Exception e) {
+            String reason = GitEvents.reason(e);
+            logger.warn("Gateway pull failed.", e);
+            GitEvents.fire(GitEvent.of(GitEvent.SYNC).config().branch(s.branch()).failure(reason));
+            lastRun = new LastRun(System.currentTimeMillis(), false, reason, "");
+            return "failed: " + reason;
         }
     }
 }

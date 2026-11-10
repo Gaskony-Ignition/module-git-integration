@@ -342,7 +342,8 @@ public final class CredentialCheck {
         List<GitRemoteCredentialsRecord> refs = ssh
                 ? GitRemoteCredentialsRecord.listBySshKeyId(id)
                 : GitRemoteCredentialsRecord.listByHttpsCredentialId(id);
-        for (GitRemoteCredentialsRecord ref : refs) {
+        // Combined: per-project remote links are kept but unused; the gateway remote below is the one.
+        for (GitRemoteCredentialsRecord ref : GitManager.combined() ? List.<GitRemoteCredentialsRecord>of() : refs) {
             GitProjectsConfigRecord project = GitProjectsConfigRecord.findById(ref.getProjectId());
             if (project == null) {
                 continue;
