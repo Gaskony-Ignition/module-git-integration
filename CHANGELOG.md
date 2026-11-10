@@ -3,7 +3,7 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
-## 4.1.0 (unreleased)
+## [4.1.0] - 2026-11-10
 
 ### Added
 - **Git policy, per deployment mode.** A new `git-policy` resource (Versioning › Policy) says
