@@ -33,7 +33,7 @@ public class GitConfigRemoteRecord {
     }
 
     private static final long SINGLETON_ID = 1L;
-    private static final String SINGLETON_NAME = String.valueOf(SINGLETON_ID);
+    public static final String SINGLETON_NAME = String.valueOf(SINGLETON_ID);
 
     private String uri;
     private String branch;
@@ -93,7 +93,7 @@ public class GitConfigRemoteRecord {
 
     public void delete() {
         try {
-            if (handler.findResource(SINGLETON_NAME).isPresent()) {
+            if (ModeStore.find(handler, META, SINGLETON_NAME).isPresent()) {
                 handler.delete(SINGLETON_NAME).join();
             }
         } catch (Exception e) {
@@ -103,7 +103,7 @@ public class GitConfigRemoteRecord {
 
     /** @return the configured remote, or null when none is set. */
     public static GitConfigRemoteRecord get() {
-        return handler.findResource(SINGLETON_NAME)
+        return ModeStore.find(handler, META, SINGLETON_NAME)
                 .map(d -> new GitConfigRemoteRecord(d.config()))
                 .orElse(null);
     }
@@ -113,12 +113,4 @@ public class GitConfigRemoteRecord {
         return ModeStore.definedIn(TYPE, SINGLETON_NAME);
     }
 
-    /** Deletes the active mode's override of this record; false when there is none. */
-    public boolean resetToCore() {
-        try {
-            return ModeStore.reset(handler, TYPE, SINGLETON_NAME);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
 }

@@ -36,7 +36,7 @@ public class GitRunnerRecord {
     public static final String MODULE_ID = "com.operametrix.ignition.git";
 
     /** The one resource name; the runner configuration is a gateway-level singleton. */
-    private static final String NAME = "runner";
+    public static final String NAME = "runner";
 
     /** How a runner delivers to a project: a release zip replacing it, or a pull of its branch. */
     public static final String MODE_RELEASE = "release";
@@ -110,7 +110,7 @@ public class GitRunnerRecord {
     /** The stored configuration, or a disabled default when none has been saved. */
     public static GitRunnerRecord get() {
         try {
-            return handler.findResource(NAME)
+            return ModeStore.find(handler, META, NAME)
                     .map(DecodedResource::config)
                     .map(GitRunnerRecord::new)
                     .orElseGet(GitRunnerRecord::new);
@@ -204,7 +204,7 @@ public class GitRunnerRecord {
      */
     public static List<String> clearAssignedDeliveries() {
         Handler h = handler;
-        if (h == null || h.findResource(NAME).isEmpty()) {
+        if (h == null || ModeStore.find(h, META, NAME).isEmpty()) {
             return null;
         }
         GitRunnerRecord r = get();
@@ -280,12 +280,4 @@ public class GitRunnerRecord {
         return ModeStore.definedIn(TYPE, NAME);
     }
 
-    /** Deletes the active mode's override of this record; false when there is none. */
-    public boolean resetToCore() {
-        try {
-            return ModeStore.reset(handler, TYPE, NAME);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
 }

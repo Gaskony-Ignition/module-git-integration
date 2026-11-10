@@ -145,7 +145,7 @@ public class GitUserHttpsCredentialRecord {
         try {
             synchronized (SAVE_LOCK) {
                 if (id == 0L) {
-                    id = handler.getResources().stream()
+                    id = ModeStore.everywhere(handler, META).stream()
                             .map(DecodedResource::config)
                             .mapToLong(Config::id)
                             .max()
@@ -169,13 +169,13 @@ public class GitUserHttpsCredentialRecord {
     }
 
     public static GitUserHttpsCredentialRecord findById(long id) {
-        return handler.findResource(String.valueOf(id))
+        return ModeStore.find(handler, META, String.valueOf(id))
                 .map(d -> new GitUserHttpsCredentialRecord(d.config()))
                 .orElse(null);
     }
 
     public static GitUserHttpsCredentialRecord findByIdAndUser(long id, String ignitionUser) {
-        return handler.findResource(String.valueOf(id))
+        return ModeStore.find(handler, META, String.valueOf(id))
                 .map(DecodedResource::config)
                 .filter(c -> ignitionUser != null && ignitionUser.equals(c.ignitionUser()))
                 .map(GitUserHttpsCredentialRecord::new)
@@ -183,7 +183,7 @@ public class GitUserHttpsCredentialRecord {
     }
 
     public static GitUserHttpsCredentialRecord findByUserAndHostPattern(String ignitionUser, String hostPattern) {
-        return handler.getResources().stream()
+        return ModeStore.all(handler, META).stream()
                 .map(DecodedResource::config)
                 .filter(c -> ignitionUser != null && ignitionUser.equals(c.ignitionUser())
                         && hostPattern != null && hostPattern.equals(c.hostPattern()))
@@ -195,7 +195,7 @@ public class GitUserHttpsCredentialRecord {
     /** All HTTPS credentials regardless of owner — for the gateway-level config-remote credential picker. */
     public static List<GitUserHttpsCredentialRecord> listAll() {
         List<GitUserHttpsCredentialRecord> out = new ArrayList<>();
-        for (DecodedResource<Config> d : handler.getResources()) {
+        for (DecodedResource<Config> d : ModeStore.all(handler, META)) {
             out.add(new GitUserHttpsCredentialRecord(d.config()));
         }
         return out;
@@ -203,10 +203,19 @@ public class GitUserHttpsCredentialRecord {
 
     public static List<GitUserHttpsCredentialRecord> listByUser(String ignitionUser) {
         List<GitUserHttpsCredentialRecord> out = new ArrayList<>();
-        for (DecodedResource<Config> d : handler.getResources()) {
+        for (DecodedResource<Config> d : ModeStore.all(handler, META)) {
             if (ignitionUser != null && ignitionUser.equals(d.config().ignitionUser())) {
                 out.add(new GitUserHttpsCredentialRecord(d.config()));
             }
+        }
+        return out;
+    }
+
+    /** Every credential defined in core or any mode, including one only a mode has. */
+    public static List<GitUserHttpsCredentialRecord> listEverywhere() {
+        List<GitUserHttpsCredentialRecord> out = new ArrayList<>();
+        for (DecodedResource<Config> d : ModeStore.everywhere(handler, META)) {
+            out.add(new GitUserHttpsCredentialRecord(d.config()));
         }
         return out;
     }
@@ -216,12 +225,4 @@ public class GitUserHttpsCredentialRecord {
         return ModeStore.definedIn(TYPE, String.valueOf(id));
     }
 
-    /** Deletes the active mode's override of this record; false when there is none. */
-    public boolean resetToCore() {
-        try {
-            return ModeStore.reset(handler, TYPE, String.valueOf(id));
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
 }

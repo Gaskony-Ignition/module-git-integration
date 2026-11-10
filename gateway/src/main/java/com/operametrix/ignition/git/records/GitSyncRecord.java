@@ -158,7 +158,7 @@ public class GitSyncRecord {
                 if (id == 0L) {
                     GitSyncRecord existing = findByProject(project);
                     id = existing != null ? existing.id
-                            : handler.getResources().stream()
+                            : ModeStore.everywhere(handler, META).stream()
                                     .map(DecodedResource::config)
                                     .mapToLong(Config::id)
                                     .max()
@@ -187,7 +187,7 @@ public class GitSyncRecord {
         if (h == null || project == null) {
             return null;
         }
-        return h.getResources().stream()
+        return ModeStore.all(h, META).stream()
                 .map(DecodedResource::config)
                 .filter(c -> project.equals(c.project()))
                 .findFirst()
@@ -201,7 +201,7 @@ public class GitSyncRecord {
         if (h == null) {
             return out;
         }
-        for (DecodedResource<Config> d : h.getResources()) {
+        for (DecodedResource<Config> d : ModeStore.all(h, META)) {
             out.add(new GitSyncRecord(d.config()));
         }
         return out;
@@ -222,12 +222,4 @@ public class GitSyncRecord {
         return ModeStore.definedIn(TYPE, String.valueOf(id));
     }
 
-    /** Deletes the active mode's override of this record; false when there is none. */
-    public boolean resetToCore() {
-        try {
-            return ModeStore.reset(handler, TYPE, String.valueOf(id));
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
 }

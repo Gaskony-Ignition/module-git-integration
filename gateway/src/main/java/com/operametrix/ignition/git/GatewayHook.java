@@ -30,11 +30,14 @@ import com.operametrix.ignition.git.managers.ProjectRecords;
 import com.operametrix.ignition.git.managers.DataDirGitManager;
 import com.operametrix.ignition.git.managers.GitManager;
 import com.operametrix.ignition.git.managers.LayoutSwitch;
+import com.operametrix.ignition.git.managers.MasterRename;
+import com.operametrix.ignition.git.managers.PullGuard;
 import com.operametrix.ignition.git.managers.RepoLocator;
 import com.inductiveautomation.ignition.common.gson.Gson;
 import com.inductiveautomation.ignition.common.gson.JsonArray;
 import com.inductiveautomation.ignition.common.gson.JsonElement;
 import com.inductiveautomation.ignition.common.gson.JsonObject;
+import com.inductiveautomation.ignition.common.gson.JsonParser;
 import com.inductiveautomation.ignition.common.licensing.LicenseState;
 import com.inductiveautomation.ignition.gateway.dataroutes.AccessControlStrategy;
 import com.inductiveautomation.ignition.gateway.config.ResourceTypeMetaRegistry;
@@ -466,6 +469,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         routes.newRoute("/branch-graph").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.READ).nocache()
                 .handler(this::handleBranchGraph).mount();
+        routes.newRoute("/branch-rename-master").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleRenameMaster).mount();
         routes.newRoute("/branch-checkout").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleBranchCheckout).mount();
@@ -475,6 +481,12 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         routes.newRoute("/mode-reset").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleModeReset).mount();
+        routes.newRoute("/mode-override").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleModeOverride).mount();
+        routes.newRoute("/definition").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.READ).nocache()
+                .handler(this::handleGetDefinition).mount();
     }
 
     /**
@@ -541,6 +553,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             o.addProperty("version", moduleVersion());
             o.addProperty("layout", GitManager.combined() ? "combined" : "separate");
             o.add("policy", policyJson());
+            // Every mode created here, active or not: the drawers' Create Override offers each.
+            JsonArray modes = new JsonArray();
+            ModeStore.modes().forEach(modes::add);
+            o.add("modes", modes);
             JsonArray changes = new JsonArray();
             boolean dirty = false;
             if (init) {
@@ -715,6 +731,71 @@ public class GatewayHook extends AbstractGatewayModuleHook {
      * Switch the branch of one repository ({@code project} or {@code repo: "config"}). Refuses,
      * with the files, when uncommitted work would be affected; never stashes.
      */
+    /**
+     * The name a repository's lone {@code master} should take to match its remote: {@code wanted},
+     * else (no branch configured) {@code main} when origin has main and no master. Null when there
+     * is nothing to offer or the repository cannot be read.
+     */
+    private static String renameTarget(Path root, String wanted) {
+        if (!java.nio.file.Files.isDirectory(root.resolve(".git"))) {
+            return null;
+        }
+        try (org.eclipse.jgit.api.Git git = GitManager.getGit(root)) {
+            org.eclipse.jgit.lib.Repository r = git.getRepository();
+            String w = wanted;
+            if (w == null || w.isBlank()) {
+                w = r.exactRef("refs/remotes/origin/main") != null
+                        && r.exactRef("refs/remotes/origin/master") == null ? "main" : null;
+            }
+            return MasterRename.target(r, w);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Rename local master to the remote's branch name: {@code project}, or {@code repo:"config"}. */
+    private Object handleRenameMaster(RequestContext req, HttpServletResponse resp) {
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            PolicyGate.check(PolicyGate.Action.BRANCH_SWITCH);
+            String project = optString(body, "project");
+            boolean gateway = "config".equals(optString(body, "repo")) || GitManager.combined();
+            Path root;
+            String to;
+            if (gateway) {
+                root = GitManager.getDataFolderPath();
+                GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+                to = renameTarget(root, remote == null ? null : remote.getBranch());
+            } else {
+                if (project == null || project.isBlank()) {
+                    throw new RuntimeException("A project or repo=config is required.");
+                }
+                root = GitManager.repoFor(project.trim()).root();
+                GitSyncRecord sync = GitSyncRecord.findByProject(project.trim());
+                to = renameTarget(root, sync != null && sync.isEnabled() && !sync.getBranch().isBlank()
+                        ? sync.getBranch() : null);
+            }
+            if (to == null) {
+                throw new RuntimeException("Nothing to rename: the repository is not on a lone master branch"
+                        + " behind a remote with another name.");
+            }
+            synchronized (gateway ? DataDirGitManager.lock() : new Object()) {
+                try (org.eclipse.jgit.api.Git git = GitManager.getGit(root)) {
+                    MasterRename.rename(git, to, "origin");
+                }
+            }
+            GitEvents.fire(GitEvent.of(GitEvent.CHECKOUT).project(gateway ? "" : project)
+                    .user(webUser(req).orElse("Versioning page")).branch(to)
+                    .message("Renamed local master to " + to).success());
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", true);
+            o.addProperty("branch", to);
+            return o.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
     private Object handleBranchCheckout(RequestContext req, HttpServletResponse resp) {
         String project = null;
         boolean config = false;
@@ -906,6 +987,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.addProperty("uri", remote.getUri());
                 o.addProperty("branch", remote.getBranch());
                 o.addProperty("from", remote.definedIn());
+                o.add("defined", definedJson(GitConfigRemoteRecord.TYPE, GitConfigRemoteRecord.SINGLETON_NAME));
                 // Secret prefill: mode + (referenced) provider/secret + (https) username. The
                 // embedded secret itself is never returned — the drawer leaves it blank to keep it.
                 SecretConfig secret = null;
@@ -945,6 +1027,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.add("delivery", delivery);
                 // Unsynced-commit count for the header sync indicator.
                 o.addProperty("ahead", DataDirGitManager.aheadCount());
+                o.addProperty("renameMaster", renameTarget(GitManager.getDataFolderPath(), remote.getBranch()));
                 // What Remote Sync pushes: the checked-out branch, and where it goes.
                 String[] target = DataDirGitManager.pushTargetNow(remote);
                 o.addProperty("pushFrom", target[0]);
@@ -970,17 +1053,17 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     private Object handleGetCredentials(RequestContext req, HttpServletResponse resp) {
         try {
             JsonArray arr = new JsonArray();
-            for (GitUserSshKeyRecord key : GitUserSshKeyRecord.listAll()) {
+            for (GitUserSshKeyRecord key : GitUserSshKeyRecord.listEverywhere()) {
                 JsonObject c = new JsonObject();
                 c.addProperty("id", key.getId());
                 c.addProperty("type", "SSH");
                 c.addProperty("label", key.getKeyName());
                 c.addProperty("name", key.getKeyName());
                 c.add("check", checkJson(CredentialCheck.get("SSH", key.getId())));
-                c.addProperty("from", key.definedIn());
+                addFrom(c, GitUserSshKeyRecord.TYPE, String.valueOf(key.getId()), key.definedIn());
                 arr.add(c);
             }
-            for (GitUserHttpsCredentialRecord cred : GitUserHttpsCredentialRecord.listAll()) {
+            for (GitUserHttpsCredentialRecord cred : GitUserHttpsCredentialRecord.listEverywhere()) {
                 JsonObject c = new JsonObject();
                 c.addProperty("id", cred.getId());
                 c.addProperty("type", "HTTPS");
@@ -988,7 +1071,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 c.addProperty("host", cred.getHostPattern());
                 c.addProperty("username", cred.getUserName());
                 c.add("check", checkJson(CredentialCheck.get("HTTPS", cred.getId())));
-                c.addProperty("from", cred.definedIn());
+                addFrom(c, GitUserHttpsCredentialRecord.TYPE, String.valueOf(cred.getId()), cred.definedIn());
                 arr.add(c);
             }
             JsonObject o = new JsonObject();
@@ -1381,8 +1464,154 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             } catch (Exception e) {
                 return error(resp, e);
             }
-            return ModeStore.writingTo(target, () -> h.handle(req, resp));
+            // The record being edited is loaded from the same definition it is saved to, so a
+            // blank secret keeps that mode's secret, not the effective one's.
+            String t = target;
+            return ModeStore.writingTo(t, () -> ModeStore.readingFrom(t, () -> h.handle(req, resp)));
         };
+    }
+
+    /**
+     * {@code from} (the definition in use; for a record only another mode has, that mode) and
+     * {@code defined} (every collection defining it).
+     */
+    private static void addFrom(JsonObject o, com.inductiveautomation.ignition.common.resourcecollection.ResourceType type,
+                                String name, String from) {
+        JsonArray d = definedJson(type, name);
+        o.addProperty("from", from != null ? from : d.isEmpty() ? null : d.get(0).getAsString());
+        o.add("defined", d);
+    }
+
+    /** The collections defining one record, core first. */
+    private static JsonArray definedJson(com.inductiveautomation.ignition.common.resourcecollection.ResourceType type,
+                                         String name) {
+        JsonArray a = new JsonArray();
+        ModeStore.definers(type, name).forEach(a::add);
+        return a;
+    }
+
+    private record RecordRef(com.inductiveautomation.ignition.common.resourcecollection.ResourceType type,
+                             String name) {
+    }
+
+    /** The record a drawer edits, from {@code type} plus {@code project} or {@code id}/{@code credType}. */
+    private static RecordRef recordRef(JsonObject body) {
+        String type = optString(body, "type");
+        switch (type == null ? "" : type) {
+            case "policy" -> {
+                return new RecordRef(GitPolicyRecord.TYPE, GitPolicyRecord.NAME);
+            }
+            case "remote" -> {
+                return new RecordRef(GitConfigRemoteRecord.TYPE, GitConfigRemoteRecord.SINGLETON_NAME);
+            }
+            case "runner" -> {
+                return new RecordRef(GitRunnerRecord.TYPE, GitRunnerRecord.NAME);
+            }
+            case "sync" -> {
+                GitSyncRecord r = GitSyncRecord.findByProject(optString(body, "project"));
+                return r == null ? null : new RecordRef(GitSyncRecord.TYPE, String.valueOf(r.getId()));
+            }
+            case "credential" -> {
+                return new RecordRef("SSH".equalsIgnoreCase(optString(body, "credType"))
+                        ? GitUserSshKeyRecord.TYPE : GitUserHttpsCredentialRecord.TYPE,
+                        String.valueOf(optLong(body, "id")));
+            }
+            default -> throw new IllegalArgumentException("Unknown record type '" + type + "'.");
+        }
+    }
+
+    /**
+     * One record's definition in one collection ({@code ?collection=}), in the shape the record's
+     * own GET returns, plus {@code defined}. A collection with no definition answers core's, which
+     * is what Create Override would copy.
+     */
+    private Object handleGetDefinition(RequestContext req, HttpServletResponse resp) {
+        try {
+            String collection = ModeStore.target(queryParam(req, "collection"));
+            JsonObject q = new JsonObject();
+            for (String k : List.of("type", "project", "id", "credType")) {
+                String v = queryParam(req, k);
+                if (v != null) {
+                    q.addProperty(k, v);
+                }
+            }
+            String type = optString(q, "type");
+            return ModeStore.readingFrom(collection, () -> {
+                JsonObject o;
+                switch (type == null ? "" : type) {
+                    case "policy" -> o = policyJson();
+                    case "remote" -> o = JsonParser.parseString(
+                            String.valueOf(handleGetRemote(req, resp))).getAsJsonObject();
+                    case "runner" -> o = JsonParser.parseString(
+                            String.valueOf(handleGetRunner(req, resp))).getAsJsonObject();
+                    case "sync" -> {
+                        String project = optString(q, "project");
+                        GitSyncRecord sync = GitSyncRecord.findByProject(project);
+                        o = new JsonObject();
+                        o.addProperty("delivery", deliveryOf(GitRunnerRecord.get(), sync, project));
+                        o.addProperty("syncBranch", sync == null ? "" : sync.getBranch());
+                        o.addProperty("syncIntervalSeconds", sync == null
+                                ? GitSyncRecord.DEFAULT_INTERVAL_SECONDS : sync.getIntervalSeconds());
+                        o.addProperty("syncUser", sync == null ? "" : sync.getIgnitionUser());
+                    }
+                    case "credential" -> {
+                        long id = optLong(q, "id");
+                        boolean ssh = "SSH".equalsIgnoreCase(optString(q, "credType"));
+                        o = new JsonObject();
+                        if (ssh) {
+                            GitUserSshKeyRecord k = GitUserSshKeyRecord.findById(id);
+                            if (k != null) {
+                                o.addProperty("name", k.getKeyName());
+                                o.addProperty("secretMode", k.getSecret() != null
+                                        && k.getSecret().isReferenced() ? "reference" : "inline");
+                            }
+                        } else {
+                            GitUserHttpsCredentialRecord c = GitUserHttpsCredentialRecord.findById(id);
+                            if (c != null) {
+                                o.addProperty("host", c.getHostPattern());
+                                o.addProperty("username", c.getUserName());
+                                SecretConfig sc = c.getSecret();
+                                boolean ref = sc != null && sc.isReferenced();
+                                o.addProperty("secretMode", ref ? "reference" : "inline");
+                                if (ref) {
+                                    o.addProperty("providerName", sc.getAsReferenced().getProviderName());
+                                    o.addProperty("secretName", sc.getAsReferenced().getSecretName());
+                                }
+                            }
+                        }
+                    }
+                    default -> throw new IllegalArgumentException("Unknown record type '" + type + "'.");
+                }
+                RecordRef ref = recordRef(q);
+                o.addProperty("collection", collection == null ? ModeStore.CORE : collection);
+                o.add("defined", ref == null ? new JsonArray() : definedJson(ref.type(), ref.name()));
+                return o.toString();
+            });
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    /** Create Override: copy the record's definition in {@code from} (default core) into {@code mode}. */
+    private Object handleModeOverride(RequestContext req, HttpServletResponse resp) {
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            String mode = ModeStore.target(optString(body, "mode"));
+            String from = optString(body, "from");
+            RecordRef ref = ModeStore.readingFrom(ModeStore.target(from), () -> recordRef(body));
+            // A project with no delivery saved yet has nothing to copy; its first save in the
+            // mode creates the record there.
+            if (ref != null) {
+                ModeStore.createOverride(ref.type(), ref.name(), from, mode);
+                if ("remote".equals(optString(body, "type"))) {
+                    DataDirGitManager.resyncOrigin();
+                }
+                DataDirGitManager.commitAllIfDirty("Override " + optString(body, "type") + " in " + mode);
+            }
+            return ok();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
     }
 
     private static String queryParam(RequestContext req, String name) {
@@ -1407,6 +1636,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         String mode = ModeStore.activeMode().orElse(null);
         o.addProperty("mode", mode);
         o.addProperty("from", GitPolicyRecord.definedIn());
+        o.add("defined", definedJson(GitPolicyRecord.TYPE, GitPolicyRecord.NAME));
         GitPolicy p = GitPolicyRecord.get();
         o.addProperty("pushAllowed", p.push());
         o.addProperty("designerCommit", p.commit());
@@ -1471,43 +1701,25 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         try {
             JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
             String type = optString(body, "type");
-            boolean done;
-            switch (type == null ? "" : type) {
-                case "policy" -> done = GitPolicyRecord.reset();
-                case "remote" -> {
-                    GitConfigRemoteRecord r = GitConfigRemoteRecord.get();
-                    done = r != null && r.resetToCore();
-                }
-                case "runner" -> done = GitRunnerRecord.get().resetToCore();
-                case "sync" -> {
-                    GitSyncRecord r = GitSyncRecord.findByProject(optString(body, "project"));
-                    done = r != null && r.resetToCore();
-                }
-                case "credential" -> {
-                    long id = optLong(body, "id");
-                    if ("SSH".equalsIgnoreCase(optString(body, "credType"))) {
-                        GitUserSshKeyRecord r = GitUserSshKeyRecord.findById(id);
-                        done = r != null && r.resetToCore();
-                    } else {
-                        GitUserHttpsCredentialRecord r = GitUserHttpsCredentialRecord.findById(id);
-                        done = r != null && r.resetToCore();
-                    }
-                }
-                default -> throw new IllegalArgumentException("Unknown record type '" + type + "'.");
-            }
-            if (!done) {
-                throw new IllegalArgumentException("That record has no override in the active mode.");
+            // Blank: the active mode's override, as 4.1.0's Reset to core did.
+            String mode = ModeStore.target(optString(body, "mode"));
+            RecordRef ref = ModeStore.readingFrom(mode, () -> recordRef(body));
+            if (ref == null || !ModeStore.removeOverride(ref.type(), ref.name(), mode)) {
+                throw new IllegalArgumentException("That record has no override in "
+                        + (mode != null ? mode : "the active mode") + ".");
             }
             // The config remote resolves differently now; point origin at it before anything runs.
             if ("remote".equals(type)) {
                 DataDirGitManager.resyncOrigin();
             }
-            DataDirGitManager.commitAllIfDirty("Reset " + type + " to core");
+            DataDirGitManager.commitAllIfDirty("Remove " + type + " override"
+                    + (mode != null ? " in " + mode : ""));
             return ok();
         } catch (Exception e) {
             return error(resp, e);
         }
     }
+
 
     private static String ok() {
         JsonObject o = new JsonObject();
@@ -1604,7 +1816,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
         }
         JsonObject o = new JsonObject();
-        o.addProperty("error", e.getMessage() == null ? e.toString() : e.getMessage());
+        String m = e.getMessage() == null ? e.toString() : e.getMessage();
+        // A raw JGit failure in plain words, the original kept for the page's console.
+        String plain = m.contains(PullGuard.DETAILS) ? null : PullGuard.plainOrNull(e);
+        o.addProperty("error", plain == null ? m : plain + PullGuard.DETAILS + m);
         return o.toString();
     }
 
@@ -1760,7 +1975,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             List<GitProjectManager.ProjectStatus> projects = GitProjectManager.listProjectStatus();
             // A mode outliving its project would be inherited by the next project created under
             // that name, which is a delivery nobody chose.
-            if (!runner.pruneMissing(projects.stream()
+            if (!ModeStore.reading() && !runner.pruneMissing(projects.stream()
                     .map(GitProjectManager.ProjectStatus::name).toList()).isEmpty()) {
                 runner.save();
             }
@@ -1791,6 +2006,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.addProperty("error", p.error());
                 o.addProperty("imagePrefix", GitProjectsConfigRecord.imagePrefixFor(p.name()));
                 o.addProperty("credentialIssue", CredentialCheck.issueFor(p.name()));
+                if (!GitManager.combined() && p.versioned() && p.remoteUrl() != null && !p.remoteUrl().isBlank()) {
+                    GitSyncRecord s0 = GitSyncRecord.findByProject(p.name());
+                    o.addProperty("renameMaster", renameTarget(GitManager.repoFor(p.name()).root(),
+                            s0 != null && s0.isEnabled() && !s0.getBranch().isBlank() ? s0.getBranch() : null));
+                }
 
                 // A runner delivery on a runner nobody switched on delivers nothing; say so.
                 o.addProperty("runnerEnabled", runnerOn);
@@ -1801,6 +2021,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                         ? GitSyncRecord.DEFAULT_INTERVAL_SECONDS : sync.getIntervalSeconds());
                 o.addProperty("syncUser", sync == null ? "" : sync.getIgnitionUser());
                 o.addProperty("syncFrom", sync == null ? null : sync.definedIn());
+                o.add("syncDefined", sync == null ? new JsonArray()
+                        : definedJson(GitSyncRecord.TYPE, String.valueOf(sync.getId())));
                 arr.add(o);
             }
             JsonObject out = new JsonObject();
@@ -2151,6 +2373,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             // Never the token itself: it is shown once, when generated.
             o.addProperty("hasToken", cfg.hasToken());
             o.addProperty("from", cfg.definedIn());
+            o.add("defined", definedJson(GitRunnerRecord.TYPE, GitRunnerRecord.NAME));
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);

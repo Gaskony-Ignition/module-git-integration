@@ -4,6 +4,7 @@ import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.operametrix.ignition.git.automation.GitEvent;
 import com.operametrix.ignition.git.automation.GitEvents;
 import com.operametrix.ignition.git.records.GitConfigRemoteRecord;
+import com.operametrix.ignition.git.records.ModeStore;
 import org.eclipse.jgit.api.CommitCommand;
 import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
@@ -101,7 +102,10 @@ public class DataDirGitManager {
             if (isInitialized()) {
                 throw new RuntimeException("Config versioning is already initialized.");
             }
-            try (Git git = Git.init().setDirectory(dataDir().toFile()).call()) {
+            GitConfigRemoteRecord configured = GitConfigRemoteRecord.get();
+            try (Git git = Git.init().setDirectory(dataDir().toFile())
+                    .setInitialBranch(MasterRename.initialBranch(configured == null ? null : configured.getBranch()))
+                    .call()) {
                 GitManager.disableSsl(git);
                 writeGitignore();
                 stageScope(git, false);
@@ -431,7 +435,7 @@ public class DataDirGitManager {
                 return;
             }
             try (Git git = GitManager.getGit(dataDir())) {
-                GitConfigRemoteRecord effective = GitConfigRemoteRecord.get();
+                GitConfigRemoteRecord effective = ModeStore.effective(GitConfigRemoteRecord::get);
                 if (effective != null) {
                     syncOrigin(git, effective);
                 }
@@ -441,6 +445,39 @@ public class DataDirGitManager {
         }
     }
 
+    /**
+     * A fetch of one followed branch, with a branch deleted on the remote (usually merged) said
+     * plainly rather than as JGit's "Remote does not have refs/heads/x available for fetch".
+     */
+    private static void fetchBranch(FetchCommand fetch, String branch) throws Exception {
+        try {
+            fetch.call();
+        } catch (org.eclipse.jgit.api.errors.GitAPIException e) {
+            String m = String.valueOf(e.getMessage()) + " " + String.valueOf(e.getCause());
+            if (m.contains("does not have") || m.contains("not advertise")) {
+                throw new RuntimeException(PullGuard.missingBranch(branch, ORIGIN) + PullGuard.DETAILS + e, e);
+            }
+            throw PullGuard.error(e);
+        }
+    }
+
+    /** The remote branch's tip after fetching it, or null when the remote does not have it. */
+    private static ObjectId fetchTipOrNull(Git git, GitConfigRemoteRecord remote, String branch) throws Exception {
+        FetchCommand fetch = git.fetch().setRemote(ORIGIN)
+                .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
+        authOrigin(git, fetch, remote);
+        try {
+            fetch.call();
+        } catch (org.eclipse.jgit.api.errors.GitAPIException e) {
+            String m = String.valueOf(e.getMessage()) + " " + String.valueOf(e.getCause());
+            if (m.contains("does not have") || m.contains("not advertise")) {
+                return null;
+            }
+            throw PullGuard.error(e);
+        }
+        return git.getRepository().resolve(trackingRef(branch));
+    }
+
     /** Origin from the effective record; see {@link OriginSync}. */
     static void syncOrigin(Git git, GitConfigRemoteRecord remote) throws IOException {
         OriginSync.apply(git, remote.getUri(), remote.getBranch());
@@ -448,7 +485,7 @@ public class DataDirGitManager {
 
     /** {@link #syncOrigin} from outside, after the effective record changed (a reset to core). */
     public static void resyncOrigin() {
-        GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+        GitConfigRemoteRecord remote = ModeStore.effective(GitConfigRemoteRecord::get);
         if (remote == null || !isInitialized()) {
             return;
         }
@@ -593,6 +630,12 @@ public class DataDirGitManager {
             try (Git git = GitManager.getGit(dataDir())) {
                 String local = git.getRepository().getBranch();
                 String target = ProjectScope.pushTarget(git.getRepository(), ORIGIN, remote.getBranch());
+                // Never push over a branch laid out another way or with unrelated history.
+                String layout = LayoutCheck.problem(git.getRepository(), fetchTipOrNull(git, remote, target),
+                        git.getRepository().resolve(Constants.HEAD), ORIGIN + "/" + target, GitManager.combined());
+                if (layout != null) {
+                    throw new RuntimeException(layout);
+                }
                 PushCommand push = git.push()
                         .setRemote(ORIGIN)
                         .setRefSpecs(new RefSpec("refs/heads/" + local + ":refs/heads/" + target));
@@ -813,7 +856,8 @@ public class DataDirGitManager {
             try {
                 if (fresh) {
                     // Re-establish the repo from the saved remote (post-restore recovery).
-                    try (Git git = Git.init().setDirectory(dataDir().toFile()).call()) {
+                    try (Git git = Git.init().setDirectory(dataDir().toFile())
+                            .setInitialBranch(MasterRename.initialBranch(branch)).call()) {
                         GitManager.disableSsl(git);
                         git.remoteAdd().setName(ORIGIN).setUri(new URIish(remote.getUri())).call();
                     }
@@ -827,11 +871,16 @@ public class DataDirGitManager {
                     FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
                             .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
                     authOrigin(git, fetch, remote);
-                    fetch.call();
+                    fetchBranch(fetch, branch);
 
                     ObjectId remoteId = repo.resolve(trackingRef(branch));
                     if (remoteId == null) {
-                        throw new RuntimeException("Branch '" + branch + "' was not found on the remote.");
+                        throw new RuntimeException(PullGuard.missingBranch(branch, ORIGIN));
+                    }
+                    String layout = LayoutCheck.problem(repo, remoteId, fresh ? null : repo.resolve(Constants.HEAD), ORIGIN + "/" + branch,
+                            GitManager.combined());
+                    if (layout != null) {
+                        throw new RuntimeException(layout);
                     }
 
                     ObjectId head = fresh ? null : repo.resolve(Constants.HEAD);
@@ -919,11 +968,16 @@ public class DataDirGitManager {
                 FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
                         .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
                 authOrigin(git, fetch, remote);
-                fetch.call();
+                fetchBranch(fetch, branch);
 
                 ObjectId tip = repo.resolve(trackingRef(branch));
                 if (tip == null) {
-                    throw new RuntimeException("Branch '" + branch + "' was not found on the remote.");
+                    throw new RuntimeException(PullGuard.missingBranch(branch, ORIGIN));
+                }
+                String layout = LayoutCheck.problem(repo, tip, null, ORIGIN + "/" + branch,
+                        GitManager.combined());
+                if (layout != null) {
+                    throw new RuntimeException(layout);
                 }
                 ObjectId head = repo.resolve(Constants.HEAD);
                 ObjectId applied = repo.resolve(SYNCED_REF);
@@ -1121,10 +1175,15 @@ public class DataDirGitManager {
                 FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
                         .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
                 authOrigin(git, fetch, remote);
-                fetch.call();
+                fetchBranch(fetch, branch);
                 ObjectId tip = repo.resolve(trackingRef(branch));
                 if (tip == null) {
-                    throw new RuntimeException("Branch '" + branch + "' was not found on the remote.");
+                    throw new RuntimeException(PullGuard.missingBranch(branch, ORIGIN));
+                }
+                String layout = LayoutCheck.problem(repo, tip, repo.resolve(Constants.HEAD), ORIGIN + "/" + branch,
+                        GitManager.combined());
+                if (layout != null) {
+                    throw new RuntimeException(layout);
                 }
                 ObjectId before = repo.resolve(Constants.HEAD);
                 ConfigAutoCommitter.hold(30_000);

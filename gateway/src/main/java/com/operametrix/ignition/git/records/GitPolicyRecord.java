@@ -43,7 +43,7 @@ public class GitPolicyRecord {
             return GitPolicy.DEFAULT;
         }
         try {
-            return h.findResource(NAME).map(DecodedResource::config).orElse(GitPolicy.DEFAULT);
+            return ModeStore.find(h, META, NAME).map(DecodedResource::config).orElse(GitPolicy.DEFAULT);
         } catch (Exception e) {
             return GitPolicy.DEFAULT;
         }
@@ -65,7 +65,7 @@ public class GitPolicyRecord {
     /** Writes the default to core when the gateway has no policy yet, so a mode has one to copy. */
     public static void ensureCore() {
         Handler h = handler;
-        if (h != null && h.findResource(NAME).isEmpty()) {
+        if (h != null && ModeStore.find(h, META, NAME).isEmpty()) {
             ModeStore.writingTo(ModeStore.CORE, () -> {
                 save(GitPolicy.DEFAULT);
                 return null;
@@ -73,11 +73,4 @@ public class GitPolicyRecord {
         }
     }
 
-    public static boolean reset() {
-        try {
-            return ModeStore.reset(handler, TYPE, NAME);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
 }

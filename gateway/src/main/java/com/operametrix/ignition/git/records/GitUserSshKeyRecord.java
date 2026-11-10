@@ -148,7 +148,7 @@ public class GitUserSshKeyRecord {
         try {
             synchronized (SAVE_LOCK) {
                 if (id == 0L) {
-                    id = handler.getResources().stream()
+                    id = ModeStore.everywhere(handler, META).stream()
                             .map(DecodedResource::config)
                             .mapToLong(Config::id)
                             .max()
@@ -172,13 +172,13 @@ public class GitUserSshKeyRecord {
     }
 
     public static GitUserSshKeyRecord findById(long id) {
-        return handler.findResource(String.valueOf(id))
+        return ModeStore.find(handler, META, String.valueOf(id))
                 .map(d -> new GitUserSshKeyRecord(d.config()))
                 .orElse(null);
     }
 
     public static GitUserSshKeyRecord findByIdAndUser(long id, String ignitionUser) {
-        return handler.findResource(String.valueOf(id))
+        return ModeStore.find(handler, META, String.valueOf(id))
                 .map(DecodedResource::config)
                 .filter(c -> ignitionUser != null && ignitionUser.equals(c.ignitionUser()))
                 .map(GitUserSshKeyRecord::new)
@@ -186,7 +186,7 @@ public class GitUserSshKeyRecord {
     }
 
     public static GitUserSshKeyRecord findByUserAndKeyName(String ignitionUser, String keyName) {
-        return handler.getResources().stream()
+        return ModeStore.all(handler, META).stream()
                 .map(DecodedResource::config)
                 .filter(c -> ignitionUser != null && ignitionUser.equals(c.ignitionUser())
                         && keyName != null && keyName.equals(c.keyName()))
@@ -198,7 +198,7 @@ public class GitUserSshKeyRecord {
     /** All SSH keys regardless of owner — for the gateway-level config-remote credential picker. */
     public static List<GitUserSshKeyRecord> listAll() {
         List<GitUserSshKeyRecord> out = new ArrayList<>();
-        for (DecodedResource<Config> d : handler.getResources()) {
+        for (DecodedResource<Config> d : ModeStore.all(handler, META)) {
             out.add(new GitUserSshKeyRecord(d.config()));
         }
         return out;
@@ -206,10 +206,19 @@ public class GitUserSshKeyRecord {
 
     public static List<GitUserSshKeyRecord> listByUser(String ignitionUser) {
         List<GitUserSshKeyRecord> out = new ArrayList<>();
-        for (DecodedResource<Config> d : handler.getResources()) {
+        for (DecodedResource<Config> d : ModeStore.all(handler, META)) {
             if (ignitionUser != null && ignitionUser.equals(d.config().ignitionUser())) {
                 out.add(new GitUserSshKeyRecord(d.config()));
             }
+        }
+        return out;
+    }
+
+    /** Every credential defined in core or any mode, including one only a mode has. */
+    public static List<GitUserSshKeyRecord> listEverywhere() {
+        List<GitUserSshKeyRecord> out = new ArrayList<>();
+        for (DecodedResource<Config> d : ModeStore.everywhere(handler, META)) {
+            out.add(new GitUserSshKeyRecord(d.config()));
         }
         return out;
     }
@@ -219,12 +228,4 @@ public class GitUserSshKeyRecord {
         return ModeStore.definedIn(TYPE, String.valueOf(id));
     }
 
-    /** Deletes the active mode's override of this record; false when there is none. */
-    public boolean resetToCore() {
-        try {
-            return ModeStore.reset(handler, TYPE, String.valueOf(id));
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
 }
