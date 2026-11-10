@@ -20,6 +20,7 @@ import {
 import { SelectInput, TextInput as LabelledTextInput } from "./fields";
 import { selectValue } from "./selectValue";
 import { errorToast } from "./errors";
+import ModeScope, { saveToParam, useActiveMode, useSaveTo } from "./ModeScope";
 import {
   useGetRemoteQuery,
   useGetSecretProvidersQuery,
@@ -95,6 +96,9 @@ const ConfigDrawer = ({
   const [restoreHistory, setRestoreHistory] = useState(true);
   const [deliveryBranch, setDeliveryBranch] = useState("");
   const [deliveryEvery, setDeliveryEvery] = useState("300");
+  const activeMode = useActiveMode();
+  const [saveTo, setSaveTo] = useSaveTo(open, remote?.from);
+  const refused = status?.policy?.refused ?? {};
 
   const form = useForm<FormShape>({
     defaultValues: {
@@ -180,6 +184,7 @@ const ConfigDrawer = ({
       await saveRemote({
         ...secretPayload(d),
         branch: d.branch.trim() || DEFAULT_BRANCH,
+        saveTo: saveToParam(activeMode, saveTo),
       }).unwrap();
       // The remote record has to exist before a delivery can be set against it.
       await saveDelivery({
@@ -214,6 +219,18 @@ const ConfigDrawer = ({
   const drawerBody = (
     <Form context={form} className="gitcfg-form">
       <Card title="Remote">
+        <ModeScope
+          from={configured ? remote?.from : null}
+          saveTo={saveTo}
+          onSaveTo={setSaveTo}
+          reset={configured ? { type: "remote" } : undefined}
+        />
+        {activeMode ? (
+          <p className="gitcfg-hint">
+            Save to writes the remote and its credential there. A Secret
+            Provider reference is the safer choice for a per-mode secret.
+          </p>
+        ) : null}
         <FormControlInput
           name="uri"
           id="cfg-uri"
@@ -360,11 +377,18 @@ const ConfigDrawer = ({
             value={deliveryMode}
             values={DELIVERY_OPTIONS.filter(
               (o) => combined || !o.combinedOnly || o.value === deliveryMode
-            ).map((o) => ({
-              label: o.label,
-              value: o.value,
-              disabled: o.combinedOnly && !combined,
-            }))}
+            ).map((o) => {
+              // Refused by the Git policy: listed, disabled, and saying why.
+              const off =
+                o.value !== "off" && o.value !== deliveryMode
+                  ? refused[`delivery:${o.value}`]
+                  : undefined;
+              return {
+                label: off ? `${o.label} (not allowed by policy)` : o.label,
+                value: o.value,
+                disabled: (o.combinedOnly && !combined) || !!off,
+              };
+            })}
             onChange={(e: unknown) => setDeliveryMode(asMode(selectValue(e)))}
           />
           {combined ? (
@@ -452,10 +476,13 @@ const ConfigDrawer = ({
             </span>
           </label>
         ) : null}
+        {refused.LAYOUT_SWITCH ? (
+          <p className="gitcfg-hint">{refused.LAYOUT_SWITCH}</p>
+        ) : null}
         <div className="gitcfg-actions">
           <Button
             colorClass="secondary"
-            disabled={switching}
+            disabled={switching || !!refused.LAYOUT_SWITCH}
             onClick={() => setConfirmLayout(true)}
           >
             {switching

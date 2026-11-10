@@ -1,7 +1,11 @@
 import React, { useState } from "react";
 import { SettingsGw, Refresh } from "@inductiveautomation/ignition-icons";
 import { Button, PageHeader, useToastNotifications } from "../../webui";
-import { useGetRemoteQuery, usePushMutation } from "./GitConfig.service";
+import {
+  useGetRemoteQuery,
+  useGetStatusQuery,
+  usePushMutation,
+} from "./GitConfig.service";
 import { errorToast } from "./errors";
 import ConfigDrawer from "./ConfigDrawer";
 
@@ -16,6 +20,9 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
     pollingInterval: 15000,
   });
   const [push, { isLoading: pushing }] = usePushMutation();
+  const { data: status } = useGetStatusQuery();
+  // Shown disabled with the reason, never hidden, when the Git policy turns pushing off.
+  const pushRefused = status?.policy?.refused?.PUSH;
   const [drawerOpen, setDrawerOpen] = useState(false);
   const toasts = useToastNotifications();
 
@@ -36,10 +43,15 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
               ✓ Up to date
             </span>
           )}
+          {pushRefused ? (
+            <span className="gitcfg-sync-status gitcfg-sync-off">
+              {pushRefused}
+            </span>
+          ) : null}
           <Button
-            colorClass={unsynced ? "primary" : "secondary"}
+            colorClass={unsynced && !pushRefused ? "primary" : "secondary"}
             startIcon={<Refresh width={18} height={18} />}
-            disabled={pushing}
+            disabled={pushing || !!pushRefused}
             onClick={() =>
               push()
                 .unwrap()

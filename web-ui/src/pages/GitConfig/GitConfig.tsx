@@ -19,6 +19,7 @@ import Credentials from "./Credentials";
 import Logs from "./Logs";
 import ExcludedFiles from "./ExcludedFiles";
 import BranchesView from "./BranchesView";
+import Policy from "./Policy";
 import "./_styles.scss";
 
 type Tab =
@@ -27,6 +28,7 @@ type Tab =
   | "excluded"
   | "projects"
   | "credentials"
+  | "policy"
   | "logs";
 
 // Credentials sit on the far right because they are set up once; Projects answers the question
@@ -37,6 +39,7 @@ const TABS: [Tab, string][] = [
   ["excluded", "Git Ignore"],
   ["projects", "Projects"],
   ["credentials", "Credentials"],
+  ["policy", "Policy"],
   ["logs", "Logs"],
 ];
 
@@ -128,7 +131,10 @@ const GitConfig = () => {
       <>
         {/* Which build this gateway runs — the first thing any bug report needs. */}
         {data && data.version ? (
-          <p className="gitcfg-version">Git Integration {data.version}</p>
+          <p className="gitcfg-version">
+            Git Integration {data.version} · Deployment mode:{" "}
+            <strong>{data.policy?.mode || "core"}</strong>
+          </p>
         ) : null}
         <div className="gitcfg-tabs" role="tablist">
           {TABS.map(([key, label]) => (
@@ -155,6 +161,8 @@ const GitConfig = () => {
           <Projects />
         ) : tab === "credentials" ? (
           <Credentials />
+        ) : tab === "policy" ? (
+          <Policy />
         ) : (
           <Logs />
         )}

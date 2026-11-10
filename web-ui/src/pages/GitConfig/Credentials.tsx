@@ -17,6 +17,12 @@ import {
 import { errorToast } from "./errors";
 import { selectValue } from "./selectValue";
 import SettingsDrawer from "./SettingsDrawer";
+import ModeScope, {
+  FromTag,
+  saveToParam,
+  useActiveMode,
+  useSaveTo,
+} from "./ModeScope";
 
 // Credentials are per Ignition user and are what a project repository authenticates with. They
 // could only be created from the Designer's setup wizard, which puts them behind the thing they
@@ -59,6 +65,7 @@ const Credentials = () => {
     const res = await saveRunner({
       enabled: accept,
       generateToken: newToken,
+      saveTo: saveToParam(activeMode, runnerSaveTo),
     }).unwrap();
     if (res.token) setIssued(res.token);
     toasts.notifySuccess("Runner access saved");
@@ -76,6 +83,11 @@ const Credentials = () => {
   const [password, setPassword] = React.useState("");
   const [providerName, setProviderName] = React.useState("");
   const [secretName, setSecretName] = React.useState("");
+  // Where the credential being edited comes from, and where Save writes it (4.1.0).
+  const activeMode = useActiveMode();
+  const [editing, setEditing] = React.useState<CredentialOption | null>(null);
+  const [saveTo, setSaveTo] = useSaveTo(open, editing?.from);
+  const [runnerSaveTo, setRunnerSaveTo] = useSaveTo(runnerOpen, runner?.from);
 
   const providerList = providers?.providers ?? [];
   const secrets =
@@ -94,12 +106,14 @@ const Credentials = () => {
   const openAdd = () => {
     reset();
     setEditId(null);
+    setEditing(null);
     setMode("inline");
     setOpen(true);
   };
   const openEdit = (c: CredentialOption) => {
     reset();
     setEditId(c.id);
+    setEditing(c);
     setKind(c.type);
     setMode("inline");
     setName(c.name ?? "");
@@ -148,7 +162,12 @@ const Credentials = () => {
               secretName,
             };
     }
-    await add(editId !== null ? { ...body, id: editId } : body).unwrap();
+    const scope = { saveTo: saveToParam(activeMode, saveTo) };
+    await add(
+      editId !== null
+        ? { ...body, id: editId, ...scope }
+        : { ...body, ...scope }
+    ).unwrap();
     // Cleared the moment it is stored, so the closed drawer holds no copy of the secret.
     reset();
     toasts.notifySuccess("Credential saved");
@@ -194,6 +213,23 @@ const Credentials = () => {
         errorTitle="Could not save the credential"
       >
         <>
+          <ModeScope
+            from={editing?.from}
+            saveTo={saveTo}
+            onSaveTo={setSaveTo}
+            reset={
+              editing
+                ? { type: "credential", id: editing.id, credType: editing.type }
+                : undefined
+            }
+          />
+          {activeMode ? (
+            <p className="gitcfg-hint">
+              A credential typed in here is encrypted with this gateway&apos;s
+              key. For a different secret per mode, a Secret Provider reference
+              is the safer choice.
+            </p>
+          ) : null}
           {/*
             Radio is a radio GROUP: it takes a `radios` array and maps over it. Used as a single
             radio with `label`/`checked` it reads `radios.map` on undefined and takes the whole
@@ -339,6 +375,12 @@ const Credentials = () => {
                   <td>{c.type}</td>
                   <td>
                     {c.label}
+                    {activeMode ? (
+                      <>
+                        {" "}
+                        <FromTag from={c.from} />
+                      </>
+                    ) : null}
                     {c.check?.account &&
                     !c.label.endsWith(`— ${c.check.account}`) ? (
                       <span className="gitcfg-proj-title">
@@ -417,6 +459,12 @@ const Credentials = () => {
         onSave={submitRunner}
         errorTitle="Could not save runner access"
       >
+        <ModeScope
+          from={runner?.from}
+          saveTo={runnerSaveTo}
+          onSaveTo={setRunnerSaveTo}
+          reset={runner?.from ? { type: "runner" } : undefined}
+        />
         <label className="gitcfg-check">
           <input
             type="checkbox"

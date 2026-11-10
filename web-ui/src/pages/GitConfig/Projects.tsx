@@ -7,6 +7,7 @@ import {
   ProjectStatus,
   useGetCredentialsQuery,
   useGetProjectsQuery,
+  useGetStatusQuery,
   useInitProjectMutation,
   useSaveDeliveryMutation,
   useSetProjectImagesMutation,
@@ -19,6 +20,7 @@ import { errorToast } from "./errors";
 import { selectValue } from "./selectValue";
 import SettingsDrawer from "./SettingsDrawer";
 import BranchesView from "./BranchesView";
+import ModeScope, { saveToParam, useActiveMode, useSaveTo } from "./ModeScope";
 
 const DELIVERY_LABEL: Record<Delivery, string> = {
   off: "Off",
@@ -66,6 +68,13 @@ const Projects = () => {
   // Combined: one gateway repository, so the remote, branch and pulls are the gateway's. A
   // project keeps only Off or a runner release, which replaces this one project.
   const combined = data?.layout === "combined";
+  const mode = useActiveMode();
+  const [saveTo, setSaveTo] = useSaveTo(open, target?.syncFrom);
+  const { data: status } = useGetStatusQuery();
+  const refused = status?.policy?.refused ?? {};
+  // "sync-pull" → pull, "runner-release" → runner: the policy's four kinds.
+  const kindOf = (d: Delivery) =>
+    d.startsWith("runner") ? "runner" : d.replace("sync-", "");
 
   const credentials = creds?.credentials ?? [];
   const projects = data?.projects ?? [];
@@ -110,7 +119,11 @@ const Projects = () => {
       }
       // Saved only when changed, so an inactive pulling delivery survives a switch back.
       if (delivery !== initialDelivery) {
-        await saveDelivery({ project: target.name, delivery }).unwrap();
+        await saveDelivery({
+          project: target.name,
+          delivery,
+          saveTo: saveToParam(mode, saveTo),
+        }).unwrap();
       }
       toasts.notifySuccess(`Saved ${target.name}`);
       return;
@@ -127,6 +140,7 @@ const Projects = () => {
         ...deliveryFields,
         // Clone the branch the delivery will pull, not the remote's default.
         branch: (needsRemote(delivery) && branch.trim()) || undefined,
+        saveTo: saveToParam(mode, saveTo),
       }).unwrap();
       toasts.notifySuccess(`Saved ${target.name}`);
       return;
@@ -148,7 +162,11 @@ const Projects = () => {
       }
     }
 
-    await saveDelivery({ project: target.name, ...deliveryFields }).unwrap();
+    await saveDelivery({
+      project: target.name,
+      ...deliveryFields,
+      saveTo: saveToParam(mode, saveTo),
+    }).unwrap();
     toasts.notifySuccess(`Saved ${target.name}`);
   };
 
@@ -405,6 +423,16 @@ const Projects = () => {
             ) : null}
 
             <h4>Delivery</h4>
+            <ModeScope
+              from={target.syncFrom}
+              saveTo={saveTo}
+              onSaveTo={setSaveTo}
+              reset={
+                target.syncFrom
+                  ? { type: "sync", project: target.name }
+                  : undefined
+              }
+            />
             <SelectInput
               label="How changes reach this project"
               value={delivery}
@@ -412,11 +440,21 @@ const Projects = () => {
               // listed but disabled so it is clear they exist.
               values={(Object.keys(DELIVERY_LABEL) as Delivery[])
                 .filter((d) => !combined || !needsRemote(d))
-                .map((d) => ({
-                  label: DELIVERY_LABEL[d],
-                  value: d,
-                  disabled: !hasRemote && needsRemote(d) && d !== delivery,
-                }))}
+                .map((d) => {
+                  // Refused by the Git policy: listed, disabled, and saying why.
+                  const off =
+                    d !== "off" && d !== delivery
+                      ? refused[`delivery:${kindOf(d)}`]
+                      : undefined;
+                  return {
+                    label: off
+                      ? `${DELIVERY_LABEL[d]} (not allowed by policy)`
+                      : DELIVERY_LABEL[d],
+                    value: d,
+                    disabled:
+                      (!hasRemote && needsRemote(d) && d !== delivery) || !!off,
+                  };
+                })}
               onChange={(e: unknown) =>
                 setDelivery((selectValue(e) as Delivery) || "off")
               }

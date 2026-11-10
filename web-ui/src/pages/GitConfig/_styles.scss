@@ -313,6 +313,25 @@ ul.gitcfg-hint {
   font-size: var(--gitcfg-text-sm);
 }
 
+// Where a record's value comes from: core, or a deployment mode's override (4.1.0).
+.gitcfg-from {
+  color: var(--neutral-60);
+  font-size: var(--gitcfg-text-sm);
+  white-space: nowrap;
+
+  &.is-mode {
+    color: var(--primary);
+    font-weight: var(--font-weight-bold);
+  }
+}
+
+// "Save to" in a drawer, with the from-tag and Reset to core under it.
+.gitcfg-mode-scope {
+  margin-bottom: var(--gitcfg-space-3);
+  padding-bottom: var(--gitcfg-space-2);
+  border-bottom: var(--gitcfg-border);
+}
+
 // Status words. One colour per meaning, used by every tab.
 .gitcfg-ok {
   color: var(--success);

@@ -13,7 +13,38 @@ export interface StatusResp {
   version?: string;
   // Separate: a repository per project. Combined: one gateway repository (4.0.0).
   layout?: Layout;
+  policy?: Policy;
 }
+// The gateway's Git policy (4.1.0) and what it refuses in the active deployment mode.
+export type DeliveryKind = "off" | "pull" | "replace" | "runner";
+export interface PolicyFields {
+  pushAllowed: boolean;
+  designerCommit: boolean;
+  branchSwitch: boolean;
+  layoutSwitch: boolean;
+  forcePushAllowed: boolean;
+  deliveryModes: DeliveryKind[];
+  allowedRemoteHosts: string[];
+}
+export interface Policy extends PolicyFields {
+  // The active deployment mode, null when the gateway runs on core alone.
+  mode: string | null;
+  // The collection the policy comes from: "core" or a mode name.
+  from: string | null;
+  // Refusal text by action: PUSH, FORCE_PUSH, DESIGNER_COMMIT, BRANCH_SWITCH, LAYOUT_SWITCH,
+  // and "delivery:<kind>".
+  refused: Record<string, string>;
+}
+// Where a save lands: "core" or the active mode. Left out, a record is saved where it is defined.
+export interface SaveTo {
+  saveTo?: string;
+}
+export type ModeResetReq =
+  | { type: "policy" | "remote" | "runner" }
+  | { type: "sync"; project: string }
+  | { type: "credential"; id: number; credType: "SSH" | "HTTPS" };
+const withSaveTo = (path: string, saveTo?: string) =>
+  saveTo ? `${path}?saveTo=${encodeURIComponent(saveTo)}` : path;
 export type Layout = "separate" | "combined";
 // The gateway repository's delivery. pull and runner only work in the Combined layout.
 export type ConfigDeliveryMode = "off" | "replace" | "pull" | "runner";
@@ -48,6 +79,8 @@ export interface CredentialOption {
   id: number;
   type: "SSH" | "HTTPS";
   label: string;
+  // The collection this credential comes from: "core" or a mode name.
+  from?: string | null;
   // Prefill for editing: an SSH key's name; an HTTPS credential's host and username.
   name?: string;
   host?: string;
@@ -79,6 +112,7 @@ export interface CredentialCheck {
 }
 export interface RemoteResp {
   configured: boolean;
+  from?: string | null;
   uri?: string;
   branch?: string;
   // Secret prefill (the embedded secret itself is never returned).
@@ -143,6 +177,8 @@ export interface ProjectStatus {
   syncBranch: string;
   syncIntervalSeconds: number;
   syncUser: string;
+  // Where the delivery record comes from: "core" or a mode name; null when none is saved.
+  syncFrom?: string | null;
   // What is wrong with the credential this project pulls with, if anything.
   credentialIssue?: string | null;
 }
@@ -285,6 +321,7 @@ export interface IgnoreEditReq {
 export interface RunnerConfig {
   enabled: boolean;
   hasToken: boolean;
+  from?: string | null;
 }
 export interface EventLogEntry {
   type: string;
@@ -337,14 +374,19 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: () => `${BASE}/credentials`,
       providesTags: ["credentials"],
     }),
-    saveRemote: builder.mutation<unknown, RemoteSecretReq & { branch: string }>(
-      {
-        query: (body) => ({ url: `${BASE}/remote`, method: "POST", body }),
-        // Saving the remote writes (and the gateway commits) the config-remote/credential
-        // resources, so refresh the history table too — not just the remote indicator.
-        invalidatesTags: ["remote", "history"],
-      }
-    ),
+    saveRemote: builder.mutation<
+      unknown,
+      RemoteSecretReq & { branch: string } & SaveTo
+    >({
+      query: ({ saveTo, ...body }) => ({
+        url: withSaveTo(`${BASE}/remote`, saveTo),
+        method: "POST",
+        body,
+      }),
+      // Saving the remote writes (and the gateway commits) the config-remote/credential
+      // resources, so refresh the history table too — not just the remote indicator.
+      invalidatesTags: ["remote", "history"],
+    }),
     removeRemote: builder.mutation<unknown, void>({
       query: () => ({ url: `${BASE}/remote-remove`, method: "POST", body: {} }),
       invalidatesTags: ["remote", "history"],
@@ -364,9 +406,13 @@ export const gitConfigApi = baseApi.injectEndpoints({
     // With an id, edits that credential in place.
     addCredential: builder.mutation<
       { id: number; type: string },
-      AddCredentialReq & { id?: number }
+      AddCredentialReq & { id?: number } & SaveTo
     >({
-      query: (body) => ({ url: `${BASE}/credentials`, method: "POST", body }),
+      query: ({ saveTo, ...body }) => ({
+        url: withSaveTo(`${BASE}/credentials`, saveTo),
+        method: "POST",
+        body,
+      }),
       invalidatesTags: ["credentials"],
     }),
     removeCredential: builder.mutation<
@@ -430,9 +476,13 @@ export const gitConfigApi = baseApi.injectEndpoints({
         delivery?: string;
         intervalSeconds?: number;
         ignitionUser?: string;
-      }
+      } & SaveTo
     >({
-      query: (body) => ({ url: `${BASE}/project-init`, method: "POST", body }),
+      query: ({ saveTo, ...body }) => ({
+        url: withSaveTo(`${BASE}/project-init`, saveTo),
+        method: "POST",
+        body,
+      }),
       invalidatesTags: ["projects"],
     }),
     setProjectRemote: builder.mutation<
@@ -547,8 +597,12 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: () => ({ url: `${BASE}/events-clear`, method: "POST", body: {} }),
       invalidatesTags: ["events"],
     }),
-    saveDelivery: builder.mutation<unknown, DeliveryReq>({
-      query: (body) => ({ url: `${BASE}/delivery`, method: "POST", body }),
+    saveDelivery: builder.mutation<unknown, DeliveryReq & SaveTo>({
+      query: ({ saveTo, ...body }) => ({
+        url: withSaveTo(`${BASE}/delivery`, saveTo),
+        method: "POST",
+        body,
+      }),
       invalidatesTags: ["projects"],
     }),
     syncNow: builder.mutation<{ result: string }, { project: string }>({
@@ -563,11 +617,35 @@ export const gitConfigApi = baseApi.injectEndpoints({
     // back — a lost token is replaced, not recovered.
     saveRunner: builder.mutation<
       { hasToken: boolean; token?: string },
-      { enabled?: boolean; generateToken?: boolean }
+      { enabled?: boolean; generateToken?: boolean } & SaveTo
     >({
-      query: (body) => ({ url: `${BASE}/runner`, method: "POST", body }),
+      query: ({ saveTo, ...body }) => ({
+        url: withSaveTo(`${BASE}/runner`, saveTo),
+        method: "POST",
+        body,
+      }),
       // "projects" too: a runner delivery shows as inactive while the runner is off.
       invalidatesTags: ["runner", "projects"],
+    }),
+    savePolicy: builder.mutation<unknown, PolicyFields & SaveTo>({
+      query: ({ saveTo, ...body }) => ({
+        url: withSaveTo(`${BASE}/policy`, saveTo),
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["status", "history"],
+    }),
+    // Deletes the active mode's override of one record, so core's value applies again.
+    modeReset: builder.mutation<unknown, ModeResetReq>({
+      query: (body) => ({ url: `${BASE}/mode-reset`, method: "POST", body }),
+      invalidatesTags: [
+        "status",
+        "remote",
+        "credentials",
+        "projects",
+        "runner",
+        "history",
+      ],
     }),
     setProjectCredential: builder.mutation<
       unknown,
@@ -629,4 +707,6 @@ export const {
   useGetRunnerQuery,
   useSaveRunnerMutation,
   useSetProjectCredentialMutation,
+  useSavePolicyMutation,
+  useModeResetMutation,
 } = gitConfigApi;

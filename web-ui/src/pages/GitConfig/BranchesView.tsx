@@ -12,6 +12,7 @@ import {
   GraphRef,
   useCheckoutBranchMutation,
   useGetBranchGraphQuery,
+  useGetStatusQuery,
 } from "./GitConfig.service";
 import { errorToast } from "./errors";
 
@@ -104,6 +105,9 @@ const BranchesView = ({ project, config, compact }: Props) => {
     config,
   });
   const [checkout, { isLoading: switching }] = useCheckoutBranchMutation();
+  const { data: status } = useGetStatusQuery();
+  // The Git policy can turn branch switching off; the buttons stay, disabled, with the reason.
+  const switchRefused = status?.policy?.refused?.BRANCH_SWITCH;
   const toasts = useToastNotifications();
   const [target, setTarget] = React.useState<string | null>(null);
   const [refusal, setRefusal] = React.useState<{
@@ -158,7 +162,7 @@ const BranchesView = ({ project, config, compact }: Props) => {
           <button
             type="button"
             className={`gitcfg-ref gitcfg-ref-${r.type}`}
-            disabled={switching}
+            disabled={switching || !!switchRefused}
             onClick={() => setTarget(r.name)}
           >
             {label}
@@ -200,6 +204,7 @@ const BranchesView = ({ project, config, compact }: Props) => {
           </span>
         ) : null}
       </p>
+      {switchRefused ? <p className="gitcfg-hint">{switchRefused}</p> : null}
 
       {refusal ? (
         <div className="gitcfg-refusal" role="alert">
@@ -301,10 +306,12 @@ const BranchesView = ({ project, config, compact }: Props) => {
                     <td className="gitcfg-table-act">
                       <Button
                         colorClass="secondary"
-                        disabled={current || switching}
+                        disabled={current || switching || !!switchRefused}
                         onClick={() => setTarget(b.name)}
                       >
-                        Switch to this branch
+                        {switchRefused && !current
+                          ? "Switch (not allowed by policy)"
+                          : "Switch to this branch"}
                       </Button>
                     </td>
                   </tr>
