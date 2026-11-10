@@ -3,6 +3,46 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## 4.2.0 (unreleased)
+
+### Changed
+- **Overrides work like the platform's own resource pages.** Every overridable drawer (policy,
+  config remote, credentials, a project's delivery, runner access) has the platform's kebab in its
+  header: **Create Override** into any deployment mode created on the gateway, not only the active
+  one, and **Remove Override**. Once a record has more than one definition, **Select Definition to
+  Configure** picks which one the drawer edits and Save writes; the definition in use is marked
+  "(active)". Lists say which modes override each record ("Overridden in Prod"), and a credential
+  that only a mode has is listed too. Gateway: `POST /mode-override`, `GET /definition`,
+  `/mode-reset` takes any mode, and `?saveTo=` any mode. The REST `resources/copy` path still works.
+- **Projects: a Branches button on each versioned project's row** opens its branch graph
+  directly. The Branches tab inside the Edit drawer is gone, so there is one way in.
+- New repositories (the gateway repository, a project's local repository, the Combined →
+  Separate split) start on the configured remote branch, else `main`, never JGit's `master`.
+- Repository layout card: the restore-history option is the platform checkbox on its own row.
+
+### Added
+- **Rename local master to main**: a repository from before 4.2.0 whose one local branch is
+  `master`, behind a remote whose branch is `main`, offers the rename (Versioning header for the
+  gateway repository, the Projects Branch column for a project). Same commits, upstream kept.
+- Branches with no remote say so, with a button to where the remote is set.
+- **Existing repositories laid out another way are refused, not merged.** Before the gateway
+  repository pushes or pulls (Remote Sync, Update from remote, the config follow, a Combined
+  Designer push or pull), a branch with no `config/` at the top or with history unrelated to this
+  gateway's is refused with the restructure steps; see docs/LAYOUT.md, "Using an existing
+  repository". Nothing is pushed over it.
+
+### Fixed
+- **Pulling a branch whose remote branch was deleted** (merged on GitHub, then deleted) showed
+  JGit's `RefNotAdvertisedException`. The Designer's pull now fetches with prune first and says
+  "feature-1's branch on origin was deleted — usually because it was merged", offers **Switch to
+  main and pull** (the remote's default branch, else the configured one, else main/master), and
+  afterwards offers to delete the local branch when it is merged, or says how many commits it
+  would lose. The sync timer, the runner and the gateway repository's follow log a plain warning
+  and stay on their branch.
+- Other raw JGit failures on pull, push and fetch read as plain sentences (credential refused,
+  repository not found, host unreachable, …); the original is kept under Details in the Designer
+  and in the browser console on the page.
+
 ## [4.1.0] - 2026-11-10
 
 ### Added

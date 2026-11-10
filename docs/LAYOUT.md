@@ -15,9 +15,10 @@ either way at any time.
 
 **Branches.** One gateway has one checked-out branch per project (Combined: one for
 everything), shared by everyone editing it, so the gateway page shows it. The
-Projects tab has a Branch column with ↑/↓ against the upstream, and each
-project's drawer has a **Branches** tab; the Versioning page has a **Branches**
-tab for the gateway config. Each draws the commit graph beside the branch list,
+Projects tab has a Branch column with ↑/↓ against the upstream and a
+**Branches** button on each versioned project's row; the Versioning page has a
+**Branches** tab for the gateway config. With no remote set, the view says so and
+links to where it is set. Each draws the commit graph beside the branch list,
 with gone, merged, ahead and behind marked. In Combined the project view shows
 the gateway repository and dims commits that leave that project. **Switch to
 this branch** changes it from the page; it is refused, with the files, while
@@ -52,6 +53,32 @@ Per-project remotes, credentials and deliveries are kept while Combined and
 work again after switching back; the gateway's Pull and Runner deliveries stop
 while Separate.
 
+## Using an existing repository
+
+The module does not remap folders: the gateway repository has `config/` at the
+top and, in Combined, `projects/<name>/`. A repository laid out another way —
+say `gateway/config/` and `project/` — is refused before anything is pushed to
+it or pulled from it, as is a branch whose history is unrelated to the
+gateway's. Restructure it once, on your side:
+
+```text
+git mv gateway/config config
+git mv project projects/<ProjectName>
+git commit -m "Gateway repository layout"
+git push
+```
+
+Then bring the two histories together once: set the gateway's remote branch to a
+new name (say `gateway-import`) and Remote Sync, which pushes a branch the remote
+does not have yet; in a clone, merge it into the restructured branch with
+`git merge --allow-unrelated-histories origin/gateway-import`, push, and set the
+gateway's branch back to that one. From then on the histories are related.
+
+New repositories start on the configured remote branch (default `main`). One
+made before 4.2.0 may sit on `master` while the remote's branch is `main`; the
+Versioning header (or the project's Branch column) then offers **Rename local
+master to main** — same commits, upstream kept.
+
 ## Designer branch list
 
 The **Branch** button opens local and remote lists. A fetch drops remote
@@ -61,5 +88,11 @@ branch's upstream, else HEAD) or `↑3` (three commits on no remote). Delete ref
 the checked-out branch and the branch a scheduled sync follows. A branch with
 unmerged or unpushed commits asks again, with the commit count, before **Delete
 anyway**. **Clean up…** fetches, then offers every gone or merged branch, ticked.
+
+**Pull** fetches with prune first. If the checked-out branch's remote branch was
+deleted — usually because it was merged — it says so and offers **Switch to main
+and pull** (the remote's default branch, else the configured one, else main or
+master), then offers to delete the local branch if it is merged, or says how many
+commits it would lose. The sync timer and the runner only log a warning.
 
 ![Branch list with gone and merged marks, and Clean up](images/designer-branch-cleanup.png)

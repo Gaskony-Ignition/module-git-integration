@@ -107,8 +107,8 @@ No Vision client scope.
   (`ProjectScope`, `Repo.inProject`/`toProjectPath`); writers hold
   `DataDirGitManager.lock()`. Combined commits use `--only`, never for an
   `rm --cached` (it re-adds from disk).
-- **Modes (`docs/MODES.md`):** records save via `ModeStore.save` (`?saveTo=`);
-  credentials only via `GitManager.setAuthentication*` (policy and host checks);
+- **Modes (`docs/MODES.md`):** records go through `ModeStore` (`?saveTo=` any mode);
+  credentials only via `GitManager.setAuthentication*` (policy, host checks);
   config remote ops use `authOrigin`, so `origin` follows the mode's record.
 - **Image snapshot walks the store tree** (`getImages` lists one level and
   returns folders as entries with no bytes) **and import merges, never

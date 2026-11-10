@@ -40,11 +40,11 @@ everything excluded, and Expand/Collapse.
 
 The **Projects** tab lists every project on the gateway, unversioned ones
 included, and how changes reach each one. **Edit** opens a drawer with the
-project's repository, delivery and branches.
+project's repository and delivery; **Branches** opens its commit graph.
 
 ![The Projects tab: each project's repository, delivery and state](docs/images/versioning-projects.png)
 
-![A project's drawer: Settings and Branches tabs](docs/images/versioning-project-drawer.png)
+![A project's drawer: repository and delivery](docs/images/versioning-project-drawer.png)
 
 **Credentials** shows, for each repository credential, when its token expires,
 what it is allowed to touch, and which projects it can read or push. The host is

@@ -50,15 +50,16 @@ pushing is turned off by the gateway's Git policy.*
 
 ## Per-mode remotes and credentials
 
-When a mode is active, the drawers for the config remote, credentials, a
-project's delivery and runner access have **Save to: core | Prod**. Core is the
-value every mode uses unless it has its own; Prod writes an override that only
-this mode uses. Each drawer shows where the value comes from now, and **Reset
-to core** deletes the mode's override. A record that exists only in the mode
-(a credential added there) is deleted by Reset, as core has nothing to fall
-back to.
+The drawers for the policy, the config remote, a credential, a project's delivery and runner
+access work like the platform's own resource pages. The kebab (⋮) in the drawer's header has,
+under **RESOURCE DEFINITIONS**, **Create Override** — pick any mode created on this gateway, not
+only the active one — and **Remove Override** for the definition being edited. Once a record has
+more than one definition, **Select Definition to Configure** picks which one the drawer shows and
+Save writes; the one this gateway runs on is marked "(active)". Lists say which modes override each
+record ("Overridden in Prod"). A record that exists only in a mode (a credential added there) is
+listed too, marked "Only in Prod"; a new record's drawer asks which collection to create it in.
 
-![The config remote's drawer: Save to core or Prod, where the value comes from, Reset to core](images/versioning-save-to.png)
+![The policy drawer on Prod's definition, with the kebab's Create Override and Remove Override](images/versioning-save-to.png)
 
 The same records can also be overridden from **Platform › Modes** or the
 gateway's `resources/copy` API; the module reads whichever value the active
@@ -94,21 +95,10 @@ the data directory).
    `ignition.conf` (above).
 2. On Dev (mode `Dev`): open **Policy**, leave core as it is. Configure the
    remote with a token that can push, **Save to: core**.
-3. Still on Dev, write the Prod override of the policy. The page's Save to only
-   offers core and the active mode, so use the gateway API: copy the policy into
-   Prod, then set its values — Push off, Commit from the Designer off, branches
-   and layout off, deliveries Sync — replace only, allowed hosts `github.com`.
-
-   ```text
-   POST /data/api/v1/resources/copy?resourceType=com.operametrix.ignition.git/git-policy
-        &fromName=policy&toName=policy&fromCollection=core&toCollection=Prod&signature=<sig>
-   PUT  /data/api/v1/resources/com.operametrix.ignition.git/git-policy
-        [{"name":"policy","collection":"Prod","signature":"<new sig>","config":{...}}]
-   ```
-
-   (`<sig>` from `GET /data/api/v1/resources/find/com.operametrix.ignition.git/git-policy/policy`.)
-   The config repository commits it; push, and the override is in the branch.
-   Or restart Dev into Prod once and use **Save to: Prod** on the Policy tab.
+3. Still on Dev, open **Policy › Edit policy**, ⋮ › **Create Override** › Prod, and set Prod's
+   values: Push off, Commit from the Designer off, branches and layout off, deliveries Sync —
+   replace only, allowed hosts `github.com`. Save. The config repository commits it; push, and the
+   override is in the branch. (The gateway's `resources/copy` API does the same, for scripting.)
 4. On Prod (mode `Prod`): Sync — replace from that branch brings the policy in.
    Configure the remote with a read-only token, **Save to: Prod**, ideally as a
    Secret Provider reference.
