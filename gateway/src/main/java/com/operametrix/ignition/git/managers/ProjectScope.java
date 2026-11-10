@@ -392,7 +392,8 @@ public final class ProjectScope {
 
     /**
      * JGit's RevertCommand takes no author, so the revert commit is authored by the gateway's
-     * git config. Rewrite just that commit (same tree, parent and message) with the Designer user.
+     * git config. Rewrite just that commit (same tree, parent and message, plus the mode trailer) with
+     * the Designer user.
      * Built directly rather than amended: an amend goes through the index, which in Combined can
      * hold other projects' staged work; this touches no index or working tree.
      */
@@ -406,7 +407,7 @@ public final class ProjectScope {
             org.eclipse.jgit.lib.CommitBuilder cb = new org.eclipse.jgit.lib.CommitBuilder();
             cb.setTreeId(head.getTree().getId());
             cb.setParentIds(head.getParents());
-            cb.setMessage(head.getFullMessage());
+            cb.setMessage(PolicyGate.trailer(head.getFullMessage()));
             cb.setAuthor(who);
             cb.setCommitter(who);
             ObjectId id = ins.insert(cb);
