@@ -175,20 +175,36 @@ public final class CredentialCheck {
         List<Target> targets = targets(ssh, id);
         List<Reach> reach = new ArrayList<>();
         for (Target t : targets) {
-            reach.add(t.error() != null
-                    ? new Reach(t.name(), false, false, t.error())
+            String refused = t.error() != null ? t.error() : notToBeContacted(t.url(), host);
+            reach.add(refused != null
+                    ? new Reach(t.name(), false, false, refused)
                     : probe(t, sshKey, user, password));
         }
 
         // The host field is a label the user typed, so a remote this credential actually reaches is
         // the better evidence of who the host is.
         boolean github = !ssh && (isGitHub(host)
-                || targets.stream().anyMatch(t -> isGitHub(t.url())));
+                || targets.stream().anyMatch(t -> isGitHub(t.url())))
+                && notToBeContacted("https://github.com", null) == null;
         Result result = github
                 ? askGitHub(password, reach)
                 : new Result(System.currentTimeMillis(), null, null, false, null, null, reach);
         results.put(key(type, id), result);
         return result;
+    }
+
+    /**
+     * Why the check must not send this credential to {@code url}: the Git policy's allowed hosts, or
+     * an HTTPS credential bound to another host. The same rules as a push, so a check in a mode that
+     * may not reach a host never contacts it.
+     */
+    private static String notToBeContacted(String url, String boundHost) {
+        try {
+            PolicyGate.checkHost(url);
+        } catch (PolicyGate.Refused r) {
+            return r.getMessage();
+        }
+        return PolicyGate.credentialMismatch(boundHost, url);
     }
 
     /** Expiry, account and scope, straight from GitHub. Any failure comes back as {@code error}. */

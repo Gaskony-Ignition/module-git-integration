@@ -1110,6 +1110,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 httpsCredentialId = rec.getId();
             }
             DataDirGitManager.saveRemote(uri, branch, sshKeyId, httpsCredentialId);
+            // The Credentials tab otherwise shows the last check of the old URL and secret (or the
+            // other mode's) until the daily check.
+            CredentialCheck.checkSoon(sshKeyId > 0 ? "SSH" : "HTTPS",
+                    sshKeyId > 0 ? sshKeyId : httpsCredentialId);
             // Commit the new remote/credential resources synchronously so the History table
             // reflects them the moment the call returns, rather than after the async auto-commit's
             // quiesce window and the next poll. No-op if the tree is already clean; the later
