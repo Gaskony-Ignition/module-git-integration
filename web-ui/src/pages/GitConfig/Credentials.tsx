@@ -356,7 +356,7 @@ const Credentials = () => {
           None yet. Needed only when a project pulls from a remote.
         </p>
       ) : (
-        <div className="gitcfg-table-scroll">
+        <div className="gitcfg-table-scroll gitcfg-cred-scroll">
           <table className="gitcfg-table">
             <thead>
               <tr>

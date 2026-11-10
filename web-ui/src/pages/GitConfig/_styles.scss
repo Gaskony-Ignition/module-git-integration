@@ -656,6 +656,11 @@ ul.gitcfg-hint {
   max-height: calc(100vh - 22rem);
 }
 
+// Runner access sits under the credentials table, so the table leaves room for it.
+.gitcfg-cred-scroll {
+  max-height: calc(100vh - 27rem);
+}
+
 .gitcfg-proj-name {
   display: block;
 }
