@@ -90,10 +90,8 @@ const Policy = () => {
           <h3>Policy</h3>
           <p>
             What Git Integration may do on this gateway
-            {mode ? ` in deployment mode ${mode}` : ""}. The policy is versioned
-            with the config, so a mode&apos;s override travels with the branch.
-            Off is refused on the gateway, from the Designer and from the
-            runner.
+            {mode ? ` in deployment mode ${mode}` : ""}. Versioned with the
+            config.
           </p>
         </div>
         <div className="gitcfg-actions">

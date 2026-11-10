@@ -44,8 +44,12 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
             </span>
           )}
           {pushRefused ? (
+            // The short form: the full refusal text squeezed the buttons into four lines.
             <span className="gitcfg-sync-status gitcfg-sync-off">
-              {pushRefused}
+              Push off{" "}
+              {status?.policy?.mode
+                ? `in deployment mode ${status.policy.mode}`
+                : "on this gateway"}
             </span>
           ) : null}
           <Button
