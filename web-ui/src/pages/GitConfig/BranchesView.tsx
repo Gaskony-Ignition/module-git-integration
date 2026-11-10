@@ -12,9 +12,12 @@ import {
   GraphRef,
   useCheckoutBranchMutation,
   useGetBranchGraphQuery,
+  useGetProjectsQuery,
+  useGetRemoteQuery,
   useGetStatusQuery,
 } from "./GitConfig.service";
 import { errorToast } from "./errors";
+import ConfigDrawer from "./ConfigDrawer";
 
 const ROW = 26;
 const LANE = 16;
@@ -91,11 +94,18 @@ interface Props {
   config?: boolean;
   // In a drawer: less height to spare than on the page.
   compact?: boolean;
+  // Opens where this project's own remote is set (Separate); the gateway's is opened here.
+  onConfigureRemote?: () => void;
 }
 
 // Read-only commit graph and branch list for one repository, plus a switch for admins. The lanes
 // come from the gateway, so this only draws.
-const BranchesView = ({ project, config, compact }: Props) => {
+const BranchesView = ({
+  project,
+  config,
+  compact,
+  onConfigureRemote,
+}: Props) => {
   const {
     data: g,
     isFetching,
@@ -109,6 +119,11 @@ const BranchesView = ({ project, config, compact }: Props) => {
   // The Git policy can turn branch switching off; the buttons stay, disabled, with the reason.
   const switchRefused = status?.policy?.refused?.BRANCH_SWITCH;
   const toasts = useToastNotifications();
+  const { data: remote } = useGetRemoteQuery();
+  const { data: projects } = useGetProjectsQuery(undefined, {
+    skip: !project,
+  });
+  const [configOpen, setConfigOpen] = React.useState(false);
   const [target, setTarget] = React.useState<string | null>(null);
   const [refusal, setRefusal] = React.useState<{
     message: string;
@@ -192,8 +207,34 @@ const BranchesView = ({ project, config, compact }: Props) => {
     </>
   );
 
+  // The gateway repository's remote (config, or everything in Combined), else the project's own.
+  const gatewayRepo = config || combined;
+  const hasRemote = gatewayRepo
+    ? !!remote?.configured
+    : !!projects?.projects.find((p) => p.name === project)?.remoteUrl;
+  const configureRemote =
+    gatewayRepo || !onConfigureRemote
+      ? () => setConfigOpen(true)
+      : onConfigureRemote;
+
   return (
     <div className="gitcfg-branches">
+      {!hasRemote ? (
+        <div className="gitcfg-no-remote">
+          <p>
+            No remote is set, so there are no remote branches here, and nothing
+            to pull or push.
+          </p>
+          <Button colorClass="secondary" onClick={configureRemote}>
+            {gatewayRepo
+              ? "Set the gateway remote"
+              : "Set this project's remote"}
+          </Button>
+        </div>
+      ) : null}
+      {gatewayRepo ? (
+        <ConfigDrawer open={configOpen} onClose={() => setConfigOpen(false)} />
+      ) : null}
       <p className="gitcfg-branches-head">
         {headline(g, project)}
         {g.filtered ? (

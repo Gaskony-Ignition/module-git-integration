@@ -4,6 +4,7 @@ import { DeleteGw } from "@inductiveautomation/ignition-icons";
 import {
   Button,
   Card,
+  Checkbox,
   Drawer,
   DrawerTemplate,
   DrawerTemplateSize,
@@ -20,8 +21,15 @@ import {
 import { SelectInput, TextInput as LabelledTextInput } from "./fields";
 import { selectValue } from "./selectValue";
 import { errorToast } from "./errors";
-import ModeScope, { saveToParam, useActiveMode, useSaveTo } from "./ModeScope";
+import Definitions, {
+  DefinitionMenu,
+  saveToParam,
+  useEditing,
+  useModes,
+} from "./ModeScope";
 import {
+  RemoteResp,
+  useGetDefinitionQuery,
   useGetRemoteQuery,
   useGetSecretProvidersQuery,
   useSaveRemoteMutation,
@@ -96,8 +104,12 @@ const ConfigDrawer = ({
   const [restoreHistory, setRestoreHistory] = useState(true);
   const [deliveryBranch, setDeliveryBranch] = useState("");
   const [deliveryEvery, setDeliveryEvery] = useState("300");
-  const activeMode = useActiveMode();
-  const [saveTo, setSaveTo] = useSaveTo(open, remote?.from);
+  const modes = useModes();
+  const [editing, setEditing] = useEditing(open, remote?.from);
+  const { data: def } = useGetDefinitionQuery(
+    { type: "remote", collection: editing },
+    { skip: !open || !modes.length || !remote?.configured }
+  );
   const refused = status?.policy?.refused ?? {};
 
   const form = useForm<FormShape>({
@@ -127,7 +139,27 @@ const ConfigDrawer = ({
   const [confirmRemoveRemote, setConfirmRemoveRemote] = useState(false);
   const [confirmDeinit, setConfirmDeinit] = useState(false);
 
-  // Prefill from the saved remote each time the drawer opens (embedded secrets stay blank).
+  // Prefill from the saved remote each time the drawer opens (embedded secrets stay blank), and
+  // from the selected definition when another one is chosen.
+  useEffect(() => {
+    if (!open || !def || def.collection !== editing) {
+      return;
+    }
+    const d = def as unknown as RemoteResp;
+    reset({
+      ...getValues(),
+      uri: d.uri || "",
+      branch: d.branch || DEFAULT_BRANCH,
+      mode: d.secretMode || "inline",
+      key: "",
+      password: "",
+      username: d.username || "",
+      provider: d.providerName || "",
+      secretName: d.secretName || "",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, def, editing]);
+
   useEffect(() => {
     if (!open || !remote) {
       return;
@@ -184,7 +216,7 @@ const ConfigDrawer = ({
       await saveRemote({
         ...secretPayload(d),
         branch: d.branch.trim() || DEFAULT_BRANCH,
-        saveTo: saveToParam(activeMode, saveTo),
+        saveTo: saveToParam(modes, editing),
       }).unwrap();
       // The remote record has to exist before a delivery can be set against it.
       await saveDelivery({
@@ -214,21 +246,24 @@ const ConfigDrawer = ({
     }
   };
 
+  const defs = {
+    record: configured ? { type: "remote" as const } : undefined,
+    defined: def?.defined ?? remote?.defined ?? [],
+    editing,
+    onEditing: setEditing,
+  };
+
   const keepHint = configured ? " (leave blank to keep current)" : "";
 
   const drawerBody = (
     <Form context={form} className="gitcfg-form">
       <Card title="Remote">
-        <ModeScope
-          from={configured ? remote?.from : null}
-          saveTo={saveTo}
-          onSaveTo={setSaveTo}
-          reset={configured ? { type: "remote" } : undefined}
-        />
-        {activeMode ? (
+        <Definitions {...defs} />
+        {modes.length ? (
           <p className="gitcfg-hint">
-            Save to writes the remote and its credential there. A Secret
-            Provider reference is the safer choice for a per-mode secret.
+            Save writes the remote and its credential to the definition
+            selected. A Secret Provider reference is the safer choice for a
+            per-mode secret.
           </p>
         ) : null}
         <FormControlInput
@@ -465,16 +500,15 @@ const ConfigDrawer = ({
             : "Separate: each project is its own repository with its own remote, branches and delivery; this repository holds config only."}
         </p>
         {combined ? (
-          <label className="gitcfg-check">
-            <input
-              type="checkbox"
-              checked={restoreHistory}
-              onChange={(e) => setRestoreHistory(e.target.checked)}
+          <div className="gitcfg-layout-opt">
+            <Checkbox
+              defaultValue={restoreHistory}
+              onChange={(_e: unknown, checked: boolean) =>
+                setRestoreHistory(checked)
+              }
+              label="Restore each project's earlier history, where one was kept"
             />
-            <span>
-              Restore each project&apos;s earlier history, where one was kept
-            </span>
-          </label>
+          </div>
         ) : null}
         {refused.LAYOUT_SWITCH ? (
           <p className="gitcfg-hint">{refused.LAYOUT_SWITCH}</p>
@@ -529,6 +563,7 @@ const ConfigDrawer = ({
           onComplete={onSave}
           onCancel={onClose}
           onClose={onClose}
+          headerEndAdornment={<DefinitionMenu {...defs} />}
         >
           {drawerBody}
         </DrawerTemplate>

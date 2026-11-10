@@ -7,6 +7,7 @@ import {
   useToastNotifications,
 } from "../../webui";
 import { errorToast } from "./errors";
+import { DefinitionMenu, DefsProps } from "./ModeScope";
 
 /**
  * The lateral panel every settings edit on this page opens in, matching ConfigDrawer's platform
@@ -26,6 +27,8 @@ const SettingsDrawer = ({
   saveDisabled,
   errorTitle,
   large,
+  defs,
+  readOnly,
   children,
 }: {
   open: boolean;
@@ -39,6 +42,10 @@ const SettingsDrawer = ({
   errorTitle?: string;
   /** The wide drawer, for content that needs room (the branch graph). */
   large?: boolean;
+  // The record's definitions: puts the platform's kebab (Create / Remove Override) in the header.
+  defs?: DefsProps;
+  // A view with nothing to save: no Save/Cancel bar, only the close button.
+  readOnly?: boolean;
   children: React.ReactNode;
 }) => {
   const [saving, setSaving] = React.useState(false);
@@ -73,6 +80,8 @@ const SettingsDrawer = ({
         onComplete={handleSave}
         onCancel={onClose}
         onClose={onClose}
+        hideButtonBar={readOnly}
+        headerEndAdornment={defs ? <DefinitionMenu {...defs} /> : undefined}
       >
         {/* The drawer renders in a portal outside the page, so it needs `.gitcfg` itself for
             the --gitcfg-* tokens; without it every spacing value falls back to zero. */}

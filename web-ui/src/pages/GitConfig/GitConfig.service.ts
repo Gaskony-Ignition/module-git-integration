@@ -14,6 +14,8 @@ export interface StatusResp {
   // Separate: a repository per project. Combined: one gateway repository (4.0.0).
   layout?: Layout;
   policy?: Policy;
+  // Every deployment mode created on this gateway, active or not.
+  modes?: string[];
 }
 // The gateway's Git policy (4.1.0) and what it refuses in the active deployment mode.
 export type DeliveryKind = "off" | "pull" | "replace" | "runner";
@@ -34,15 +36,27 @@ export interface Policy extends PolicyFields {
   // Refusal text by action: PUSH, FORCE_PUSH, DESIGNER_COMMIT, BRANCH_SWITCH, LAYOUT_SWITCH,
   // and "delivery:<kind>".
   refused: Record<string, string>;
+  // The collections defining it, core first: ["core", "Prod"].
+  defined?: string[];
 }
 // Where a save lands: "core" or the active mode. Left out, a record is saved where it is defined.
 export interface SaveTo {
   saveTo?: string;
 }
-export type ModeResetReq =
+// Which record a drawer edits, for the definition routes.
+export type RecordRef =
   | { type: "policy" | "remote" | "runner" }
   | { type: "sync"; project: string }
   | { type: "credential"; id: number; credType: "SSH" | "HTTPS" };
+// Remove Override: deletes `mode`'s definition (the active mode's when left out).
+export type ModeResetReq = RecordRef & { mode?: string };
+// Create Override: copies the definition in `from` (core when left out) into `mode`.
+export type ModeOverrideReq = RecordRef & { mode: string; from?: string };
+// One record's definition in one collection, in the shape of the record's own GET.
+export type DefinitionResp = Record<string, unknown> & {
+  collection: string;
+  defined: string[];
+};
 const withSaveTo = (path: string, saveTo?: string) =>
   saveTo ? `${path}?saveTo=${encodeURIComponent(saveTo)}` : path;
 export type Layout = "separate" | "combined";
@@ -81,6 +95,7 @@ export interface CredentialOption {
   label: string;
   // The collection this credential comes from: "core" or a mode name.
   from?: string | null;
+  defined?: string[];
   // Prefill for editing: an SSH key's name; an HTTPS credential's host and username.
   name?: string;
   host?: string;
@@ -112,7 +127,10 @@ export interface CredentialCheck {
 }
 export interface RemoteResp {
   configured: boolean;
+  // Set when the repository's lone local branch is master and the remote's is this name.
+  renameMaster?: string | null;
   from?: string | null;
+  defined?: string[];
   uri?: string;
   branch?: string;
   // Secret prefill (the embedded secret itself is never returned).
@@ -179,6 +197,9 @@ export interface ProjectStatus {
   syncUser: string;
   // Where the delivery record comes from: "core" or a mode name; null when none is saved.
   syncFrom?: string | null;
+  syncDefined?: string[];
+  // Set when the project's lone local branch is master and its remote's is this name.
+  renameMaster?: string | null;
   // What is wrong with the credential this project pulls with, if anything.
   credentialIssue?: string | null;
 }
@@ -322,6 +343,7 @@ export interface RunnerConfig {
   enabled: boolean;
   hasToken: boolean;
   from?: string | null;
+  defined?: string[];
 }
 export interface EventLogEntry {
   type: string;
@@ -385,7 +407,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
       }),
       // Saving the remote writes (and the gateway commits) the config-remote/credential
       // resources, so refresh the history table too — not just the remote indicator.
-      invalidatesTags: ["remote", "history"],
+      invalidatesTags: ["definition", "remote", "history"],
     }),
     removeRemote: builder.mutation<unknown, void>({
       query: () => ({ url: `${BASE}/remote-remove`, method: "POST", body: {} }),
@@ -413,7 +435,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: ["credentials"],
+      invalidatesTags: ["definition", "credentials"],
     }),
     removeCredential: builder.mutation<
       unknown,
@@ -483,7 +505,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: ["projects"],
+      invalidatesTags: ["definition", "projects"],
     }),
     setProjectRemote: builder.mutation<
       unknown,
@@ -603,7 +625,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: ["projects"],
+      invalidatesTags: ["definition", "projects"],
     }),
     syncNow: builder.mutation<{ result: string }, { project: string }>({
       query: (body) => ({ url: `${BASE}/sync-now`, method: "POST", body }),
@@ -625,7 +647,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
         body,
       }),
       // "projects" too: a runner delivery shows as inactive while the runner is off.
-      invalidatesTags: ["runner", "projects"],
+      invalidatesTags: ["definition", "runner", "projects"],
     }),
     savePolicy: builder.mutation<unknown, PolicyFields & SaveTo>({
       query: ({ saveTo, ...body }) => ({
@@ -633,9 +655,9 @@ export const gitConfigApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: ["status", "history"],
+      invalidatesTags: ["definition", "status", "history"],
     }),
-    // Deletes the active mode's override of one record, so core's value applies again.
+    // Deletes one mode's override of a record, so core's value applies there again.
     modeReset: builder.mutation<unknown, ModeResetReq>({
       query: (body) => ({ url: `${BASE}/mode-reset`, method: "POST", body }),
       invalidatesTags: [
@@ -645,7 +667,42 @@ export const gitConfigApi = baseApi.injectEndpoints({
         "projects",
         "runner",
         "history",
+        "definition",
       ],
+    }),
+    renameMaster: builder.mutation<
+      { ok: boolean; branch: string },
+      { project?: string; repo?: "config" }
+    >({
+      query: (body) => ({
+        url: `${BASE}/branch-rename-master`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["remote", "projects", "branches", "status", "events"],
+    }),
+    modeOverride: builder.mutation<unknown, ModeOverrideReq>({
+      query: (body) => ({ url: `${BASE}/mode-override`, method: "POST", body }),
+      invalidatesTags: [
+        "status",
+        "remote",
+        "credentials",
+        "projects",
+        "runner",
+        "history",
+        "definition",
+      ],
+    }),
+    getDefinition: builder.query<
+      DefinitionResp,
+      RecordRef & { collection: string }
+    >({
+      query: (q) =>
+        `${BASE}/definition?` +
+        Object.entries(q)
+          .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+          .join("&"),
+      providesTags: ["definition"],
     }),
     setProjectCredential: builder.mutation<
       unknown,
@@ -709,4 +766,7 @@ export const {
   useSetProjectCredentialMutation,
   useSavePolicyMutation,
   useModeResetMutation,
+  useModeOverrideMutation,
+  useRenameMasterMutation,
+  useGetDefinitionQuery,
 } = gitConfigApi;

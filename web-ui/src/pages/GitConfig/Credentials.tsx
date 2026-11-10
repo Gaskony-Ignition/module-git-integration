@@ -13,15 +13,16 @@ import {
   useRemoveCredentialMutation,
   useSaveRunnerMutation,
   useGetStatusQuery,
+  useGetDefinitionQuery,
 } from "./GitConfig.service";
 import { errorToast } from "./errors";
 import { selectValue } from "./selectValue";
 import SettingsDrawer from "./SettingsDrawer";
-import ModeScope, {
-  FromTag,
+import Definitions, {
+  OverrideTag,
   saveToParam,
-  useActiveMode,
-  useSaveTo,
+  useEditing,
+  useModes,
 } from "./ModeScope";
 
 // Credentials are per Ignition user and are what a project repository authenticates with. They
@@ -65,7 +66,7 @@ const Credentials = () => {
     const res = await saveRunner({
       enabled: accept,
       generateToken: newToken,
-      saveTo: saveToParam(activeMode, runnerSaveTo),
+      saveTo: saveToParam(modes, runnerEditing),
     }).unwrap();
     if (res.token) setIssued(res.token);
     toasts.notifySuccess("Runner access saved");
@@ -83,11 +84,50 @@ const Credentials = () => {
   const [password, setPassword] = React.useState("");
   const [providerName, setProviderName] = React.useState("");
   const [secretName, setSecretName] = React.useState("");
-  // Where the credential being edited comes from, and where Save writes it (4.1.0).
-  const activeMode = useActiveMode();
+  // The credential being edited, and which of its definitions the drawer edits (4.2.0).
+  const modes = useModes();
   const [editing, setEditing] = React.useState<CredentialOption | null>(null);
-  const [saveTo, setSaveTo] = useSaveTo(open, editing?.from);
-  const [runnerSaveTo, setRunnerSaveTo] = useSaveTo(runnerOpen, runner?.from);
+  const [collection, setCollection] = useEditing(open, editing?.from);
+  const [runnerEditing, setRunnerEditing] = useEditing(
+    runnerOpen,
+    runner?.from
+  );
+  const credRef = editing
+    ? { type: "credential" as const, id: editing.id, credType: editing.type }
+    : undefined;
+  const { data: def } = useGetDefinitionQuery(
+    { ...(credRef ?? { type: "runner" }), collection },
+    { skip: !open || !credRef || !modes.length }
+  );
+  const { data: runnerDef } = useGetDefinitionQuery(
+    { type: "runner", collection: runnerEditing },
+    { skip: !runnerOpen || !modes.length }
+  );
+  const credDefs = {
+    record: credRef,
+    defined: def?.defined ?? editing?.defined ?? [],
+    editing: collection,
+    onEditing: setCollection,
+  };
+  const runnerDefs = {
+    record: runner?.from ? { type: "runner" as const } : undefined,
+    defined: runnerDef?.defined ?? runner?.defined ?? [],
+    editing: runnerEditing,
+    onEditing: setRunnerEditing,
+  };
+  // Another definition chosen: its fields replace the form's (the secret stays blank).
+  React.useEffect(() => {
+    if (!open || !def || def.collection !== collection) return;
+    if (typeof def.name === "string") setName(def.name);
+    if (typeof def.host === "string") setHost(def.host);
+    if (typeof def.username === "string") setUsername(def.username);
+  }, [open, def, collection]);
+  React.useEffect(() => {
+    if (!runnerOpen || !runnerDef || runnerDef.collection !== runnerEditing)
+      return;
+    setAccept(!!runnerDef.enabled);
+    setNewToken(!runnerDef.hasToken);
+  }, [runnerOpen, runnerDef, runnerEditing]);
 
   const providerList = providers?.providers ?? [];
   const secrets =
@@ -162,7 +202,7 @@ const Credentials = () => {
               secretName,
             };
     }
-    const scope = { saveTo: saveToParam(activeMode, saveTo) };
+    const scope = { saveTo: saveToParam(modes, collection) };
     await add(
       editId !== null
         ? { ...body, id: editId, ...scope }
@@ -181,9 +221,19 @@ const Credentials = () => {
   };
 
   const rows = data?.credentials ?? [];
+  // A credential only another mode defines: this gateway never uses or checks it.
+  const activeMode = status?.policy?.mode ?? null;
+  const elsewhere = (c: CredentialOption) =>
+    !!c.defined?.length &&
+    !c.defined.includes("core") &&
+    !(activeMode && c.defined.includes(activeMode));
   React.useEffect(
-    () => setPending((data?.credentials ?? []).some((c) => c.check === null)),
-    [data]
+    () =>
+      setPending(
+        (data?.credentials ?? []).some((c) => c.check === null && !elsewhere(c))
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data, activeMode]
   );
 
   return (
@@ -211,19 +261,11 @@ const Credentials = () => {
         onSave={save}
         saveDisabled={!ready}
         errorTitle="Could not save the credential"
+        defs={credDefs}
       >
         <>
-          <ModeScope
-            from={editing?.from}
-            saveTo={saveTo}
-            onSaveTo={setSaveTo}
-            reset={
-              editing
-                ? { type: "credential", id: editing.id, credType: editing.type }
-                : undefined
-            }
-          />
-          {activeMode ? (
+          <Definitions {...credDefs} />
+          {modes.length ? (
             <p className="gitcfg-hint">
               A credential typed in here is encrypted with this gateway&apos;s
               key. For a different secret per mode, a Secret Provider reference
@@ -374,13 +416,7 @@ const Credentials = () => {
                 <tr key={`${c.type}-${c.id}`}>
                   <td>{c.type}</td>
                   <td>
-                    {c.label}
-                    {activeMode ? (
-                      <>
-                        {" "}
-                        <FromTag from={c.from} />
-                      </>
-                    ) : null}
+                    {c.label} <OverrideTag defined={c.defined} from={c.from} />
                     {c.check?.account &&
                     !c.label.endsWith(`— ${c.check.account}`) ? (
                       <span className="gitcfg-proj-title">
@@ -388,14 +424,23 @@ const Credentials = () => {
                       </span>
                     ) : null}
                   </td>
-                  <td>{expiry(c)}</td>
-                  <td>{scope(c)}</td>
-                  <td>{reach(c)}</td>
-                  <td>{checked(c)}</td>
+                  {elsewhere(c) ? (
+                    <td colSpan={4} className="gitcfg-off">
+                      Not used on this gateway: only{" "}
+                      {(c.defined ?? []).join(", ")} has it.
+                    </td>
+                  ) : (
+                    <>
+                      <td>{expiry(c)}</td>
+                      <td>{scope(c)}</td>
+                      <td>{reach(c)}</td>
+                      <td>{checked(c)}</td>
+                    </>
+                  )}
                   <td className="gitcfg-table-act">
                     <Button
                       colorClass="secondary"
-                      disabled={checkingId !== null}
+                      disabled={checkingId !== null || elsewhere(c)}
                       onClick={() => {
                         setCheckingId(`${c.type}-${c.id}`);
                         check({ type: c.type, id: c.id })
@@ -416,6 +461,8 @@ const Credentials = () => {
                     </Button>
                     <Button
                       colorClass="secondary"
+                      // Removed from its mode with Edit › ⋮ › Remove Override.
+                      disabled={elsewhere(c)}
                       onClick={() => del(c.type, c.id, c.label)}
                     >
                       Remove
@@ -458,13 +505,9 @@ const Credentials = () => {
         onClose={() => setRunnerOpen(false)}
         onSave={submitRunner}
         errorTitle="Could not save runner access"
+        defs={runnerDefs}
       >
-        <ModeScope
-          from={runner?.from}
-          saveTo={runnerSaveTo}
-          onSaveTo={setRunnerSaveTo}
-          reset={runner?.from ? { type: "runner" } : undefined}
-        />
+        <Definitions {...runnerDefs} />
         <label className="gitcfg-check">
           <input
             type="checkbox"

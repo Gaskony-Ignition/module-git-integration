@@ -5,6 +5,7 @@ import {
   useGetRemoteQuery,
   useGetStatusQuery,
   usePushMutation,
+  useRenameMasterMutation,
 } from "./GitConfig.service";
 import { errorToast } from "./errors";
 import ConfigDrawer from "./ConfigDrawer";
@@ -24,6 +25,8 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
   // Shown disabled with the reason, never hidden, when the Git policy turns pushing off.
   const pushRefused = status?.policy?.refused?.PUSH;
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [rename, { isLoading: renaming }] = useRenameMasterMutation();
+  const switchRefused = status?.policy?.refused?.BRANCH_SWITCH;
   const toasts = useToastNotifications();
 
   const configured = !!(remote && remote.configured);
@@ -51,6 +54,23 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
                 ? `in deployment mode ${status.policy.mode}`
                 : "on this gateway"}
             </span>
+          ) : null}
+          {remote?.renameMaster ? (
+            // A repository from before 4.2.0 sits on master while the remote's branch is main.
+            <Button
+              colorClass="secondary"
+              disabled={renaming || !!switchRefused}
+              onClick={() =>
+                rename({ repo: "config" })
+                  .unwrap()
+                  .then((r) =>
+                    toasts.notifySuccess(`Local master is now ${r.branch}`)
+                  )
+                  .catch(errorToast(toasts, "Could not rename the branch"))
+              }
+            >
+              {`Rename local master to ${remote.renameMaster}`}
+            </Button>
           ) : null}
           <Button
             colorClass={unsynced && !pushRefused ? "primary" : "secondary"}

@@ -2,10 +2,17 @@ import React from "react";
 import { Button, Loading, useToastNotifications } from "../../webui";
 import { TextInput } from "./fields";
 import SettingsDrawer from "./SettingsDrawer";
-import ModeScope, { FromTag, saveToParam, useSaveTo } from "./ModeScope";
+import Definitions, {
+  FromTag,
+  OverrideTag,
+  saveToParam,
+  useEditing,
+  useModes,
+} from "./ModeScope";
 import {
   DeliveryKind,
   PolicyFields,
+  useGetDefinitionQuery,
   useGetStatusQuery,
   useSavePolicyMutation,
 } from "./GitConfig.service";
@@ -43,23 +50,40 @@ const Policy = () => {
   const [open, setOpen] = React.useState(false);
   const [draft, setDraft] = React.useState<PolicyFields | null>(null);
   const [hosts, setHosts] = React.useState("");
-  const [saveTo, setSaveTo] = useSaveTo(open, policy?.from);
+  const modes = useModes();
+  const [editing, setEditing] = useEditing(open, policy?.from);
+  // The definition being edited, which on a gateway with modes need not be the one in use.
+  const { data: def } = useGetDefinitionQuery(
+    { type: "policy", collection: editing },
+    { skip: !open || !modes.length }
+  );
+
+  const load = (p: PolicyFields) => {
+    setDraft({
+      pushAllowed: p.pushAllowed,
+      forcePushAllowed: p.forcePushAllowed,
+      designerCommit: p.designerCommit,
+      branchSwitch: p.branchSwitch,
+      layoutSwitch: p.layoutSwitch,
+      deliveryModes: p.deliveryModes,
+      allowedRemoteHosts: p.allowedRemoteHosts,
+    });
+    setHosts(p.allowedRemoteHosts.join(", "));
+  };
+
+  React.useEffect(() => {
+    if (open && def && def.collection === editing) {
+      load(def as unknown as PolicyFields);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, def, editing]);
 
   if (isLoading || !policy) {
     return <Loading isLoading={true} />;
   }
 
   const openEdit = () => {
-    setDraft({
-      pushAllowed: policy.pushAllowed,
-      forcePushAllowed: policy.forcePushAllowed,
-      designerCommit: policy.designerCommit,
-      branchSwitch: policy.branchSwitch,
-      layoutSwitch: policy.layoutSwitch,
-      deliveryModes: policy.deliveryModes,
-      allowedRemoteHosts: policy.allowedRemoteHosts,
-    });
-    setHosts(policy.allowedRemoteHosts.join(", "));
+    load(policy);
     setOpen(true);
   };
 
@@ -76,11 +100,17 @@ const Policy = () => {
         .split(/[\s,]+/)
         .map((h) => h.trim())
         .filter((h) => h !== ""),
-      saveTo: saveToParam(mode, saveTo),
+      saveTo: saveToParam(modes, editing),
     }).unwrap();
     toasts.notifySuccess("Git policy saved");
   };
 
+  const defs = {
+    record: { type: "policy" as const },
+    defined: def?.defined ?? policy.defined ?? [],
+    editing,
+    onEditing: setEditing,
+  };
   const from = <FromTag from={policy.from || "core"} />;
 
   return (
@@ -91,7 +121,7 @@ const Policy = () => {
           <p>
             What Git Integration may do on this gateway
             {mode ? ` in deployment mode ${mode}` : ""}. Versioned with the
-            config.
+            config. <OverrideTag defined={policy.defined} from={policy.from} />
           </p>
         </div>
         <div className="gitcfg-actions">
@@ -146,15 +176,11 @@ const Policy = () => {
         onClose={() => setOpen(false)}
         onSave={submit}
         errorTitle="Could not save the Git policy"
+        defs={defs}
       >
         {draft ? (
           <>
-            <ModeScope
-              from={policy.from}
-              saveTo={saveTo}
-              onSaveTo={setSaveTo}
-              reset={{ type: "policy" }}
-            />
+            <Definitions {...defs} />
             {FLAGS.map(([key, label]) => (
               <label className="gitcfg-check" key={key}>
                 <input

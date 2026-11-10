@@ -43,6 +43,7 @@ const baseApi = createApi({
   reducerPath: "gitConfigApi",
   baseQuery,
   tagTypes: [
+    "definition",
     "status",
     "history",
     "remote",

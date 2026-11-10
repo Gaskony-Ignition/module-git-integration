@@ -15,12 +15,19 @@ import {
   useSetProjectRemoteMutation,
   useSetProjectCredentialMutation,
   useSyncNowMutation,
+  useGetDefinitionQuery,
+  useRenameMasterMutation,
 } from "./GitConfig.service";
 import { errorToast } from "./errors";
 import { selectValue } from "./selectValue";
 import SettingsDrawer from "./SettingsDrawer";
 import BranchesView from "./BranchesView";
-import ModeScope, { saveToParam, useActiveMode, useSaveTo } from "./ModeScope";
+import Definitions, {
+  OverrideTag,
+  saveToParam,
+  useEditing,
+  useModes,
+} from "./ModeScope";
 
 const DELIVERY_LABEL: Record<Delivery, string> = {
   off: "Off",
@@ -48,13 +55,14 @@ const Projects = () => {
   const [snapshotImages, { isLoading: snapshotting }] =
     useSnapshotProjectImagesMutation();
   const [syncNow, { isLoading: syncing }] = useSyncNowMutation();
+  const [renameMaster, { isLoading: renaming }] = useRenameMasterMutation();
   const toasts = useToastNotifications();
 
   const [target, setTarget] = React.useState<ProjectStatus | null>(null);
   const [open, setOpen] = React.useState(false);
-  const [drawerTab, setDrawerTab] = React.useState<"settings" | "branches">(
-    "settings"
-  );
+  // The project whose Branches drawer is open (the row's Branches button).
+  const [branchesOf, setBranchesOf] = React.useState<string | null>(null);
+  const [branchesOpen, setBranchesOpen] = React.useState(false);
   const [version, setVersion] = React.useState(false);
   const [url, setUrl] = React.useState("");
   const [credId, setCredId] = React.useState("");
@@ -68,8 +76,35 @@ const Projects = () => {
   // Combined: one gateway repository, so the remote, branch and pulls are the gateway's. A
   // project keeps only Off or a runner release, which replaces this one project.
   const combined = data?.layout === "combined";
-  const mode = useActiveMode();
-  const [saveTo, setSaveTo] = useSaveTo(open, target?.syncFrom);
+  const modes = useModes();
+  const [editing, setEditing] = useEditing(open, target?.syncFrom);
+  // Delivery definitions are per mode only in Separate; in Combined a project's delivery is the
+  // runner record, overridden from Runner access.
+  const perMode = modes.length > 0 && !combined;
+  const syncRef =
+    target && target.syncFrom
+      ? { type: "sync" as const, project: target.name }
+      : undefined;
+  const { data: def } = useGetDefinitionQuery(
+    { type: "sync", project: target?.name ?? "", collection: editing },
+    { skip: !open || !perMode || !syncRef }
+  );
+  React.useEffect(() => {
+    if (!open || !def || def.collection !== editing) return;
+    const d = def as unknown as ProjectStatus;
+    setDelivery(d.delivery);
+    setBranch(d.syncBranch || target?.branch || "");
+    setEvery(String(d.syncIntervalSeconds));
+    setUser(d.syncUser);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, def, editing]);
+  const defs = {
+    record: syncRef,
+    defined: def?.defined ?? target?.syncDefined ?? [],
+    editing,
+    onEditing: setEditing,
+  };
+  const saveTo = perMode ? saveToParam(modes, editing) : undefined;
   const { data: status } = useGetStatusQuery();
   const refused = status?.policy?.refused ?? {};
   // "sync-pull" → pull, "runner-release" → runner: the policy's four kinds.
@@ -96,7 +131,6 @@ const Projects = () => {
     setBranch(p.syncBranch || p.branch || "");
     setEvery(String(p.syncIntervalSeconds));
     setUser(p.syncUser);
-    setDrawerTab("settings");
     setOpen(true);
   };
 
@@ -122,7 +156,7 @@ const Projects = () => {
         await saveDelivery({
           project: target.name,
           delivery,
-          saveTo: saveToParam(mode, saveTo),
+          saveTo,
         }).unwrap();
       }
       toasts.notifySuccess(`Saved ${target.name}`);
@@ -140,7 +174,7 @@ const Projects = () => {
         ...deliveryFields,
         // Clone the branch the delivery will pull, not the remote's default.
         branch: (needsRemote(delivery) && branch.trim()) || undefined,
-        saveTo: saveToParam(mode, saveTo),
+        saveTo,
       }).unwrap();
       toasts.notifySuccess(`Saved ${target.name}`);
       return;
@@ -165,7 +199,7 @@ const Projects = () => {
     await saveDelivery({
       project: target.name,
       ...deliveryFields,
-      saveTo: saveToParam(mode, saveTo),
+      saveTo,
     }).unwrap();
     toasts.notifySuccess(`Saved ${target.name}`);
   };
@@ -248,6 +282,27 @@ const Projects = () => {
                     {p.behind ? (
                       <span className="gitcfg-ab">{` ↓${p.behind}`}</span>
                     ) : null}
+                    {p.renameMaster ? (
+                      <button
+                        type="button"
+                        className="gitcfg-link"
+                        disabled={renaming || !!refused.BRANCH_SWITCH}
+                        onClick={() =>
+                          renameMaster({ project: p.name })
+                            .unwrap()
+                            .then((r) =>
+                              toasts.notifySuccess(
+                                `${p.name}: local master is now ${r.branch}`
+                              )
+                            )
+                            .catch(
+                              errorToast(toasts, "Could not rename the branch")
+                            )
+                        }
+                      >
+                        {`Rename to ${p.renameMaster}`}
+                      </button>
+                    ) : null}
                   </td>
                   <td className="gitcfg-meta gitcfg-proj-remote">
                     {p.remoteUrl
@@ -256,7 +311,10 @@ const Projects = () => {
                       ? "Local only"
                       : "—"}
                   </td>
-                  <td>{deliveryCell(p)}</td>
+                  <td>
+                    {deliveryCell(p)}{" "}
+                    <OverrideTag defined={p.syncDefined} from={p.syncFrom} />
+                  </td>
                   <td>
                     {state(p)}
                     {p.credentialIssue ? (
@@ -278,6 +336,17 @@ const Projects = () => {
                     >
                       Edit
                     </Button>
+                    {p.versioned ? (
+                      <Button
+                        colorClass="secondary"
+                        onClick={() => {
+                          setBranchesOf(p.name);
+                          setBranchesOpen(true);
+                        }}
+                      >
+                        Branches
+                      </Button>
+                    ) : null}
                     {isSync(p.delivery) && !combined ? (
                       <Button
                         colorClass="secondary"
@@ -308,32 +377,9 @@ const Projects = () => {
         onClose={() => setOpen(false)}
         onSave={submit}
         errorTitle={target ? `Could not save ${target.name}` : undefined}
-        large={drawerTab === "branches"}
-        saveDisabled={drawerTab === "branches"}
+        defs={perMode ? defs : undefined}
       >
-        {target && target.versioned ? (
-          <div className="gitcfg-tabs" role="tablist">
-            {(
-              [
-                ["settings", "Settings"],
-                ["branches", "Branches"],
-              ] as const
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                role="tab"
-                aria-selected={drawerTab === key}
-                className={drawerTab === key ? "is-active" : ""}
-                onClick={() => setDrawerTab(key)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        ) : null}
-        {target && drawerTab === "branches" && target.versioned ? (
-          <BranchesView project={target.name} compact />
-        ) : target ? (
+        {target ? (
           <>
             <h4>Repository</h4>
             {combined ? (
@@ -423,16 +469,7 @@ const Projects = () => {
             ) : null}
 
             <h4>Delivery</h4>
-            <ModeScope
-              from={target.syncFrom}
-              saveTo={saveTo}
-              onSaveTo={setSaveTo}
-              reset={
-                target.syncFrom
-                  ? { type: "sync", project: target.name }
-                  : undefined
-              }
-            />
+            {perMode ? <Definitions {...defs} /> : null}
             <SelectInput
               label="How changes reach this project"
               value={delivery}
@@ -503,6 +540,27 @@ const Projects = () => {
               </>
             ) : null}
           </>
+        ) : null}
+      </SettingsDrawer>
+
+      <SettingsDrawer
+        open={branchesOpen}
+        title={branchesOf ? `${branchesOf} — Branches` : ""}
+        onClose={() => setBranchesOpen(false)}
+        onSave={async () => undefined}
+        large
+        readOnly
+      >
+        {branchesOf ? (
+          <BranchesView
+            project={branchesOf}
+            compact
+            onConfigureRemote={() => {
+              const p = projects.find((x) => x.name === branchesOf);
+              setBranchesOpen(false);
+              if (p) openTarget(p);
+            }}
+          />
         ) : null}
       </SettingsDrawer>
     </div>

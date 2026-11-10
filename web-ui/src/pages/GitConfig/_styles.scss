@@ -326,10 +326,20 @@ ul.gitcfg-hint {
 }
 
 // "Save to" in a drawer, with the from-tag and Reset to core under it.
-.gitcfg-mode-scope {
+// A drawer's resource definitions (Create / Remove Override, Select Definition to Configure).
+.gitcfg-defs {
   margin-bottom: var(--gitcfg-space-3);
   padding-bottom: var(--gitcfg-space-2);
   border-bottom: var(--gitcfg-border);
+
+  p {
+    margin: 0 0 var(--gitcfg-space-1);
+  }
+}
+
+.gitcfg-defs-title {
+  margin: 0;
+  font-weight: var(--font-weight-bold);
 }
 
 // Status words. One colour per meaning, used by every tab.
@@ -576,6 +586,53 @@ ul.gitcfg-hint {
   color: var(--neutral-60);
   font-size: var(--gitcfg-text-md);
   line-height: 1.35;
+}
+
+// The layout card's one option: the platform checkbox on its own row, its label beside it and
+// wrapping under itself, not under the box.
+// A small text action inside a table cell (Rename to main).
+.gitcfg-link {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font-size: var(--gitcfg-text-sm);
+  cursor: pointer;
+
+  &:disabled {
+    color: var(--neutral-50);
+    cursor: default;
+  }
+}
+
+// Branches with no remote: what is missing, and the way to where it is set.
+.gitcfg-no-remote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gitcfg-space-3);
+  margin-bottom: var(--gitcfg-space-2);
+  padding: var(--gitcfg-space-2) var(--gitcfg-space-3);
+  border: var(--gitcfg-border);
+  border-radius: var(--gitcfg-radius);
+
+  p {
+    margin: 0;
+  }
+}
+
+.gitcfg-layout-opt {
+  margin: var(--gitcfg-space-3) 0;
+
+  .MuiFormControlLabel-root {
+    align-items: flex-start;
+    margin-left: 0;
+  }
+
+  .MuiCheckbox-root {
+    padding: 0 var(--gitcfg-space-2) 0 0;
+  }
 }
 
 .gitcfg-check {
