@@ -38,11 +38,15 @@ setting's value and where it comes from (`from core` or `from Prod`).
 
 The default is how earlier versions behaved: everything allowed, any host.
 
+![The Policy tab in deployment mode Prod: each setting, its value and where it comes from](images/versioning-policy.png)
+
 A refused action stays on screen, disabled, with the reason: on the page as
 text, in the Designer in the menu or button ("Checkout (off in deployment mode
 Prod)"). The gateway refuses it either way — a route answers 403 and the
 Designer shows the message, for example *Not allowed in deployment mode Prod:
 pushing is turned off by the gateway's Git policy.*
+
+![The layout switch disabled, with the reason, in deployment mode Prod](images/versioning-policy-refused.png)
 
 ## Per-mode remotes and credentials
 
@@ -53,6 +57,8 @@ this mode uses. Each drawer shows where the value comes from now, and **Reset
 to core** deletes the mode's override. A record that exists only in the mode
 (a credential added there) is deleted by Reset, as core has nothing to fall
 back to.
+
+![The config remote's drawer: Save to core or Prod, where the value comes from, Reset to core](images/versioning-save-to.png)
 
 The same records can also be overridden from **Platform › Modes** or the
 gateway's `resources/copy` API; the module reads whichever value the active
@@ -88,9 +94,21 @@ the data directory).
    `ignition.conf` (above).
 2. On Dev (mode `Dev`): open **Policy**, leave core as it is. Configure the
    remote with a token that can push, **Save to: core**.
-3. Still on Dev, edit the policy with **Save to: Prod**: Push off, Commit from
-   the Designer off, branches and layout off, deliveries Sync — replace only,
-   allowed hosts `github.com`. Commit and push; the override is in the branch.
+3. Still on Dev, write the Prod override of the policy. The page's Save to only
+   offers core and the active mode, so use the gateway API: copy the policy into
+   Prod, then set its values — Push off, Commit from the Designer off, branches
+   and layout off, deliveries Sync — replace only, allowed hosts `github.com`.
+
+   ```text
+   POST /data/api/v1/resources/copy?resourceType=com.operametrix.ignition.git/git-policy
+        &fromName=policy&toName=policy&fromCollection=core&toCollection=Prod&signature=<sig>
+   PUT  /data/api/v1/resources/com.operametrix.ignition.git/git-policy
+        [{"name":"policy","collection":"Prod","signature":"<new sig>","config":{...}}]
+   ```
+
+   (`<sig>` from `GET /data/api/v1/resources/find/com.operametrix.ignition.git/git-policy/policy`.)
+   The config repository commits it; push, and the override is in the branch.
+   Or restart Dev into Prod once and use **Save to: Prod** on the Policy tab.
 4. On Prod (mode `Prod`): Sync — replace from that branch brings the policy in.
    Configure the remote with a read-only token, **Save to: Prod**, ideally as a
    Secret Provider reference.

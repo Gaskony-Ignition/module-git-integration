@@ -34,6 +34,13 @@ upstream's; everything below is this fork.
 - A credential is no longer sent to a host other than its own: the gateway remote's credential in
   Combined to a Designer-added remote elsewhere, an HTTPS credential to a host its host field does
   not name, or a saved credential tested against a URL on another host.
+- The credential check no longer contacts a host the Git policy does not allow, nor sends an HTTPS
+  credential to a host its host field does not name; saving the config remote checks its credential
+  at once.
+- Commit and revert emails come from the user's contact info again: on 8.3 the user-source lookup
+  read an empty legacy table, so every Designer commit had no email.
+- The Combined pull-guard refusal shows its whole file list in the Designer (the error dialog cut it
+  off). The Credentials table scrolls in place so the tab fits 1366×640.
 - A revert from the Designer is authored by the Designer user (with their email) instead of "ignition". The revert commit is rewritten in place with the same tree, parent and message, so nothing staged or dirty is touched in either layout.
 
 ## [4.0.0] - 2026-11-10

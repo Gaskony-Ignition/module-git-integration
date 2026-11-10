@@ -101,6 +101,8 @@ credentials and deliveries can be saved for one mode only. Only the policy is
 versioned, so a Prod override written on Dev travels with the branch.
 [docs/MODES.md](docs/MODES.md) has the setup.
 
+![The Policy tab in deployment mode Prod](docs/images/versioning-policy.png)
+
 This build adds the gateway-side Versioning page, change badges, branches and
 delivery on top of upstream 2.1.0 ([CHANGELOG.md](CHANGELOG.md)). The
 Versioning page meets WCAG 2.1 AA, short of three platform controls with no
