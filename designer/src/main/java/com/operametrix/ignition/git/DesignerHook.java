@@ -127,7 +127,12 @@ public class DesignerHook extends AbstractDesignerModuleHook {
             userButton.setIcon(IconUtils.getIcon(userIconPath1));
 
             try {
-                branchButton.setText(rpc.getCurrentBranch(projectName));
+                String branch = rpc.getCurrentBranch(projectName);
+                String shown = branchButton.getText();
+                branchButton.setText(branch);
+                if (branch != null && shown != null && !"unknown".equals(shown) && !shown.equals(branch)) {
+                    followBranchSwitch(branch);
+                }
             } catch (Exception ex) {
                 branchButton.setText("unknown");
             }
@@ -135,6 +140,30 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         });
 
         gitUserTimer.start();
+    }
+
+    /**
+     * The branch was switched from the gateway page. The gateway already holds the new branch's
+     * resources, but the Designer only loads them on Update Project — so load them here, unless
+     * that would throw away edits this Designer has not saved.
+     */
+    private void followBranchSwitch(String branch) {
+        String notice;
+        if (context.getProject().getChanges().isEmpty()) {
+            GitBaseAction.pullProjectFromGateway();
+            refreshCommitPanel();
+            refreshHistoryPanel();
+            notice = "Switched to '" + branch + "' on the gateway; the project was reloaded.";
+        } else {
+            notice = "Switched to '" + branch + "' on the gateway. Save or discard your edits, then File > Update Project.";
+        }
+        if (layoutNotice != null) {
+            gitStatusBar.remove(layoutNotice);
+        }
+        layoutNotice = new JLabel(notice);
+        gitStatusBar.add(layoutNotice);
+        gitStatusBar.revalidate();
+        gitStatusBar.repaint();
     }
 
     private void initStatusBarUnregistered() {
