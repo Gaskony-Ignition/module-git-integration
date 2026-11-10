@@ -482,7 +482,7 @@ public class GitBaseAction {
         if (choice != JOptionPane.YES_OPTION) return;
 
         try {
-            rpc.revertCommit(projectName, commitHash);
+            rpc.revertCommit(projectName, userName, commitHash);
             pullProjectFromGateway();
         } catch (Exception ex) {
             ErrorUtil.showError(ex);

@@ -818,11 +818,11 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     @Override
-    protected boolean revertCommitImpl(String projectName, String commitHash) throws Exception {
+    protected boolean revertCommitImpl(String projectName, String userName, String commitHash) throws Exception {
         RepoLocator.Repo repo = GitManager.repoFor(projectName);
         boolean result;
         synchronized (GitManager.lockFor(repo)) {
-            result = GitManager.revertCommit(repo, commitHash);
+            result = GitManager.revertCommit(repo, commitHash, userName);
         }
         if (result) {
             GitProjectManager.importProject(projectName);

@@ -141,11 +141,50 @@ class ProjectScopeTest {
         RevCommit c = ProjectScope.commit(git, a, List.of("project.json"), "A6", false, "e", "");
         write(data, "config/a.json", "{\"a\":6}");
 
-        ProjectScope.revertScoped(git, a, c.getName());
+        ProjectScope.revertScoped(git, a, c.getName(), "e", "");
 
         assertThat(Files.readString(data.resolve("projects/A/project.json"))).isEqualTo("{\"title\":\"A\"}");
         assertThat(Files.readString(data.resolve("config/a.json"))).isEqualTo("{\"a\":6}");
         assertThat(git.getRepository().resolve(Constants.HEAD)).isNotEqualTo(c.getId());
+    }
+
+    @Test
+    void combinedRevertIsAuthoredByTheDesignerUserAndTakesNothingElse() throws Exception {
+        write(data, "projects/A/project.json", "{\"title\":\"A8\"}");
+        RevCommit c = ProjectScope.commit(git, a, List.of("project.json"), "A8", false, "e", "");
+        write(data, "projects/B/project.json", "{\"title\":\"B dirty\"}");
+        write(data, "config/staged.txt", "s");
+        git.add().addFilepattern("config/staged.txt").call();
+        assertThat(git.status().call().getAdded()).containsExactly("config/staged.txt");
+
+        ProjectScope.revertScoped(git, a, c.getName(), "alice", "alice@x.com");
+
+        RevCommit head = git.log().setMaxCount(1).call().iterator().next();
+        assertThat(head.getAuthorIdent().getName()).isEqualTo("alice");
+        assertThat(head.getAuthorIdent().getEmailAddress()).isEqualTo("alice@x.com");
+        assertThat(head.getCommitterIdent().getName()).isEqualTo("alice");
+        assertThat(head.getShortMessage()).startsWith("Revert");
+        assertThat(head.getParent(0).getName()).isEqualTo(c.getName());
+        assertThat(filesIn(head)).containsExactly("projects/A/project.json");
+        assertThat(Files.readString(data.resolve("projects/B/project.json"))).isEqualTo("{\"title\":\"B dirty\"}");
+        assertThat(Files.readString(data.resolve("config/staged.txt"))).isEqualTo("s");
+    }
+
+    @Test
+    void separateRevertIsAuthoredByTheDesignerUser() throws Exception {
+        write(data, "projects/A/project.json", "{\"title\":\"A9\"}");
+        git.add().addFilepattern(".").call();
+        RevCommit c = git.commit().setMessage("A9").setAuthor("t", "").call();
+
+        git.revert().include(c).call();
+        ProjectScope.reauthorHead(git, "bob", "bob@x.com");
+
+        RevCommit head = git.log().setMaxCount(1).call().iterator().next();
+        assertThat(head.getAuthorIdent().getName()).isEqualTo("bob");
+        assertThat(head.getCommitterIdent().getEmailAddress()).isEqualTo("bob@x.com");
+        assertThat(head.getShortMessage()).startsWith("Revert");
+        assertThat(Files.readString(data.resolve("projects/A/project.json"))).isEqualTo("{\"title\":\"A\"}");
+        assertThat(git.status().call().isClean()).isTrue();
     }
 
     @Test
@@ -154,7 +193,7 @@ class ProjectScopeTest {
         write(data, "config/a.json", "{\"a\":7}");
         git.add().addFilepattern(".").call();
         RevCommit both = git.commit().setMessage("both").setAuthor("t", "").call();
-        assertThatThrownBy(() -> ProjectScope.revertScoped(git, a, both.getName()))
+        assertThatThrownBy(() -> ProjectScope.revertScoped(git, a, both.getName(), "e", ""))
                 .hasMessageContaining("outside this project");
         assertThat(git.getRepository().resolve(Constants.HEAD)).isEqualTo(both.getId());
     }

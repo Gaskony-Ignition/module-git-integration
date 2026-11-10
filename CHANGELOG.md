@@ -3,6 +3,11 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## 4.1.0 (unreleased)
+
+### Fixed
+- A revert from the Designer is authored by the Designer user (with their email) instead of "ignition". The revert commit is rewritten in place with the same tree, parent and message, so nothing staged or dirty is touched in either layout.
+
 ## [4.0.0] - 2026-11-10
 
 **Type:** MAJOR

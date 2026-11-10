@@ -141,8 +141,8 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     }
 
     @Override
-    public boolean revertCommit(String projectName, String commitHash) throws Exception {
-        return revertCommitImpl(projectName, commitHash);
+    public boolean revertCommit(String projectName, String userName, String commitHash) throws Exception {
+        return revertCommitImpl(projectName, userName, commitHash);
     }
 
     @Override
@@ -277,7 +277,7 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     protected abstract List<String> getCommitFileDiffImpl(String projectName, String commitHash, String filePath);
     protected abstract boolean discardChangesImpl(String projectName, List<String> paths);
     protected abstract boolean checkoutCommitImpl(String projectName, String commitHash) throws Exception;
-    protected abstract boolean revertCommitImpl(String projectName, String commitHash) throws Exception;
+    protected abstract boolean revertCommitImpl(String projectName, String userName, String commitHash) throws Exception;
     protected abstract boolean initializeLocalProjectImpl(String projectName, String ignitionUser) throws Exception;
     protected abstract boolean hasRemoteRepositoryImpl(String projectName);
     protected abstract boolean fetchImpl(String projectName, String userName, String remoteName) throws Exception;

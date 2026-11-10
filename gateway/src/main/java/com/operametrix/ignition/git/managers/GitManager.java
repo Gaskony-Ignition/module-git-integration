@@ -1159,11 +1159,12 @@ public class GitManager {
      * If the revert produces merge conflicts, the operation is aborted via hard reset
      * and an error is thrown so the repo is never left in a conflicted state.
      */
-    public static boolean revertCommit(Path projectFolderPath, String commitHash) {
-        return revertCommit(new RepoLocator.Repo(projectFolderPath, ""), commitHash);
+    public static boolean revertCommit(RepoLocator.Repo scope, String commitHash, String userName) {
+        return revertCommit(scope, commitHash, userName,
+                userName == null || userName.isEmpty() ? "" : resolveUserEmail(userName));
     }
 
-    public static boolean revertCommit(RepoLocator.Repo scope, String commitHash) {
+    public static boolean revertCommit(RepoLocator.Repo scope, String commitHash, String userName, String email) {
         try (Git git = getGit(scope.root())) {
             Repository repo = git.getRepository();
             ObjectId commitId = repo.resolve(commitHash);
@@ -1198,7 +1199,7 @@ public class GitManager {
             }
 
             if (scope.scoped()) {
-                ProjectScope.revertScoped(git, scope, commitHash);
+                ProjectScope.revertScoped(git, scope, commitHash, userName, email);
                 return true;
             }
             RevCommit result = git.revert().include(commitId).call();
@@ -1207,6 +1208,7 @@ public class GitManager {
                 git.reset().setMode(ResetCommand.ResetType.HARD).call();
                 throw new RuntimeException("Revert failed — conflicts detected. The revert has been aborted.");
             }
+            ProjectScope.reauthorHead(git, userName, email);
             return true;
         } catch (RuntimeException e) {
             throw e;

@@ -354,7 +354,8 @@ public final class ProjectScope {
      * is neither. A conflicted revert is undone for the project's paths only — the hard reset the
      * Separate layout uses would also throw away uncommitted config and other projects' edits.
      */
-    public static void revertScoped(Git git, RepoLocator.Repo repo, String commitHash) throws Exception {
+    public static void revertScoped(Git git, RepoLocator.Repo repo, String commitHash, String userName,
+                                    String email) throws Exception {
         Repository r = git.getRepository();
         ObjectId id = r.resolve(commitHash);
         if (id == null) {
@@ -385,6 +386,36 @@ public final class ProjectScope {
             r.writeRevertHead(null);
             r.writeMergeCommitMsg(null);
             throw new IllegalStateException("Revert failed — conflicts detected. The revert has been aborted.");
+        }
+        reauthorHead(git, userName, email);
+    }
+
+    /**
+     * JGit's RevertCommand takes no author, so the revert commit is authored by the gateway's
+     * git config. Rewrite just that commit (same tree, parent and message) with the Designer user.
+     * Built directly rather than amended: an amend goes through the index, which in Combined can
+     * hold other projects' staged work; this touches no index or working tree.
+     */
+    public static void reauthorHead(Git git, String userName, String email) throws java.io.IOException {
+        if (userName == null || userName.isEmpty()) return;
+        Repository repo = git.getRepository();
+        try (RevWalk walk = new RevWalk(repo); org.eclipse.jgit.lib.ObjectInserter ins = repo.newObjectInserter()) {
+            RevCommit head = walk.parseCommit(repo.resolve(Constants.HEAD));
+            org.eclipse.jgit.lib.PersonIdent who = new org.eclipse.jgit.lib.PersonIdent(
+                    userName, email == null ? "" : email);
+            org.eclipse.jgit.lib.CommitBuilder cb = new org.eclipse.jgit.lib.CommitBuilder();
+            cb.setTreeId(head.getTree().getId());
+            cb.setParentIds(head.getParents());
+            cb.setMessage(head.getFullMessage());
+            cb.setAuthor(who);
+            cb.setCommitter(who);
+            ObjectId id = ins.insert(cb);
+            ins.flush();
+            org.eclipse.jgit.lib.RefUpdate ru = repo.updateRef(Constants.HEAD);
+            ru.setNewObjectId(id);
+            ru.setExpectedOldObjectId(head.getId());
+            ru.setRefLogMessage("revert: author " + userName, false);
+            ru.forceUpdate();
         }
     }
 }

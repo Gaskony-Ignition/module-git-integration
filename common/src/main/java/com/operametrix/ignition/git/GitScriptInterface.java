@@ -116,7 +116,7 @@ public interface GitScriptInterface {
     boolean checkoutCommit(String projectName, String commitHash) throws Exception;
 
     /** Create a new commit that reverses the changes of the specified commit (git revert). */
-    boolean revertCommit(String projectName, String commitHash) throws Exception;
+    boolean revertCommit(String projectName, String userName, String commitHash) throws Exception;
 
     /** Check whether the given project has a remote repository configured. */
     boolean hasRemoteRepository(String projectName);
