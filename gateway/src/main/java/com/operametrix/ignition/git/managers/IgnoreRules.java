@@ -1,0 +1,172 @@
+package com.operametrix.ignition.git.managers;
+
+import org.eclipse.jgit.ignore.FastIgnoreRule;
+import org.eclipse.jgit.ignore.IgnoreNode;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+/**
+ * The data-directory {@code .gitignore}: its template and how the Git Ignore tab decides a path.
+ * No gateway context, so the tree's tick logic is unit tested (the 3.10.1 anchored-rule trap).
+ */
+public final class IgnoreRules {
+
+    private IgnoreRules() {
+    }
+
+    /**
+     * Only {@code config/} by default. Other modules keep whole runtimes under the data root (the
+     * Python3 module's CPython distributions, Playwright's browsers), so a data root versioned by
+     * default swept tens of thousands of files into the repository.
+     */
+    public static final String ROOT_RULES_COMMENT =
+            "# Only config/ is versioned by default; tick a data-root path on the Git Ignore tab to add it.";
+
+    /** Based on Inductive Automation's version-control-guide template, plus the root rules. */
+    public static final List<String> TEMPLATE = List.of(
+            "# Ignition data-directory config-as-code — managed by the Git module",
+            "**/db/*",
+            "**/metricsdb/*",
+            "**/autobackup/*",
+            "**/db_backup_sqlite.idb",
+            "**/valueStore.idb",
+            // SQLite write-ahead-log sidecars. Without these the baseline `git add .` races the
+            // tag value store: the directory scan lists valueStore.idb-wal, SQLite checkpoints and
+            // deletes it, and the add dies with FileNotFoundException — so init could never
+            // complete on a gateway that was actually running. Ignoring the .idb itself is not
+            // enough; the sidecars are separate paths.
+            "**/*-wal",
+            "**/*-shm",
+            "**/jar-cache/*",
+            "**/request*",
+            "**/response*",
+            "*.tmp",
+            "*.bak",
+            "**/var",
+            "*.log",
+            "**/logs",
+            "**/certificates/*",
+            "**/keystore/",
+            "**/config/local",
+            "**/config/resources/local",
+            "**/.container-init.conf",
+            "**/conversion-report.txt",
+            "**.digest.json",
+            "**/migration-log-*.md",
+            "**/.resources/",
+            "**/.alarms_*",
+            // This module's own records: git credentials, remotes and deliveries belong to the
+            // gateway they were set on. Versioned, a gateway following another's branch would take
+            // that gateway's remote and deliveries, and Sync - replace would delete its own.
+            "**/com.operametrix.ignition.git/",
+            "",
+            ROOT_RULES_COMMENT,
+            "/*",
+            "!/config/",
+            "!/.gitignore"
+    );
+
+    /** Parsed {@code .gitignore} rules, newest last (git's last-match-wins order). */
+    public static List<FastIgnoreRule> parse(Path gitignore) throws IOException {
+        if (!Files.exists(gitignore)) {
+            return List.of();
+        }
+        IgnoreNode node = new IgnoreNode();
+        try (InputStream in = Files.newInputStream(gitignore)) {
+            node.parse(in);
+        }
+        return node.getRules();
+    }
+
+    /**
+     * Decide one path against the rules, git-style: the LAST matching rule wins, and a negation
+     * (`!foo`) re-includes. Returns {@code null} when nothing matched.
+     *
+     * <p>Matching is done on the full repo-relative path AND on each trailing path segment, because
+     * a rule without a slash (e.g. {@code *.log}) matches at any depth — {@code FastIgnoreRule}
+     * itself only compares what it is handed.
+     */
+    public static FastIgnoreRule matchRule(List<FastIgnoreRule> rules, String path, boolean isDir) {
+        FastIgnoreRule match = null;
+        for (FastIgnoreRule r : rules) {
+            if (r.isEmpty()) {
+                continue;
+            }
+            boolean hit = r.isMatch("/" + path, isDir, true);
+            // JGit flags an anchored "/*" as name-only too; testing its basename would let it
+            // exclude every path at every depth, so only a rule with no slash at all gets this.
+            if (!hit && r.getNameOnly() && !isAnchored(r)) {
+                // A name-only rule applies to every segment, so test the basename too.
+                int slash = path.lastIndexOf('/');
+                hit = r.isMatch("/" + (slash >= 0 ? path.substring(slash + 1) : path), isDir, true);
+            }
+            if (hit) {
+                match = r;
+            }
+        }
+        return match;
+    }
+
+    /** A rule that starts with a slash ("/*", "!/config/") applies at the repo root only. */
+    private static boolean isAnchored(FastIgnoreRule r) {
+        String pattern = r.toString();
+        return (pattern.startsWith("!") ? pattern.substring(1) : pattern).startsWith("/");
+    }
+
+    /**
+     * Whether a path is excluded, taking ancestors into account. Git cannot re-include a file whose
+     * PARENT DIRECTORY is excluded, so an ancestor's exclusion is final for everything beneath it —
+     * a negation deeper down is silently ineffective, and the UI must not offer it.
+     *
+     * @return the deciding rule and whether an ancestor (not the path itself) settled it
+     */
+    public static Decision decide(List<FastIgnoreRule> rules, String path, boolean isDir) {
+        // Walk ancestors root-downwards; the first excluded ancestor settles it.
+        StringBuilder walked = new StringBuilder();
+        for (String segment : path.split("/")) {
+            if (walked.length() > 0) {
+                walked.append('/');
+            }
+            walked.append(segment);
+            String sofar = walked.toString();
+            boolean last = sofar.equals(path);
+            FastIgnoreRule m = matchRule(rules, sofar, last ? isDir : true);
+            if (m != null && m.getResult() && !last) {
+                // An ancestor is excluded — nothing below it can be re-included.
+                return new Decision(m, true);
+            }
+            if (last) {
+                return new Decision(m, false);
+            }
+        }
+        return new Decision(null, false);
+    }
+
+    /** The rule that settled a path, and whether it was inherited from an excluded ancestor. */
+    public record Decision(FastIgnoreRule rule, boolean fromAncestor) {
+        public boolean excluded() {
+            return rule != null && rule.getResult();
+        }
+    }
+
+    /**
+     * Whether the deciding rule is this path's own explicit line rather than an inherited glob.
+     * Only an own line can be removed by unticking; a glob has to be negated instead.
+     */
+    public static boolean isOwnLine(FastIgnoreRule rule, String path, boolean isDir) {
+        String text = rule.toString().trim();
+        if (text.startsWith("!")) {
+            text = text.substring(1);
+        }
+        String bare = text.startsWith("/") ? text.substring(1) : text;
+        if (bare.endsWith("/")) {
+            bare = bare.substring(0, bare.length() - 1);
+        }
+        return bare.equals(path) || (isDir && bare.equals(path + "/"));
+    }
+
+}
