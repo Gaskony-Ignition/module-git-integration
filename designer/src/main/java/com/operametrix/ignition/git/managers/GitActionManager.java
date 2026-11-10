@@ -508,6 +508,18 @@ public class GitActionManager {
         });
     }
 
+    /** The gateway's layout changed under an open Designer: open popups follow it. */
+    public static void onLayoutChanged(boolean combined) {
+        if (branchPopup != null) {
+            branchPopup.setGatewayWide(combined);
+        }
+        if (remotesPopup != null) {
+            // Editable in Separate, a read-only message in Combined: the next open builds the right one.
+            remotesPopup.dispose();
+            remotesPopup = null;
+        }
+    }
+
     /** Combined layout: one repository for the gateway, so branches and remotes are gateway-wide. */
     public static boolean gatewayWide() {
         try {

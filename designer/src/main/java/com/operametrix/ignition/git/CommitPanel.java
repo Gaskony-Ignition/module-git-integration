@@ -285,6 +285,19 @@ public class CommitPanel extends JPanel {
             changesTable.getColumn("Type").setCellRenderer(new ChangeTypeCellRenderer());
 
             changesCountLabel.setText("Changes (" + ds.getRowCount() + ")");
+            changesCountLabel.setForeground(UIManager.getColor("Label.foreground"));
+            changesCountLabel.setToolTipText(null);
+        });
+    }
+
+    /** The gateway could not list the changes (a leftover .git in Combined, say): say why. */
+    public void showError(String message) {
+        SwingUtilities.invokeLater(() -> {
+            ((DefaultTableModel) changesTable.getModel()).setRowCount(0);
+            changesCountLabel.setText("<html>Changes unavailable: " + message
+                    .replace("&", "&amp;").replace("<", "&lt;") + "</html>");
+            changesCountLabel.setForeground(new java.awt.Color(0xC6, 0x28, 0x28));
+            changesCountLabel.setToolTipText(message);
         });
     }
 

@@ -43,6 +43,9 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     JPanel gitStatusBar;
     JButton branchButton;
     Timer gitUserTimer;
+    /** The gateway's repository layout as last seen; re-read on the status poll. */
+    private String layout;
+    private JLabel layoutNotice;
 
     CommitPanel commitPanel;
     DockableFrame commitFrame;
@@ -65,6 +68,11 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         Optional<ConcurrencySessionInfo> sessionInfo = context.getResourceEditManager().getCurrentSessionInfo();
         userName = sessionInfo.map(ConcurrencySessionInfo::username).orElse("");
 
+        try {
+            layout = rpc.getRepositoryLayout();
+        } catch (Exception e) {
+            layout = null;
+        }
         boolean registered = rpc.isProjectRegistered(projectName);
         if (registered) {
             rpc.setupLocalRepo(projectName, userName);
@@ -123,6 +131,7 @@ public class DesignerHook extends AbstractDesignerModuleHook {
             } catch (Exception ex) {
                 branchButton.setText("unknown");
             }
+            checkLayout();
         });
 
         gitUserTimer.start();
@@ -159,8 +168,50 @@ public class DesignerHook extends AbstractDesignerModuleHook {
                     ? "/com/operametrix/ignition/git/icons/ic_verified_user.svg"
                     : "/com/operametrix/ignition/git/icons/ic_unregister_user.svg";
             userButton.setIcon(IconUtils.getIcon(iconPath));
+            checkLayout();
         });
         gitUserTimer.start();
+    }
+
+    /**
+     * An admin can switch the layout while this Designer is open. Branches, remotes and whether
+     * this project is versioned all follow it, so pick it up here rather than on the next open.
+     */
+    private void checkLayout() {
+        String now;
+        try {
+            now = rpc.getRepositoryLayout();
+        } catch (Exception e) {
+            return;
+        }
+        if (now == null || now.equals(layout)) {
+            return;
+        }
+        boolean first = layout == null;
+        layout = now;
+        if (first) {
+            return;
+        }
+        boolean combined = "combined".equals(now);
+        if (branchButton == null && rpc.isProjectRegistered(projectName)) {
+            reinitializeAfterSetup();
+        } else {
+            refreshBranchLabel();
+            refreshCommitPanel();
+            refreshHistoryPanel();
+        }
+        GitActionManager.onLayoutChanged(combined);
+        if (gitStatusBar != null) {
+            if (layoutNotice != null) {
+                gitStatusBar.remove(layoutNotice);
+            }
+            layoutNotice = new JLabel(combined
+                    ? "Layout is now Combined: branches and the remote are gateway-wide."
+                    : "Layout is now Separate: this project has its own repository.");
+            gitStatusBar.add(layoutNotice);
+            gitStatusBar.revalidate();
+            gitStatusBar.repaint();
+        }
     }
 
     private boolean hasUserCredentials(String userName) {
@@ -313,7 +364,16 @@ public class DesignerHook extends AbstractDesignerModuleHook {
                 // marks in the tree can never disagree with the Changes list beside them.
                 GitChangeBadges.update(ds);
             } catch (Exception e) {
-                // Silently ignore refresh errors
+                // A refusal the gateway words for the user is shown, never left as blank badges;
+                // a transient failure (gateway restarting) is not worth one.
+                Throwable root = e;
+                while (root.getCause() != null) {
+                    root = root.getCause();
+                }
+                String msg = root.getMessage();
+                if (msg != null && msg.contains(".git folder")) {
+                    commitPanel.showError(msg);
+                }
             }
         }).start();
     }
