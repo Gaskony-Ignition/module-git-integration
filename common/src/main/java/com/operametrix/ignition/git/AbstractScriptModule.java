@@ -79,8 +79,18 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     }
 
     @Override
-    public boolean deleteBranch(String projectName, String branchName) throws Exception {
-        return deleteBranchImpl(projectName, branchName);
+    public String deleteBranch(String projectName, String branchName, boolean force) throws Exception {
+        return deleteBranchImpl(projectName, branchName, force);
+    }
+
+    @Override
+    public Dataset getLocalBranchInfo(String projectName) throws Exception {
+        return getLocalBranchInfoImpl(projectName);
+    }
+
+    @Override
+    public Dataset cleanupBranches(String projectName, List<String> branchNames) throws Exception {
+        return cleanupBranchesImpl(projectName, branchNames);
     }
 
 
@@ -249,7 +259,9 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     protected abstract String getCurrentBranchImpl(String projectName) throws Exception;
     protected abstract boolean createBranchImpl(String projectName, String branchName) throws Exception;
     protected abstract boolean checkoutBranchImpl(String projectName, String branchName) throws Exception;
-    protected abstract boolean deleteBranchImpl(String projectName, String branchName) throws Exception;
+    protected abstract String deleteBranchImpl(String projectName, String branchName, boolean force) throws Exception;
+    protected abstract Dataset getLocalBranchInfoImpl(String projectName) throws Exception;
+    protected abstract Dataset cleanupBranchesImpl(String projectName, List<String> branchNames) throws Exception;
     protected abstract boolean isProjectRegisteredImpl(String projectName);
     protected abstract boolean initializeProjectImpl(String projectName, String repoUri, String ignitionUser,
                                                      long sshKeyId, long httpsCredentialId) throws Exception;

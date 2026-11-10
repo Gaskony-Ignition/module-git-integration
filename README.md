@@ -122,6 +122,14 @@ Project versioning: open a project, click **Configure** in the Designer's status
 bar, and either clone a remote or initialise locally. Commit from the **Commit**
 tab beside the Project Browser.
 
+Branches: the **Branch** button opens local and remote lists. A fetch drops remote
+branches that were deleted on the remote, and the local list marks a branch
+`[gone]` (its remote branch was deleted), `[merged]` (already in the current
+branch's upstream, else HEAD) or `↑3` (three commits on no remote). Delete refuses
+the checked-out branch and the branch a scheduled sync follows. A branch with
+unmerged or unpushed commits asks again, with the commit count, before **Delete
+anyway**. **Clean up…** fetches, then offers every gone or merged branch, ticked.
+
 Gateway config versioning: **Platform → System → Versioning → Initialize
 versioning**. Adjust what is covered under **Git Ignore**.
 

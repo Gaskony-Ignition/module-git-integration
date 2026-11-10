@@ -3,6 +3,25 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## 4.0.0 (unreleased)
+
+**Type:** MAJOR
+
+### Added
+- **Branch clean-up in the Designer.** The local branch list marks branches `[gone]` (deleted on
+  the remote), `[merged]` and `↑N` (commits on no remote), and the sync branch shows as protected.
+  **Clean up…** fetches, then offers every gone or merged branch, ticked, and deletes the ones you
+  keep ticked.
+
+### Changed
+- **Delete is safe by default.** An unmerged or unpushed branch is refused with the commit count;
+  **Delete anyway** overrides that. The checked-out branch and the branch a scheduled sync follows
+  are never deleted. Before, anything but the current branch was force-deleted after one prompt.
+- **Fetch prunes.** Branches deleted on the remote leave the remote list on the next fetch (Designer
+  fetch, scheduled sync and the config repo's fetches).
+- **RPC:** `deleteBranch` takes a `force` flag and returns a refusal as text; new
+  `getLocalBranchInfo` and `cleanupBranches`. `getLocalBranches` is unchanged.
+
 ## [3.11.3] - 2026-11-04
 
 **Type:** PATCH

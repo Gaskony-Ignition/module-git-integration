@@ -847,14 +847,17 @@ public class GitManager {
         return resourcePath + "/resource.json";
     }
 
-    public static boolean deleteBranch(Path projectFolderPath, String branchName) throws Exception {
+    public static BranchHygiene.Result deleteBranch(Path projectFolderPath, String branchName, boolean force,
+                                                    java.util.Map<String, String> protectedBranches) throws Exception {
         try (Git git = getGit(projectFolderPath)) {
-            String currentBranch = git.getRepository().getBranch();
-            if (branchName.equals(currentBranch)) {
-                throw new IllegalStateException("Cannot delete the currently checked out branch: " + branchName);
-            }
-            git.branchDelete().setBranchNames(branchName).setForce(true).call();
-            return true;
+            return BranchHygiene.delete(git, branchName, force, protectedBranches);
+        }
+    }
+
+    public static List<BranchHygiene.Info> localBranchInfo(Path projectFolderPath,
+                                                           java.util.Map<String, String> protectedBranches) throws Exception {
+        try (Git git = getGit(projectFolderPath)) {
+            return BranchHygiene.classify(git, protectedBranches);
         }
     }
 

@@ -51,7 +51,23 @@ public interface GitScriptInterface {
     String getCurrentBranch(String projectName) throws Exception;
     boolean createBranch(String projectName, String branchName) throws Exception;
     boolean checkoutBranch(String projectName, String branchName) throws Exception;
-    boolean deleteBranch(String projectName, String branchName) throws Exception;
+
+    /**
+     * Per local branch: name, upstream (null if none), gone, ahead, merged, protectedReason (null,
+     * "current", or what else needs the branch). Columns: String, String, Boolean, Integer,
+     * Boolean, String.
+     */
+    Dataset getLocalBranchInfo(String projectName) throws Exception;
+
+    /**
+     * Delete a local branch. Returns {@link BranchDeleteResult#encode} text: empty when deleted,
+     * otherwise why it was refused. Without {@code force}, unmerged and unpushed branches refuse;
+     * protected branches refuse either way.
+     */
+    String deleteBranch(String projectName, String branchName, boolean force) throws Exception;
+
+    /** Safe-delete each name. Dataset columns: branch, ok, reason. */
+    Dataset cleanupBranches(String projectName, List<String> branchNames) throws Exception;
 
     /** Check whether the given project is registered in the gateway's git configuration. */
     boolean isProjectRegistered(String projectName);

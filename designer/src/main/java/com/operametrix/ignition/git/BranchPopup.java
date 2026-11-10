@@ -1,6 +1,7 @@
 package com.operametrix.ignition.git;
 
 import com.inductiveautomation.ignition.client.icons.VectorIcons;
+import com.inductiveautomation.ignition.common.Dataset;
 import com.inductiveautomation.ignition.designer.gui.CommonUI;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,18 +13,52 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.List;
 
 public class BranchPopup extends JDialog {
     private final Logger logger = LoggerFactory.getLogger(getClass());
 
-    private JList<String> localBranchList;
+    /** One local branch as the gateway classified it. */
+    public record Row(String name, String upstream, boolean gone, int ahead, boolean merged,
+                      String protectedReason) {
+        /** The list text: the name plus what is worth knowing before deleting it. */
+        String label(boolean current) {
+            StringBuilder sb = new StringBuilder(name);
+            if (gone) sb.append("  [gone]");
+            if (merged && !current) sb.append("  [merged]");
+            if (ahead > 0) sb.append("  \u2191").append(ahead);
+            if (protectedReason != null && !"current".equals(protectedReason)) {
+                sb.append("  (").append(protectedReason).append(")");
+            }
+            return sb.toString();
+        }
+
+        @Override
+        public String toString() {
+            return name;
+        }
+    }
+
+    public static List<Row> rows(Dataset ds) {
+        List<Row> out = new ArrayList<>();
+        for (int i = 0; i < ds.getRowCount(); i++) {
+            out.add(new Row((String) ds.getValueAt(i, "name"), (String) ds.getValueAt(i, "upstream"),
+                    Boolean.TRUE.equals(ds.getValueAt(i, "gone")),
+                    ((Number) ds.getValueAt(i, "ahead")).intValue(),
+                    Boolean.TRUE.equals(ds.getValueAt(i, "merged")),
+                    (String) ds.getValueAt(i, "protectedReason")));
+        }
+        return out;
+    }
+
+    private JList<Row> localBranchList;
     private JList<String> remoteBranchList;
-    private DefaultListModel<String> localModel;
+    private DefaultListModel<Row> localModel;
     private DefaultListModel<String> remoteModel;
     private String currentBranch = "";
 
-    public BranchPopup(String currentBranch, List<String> localBranches, List<String> remoteBranches, Component parent) {
+    public BranchPopup(String currentBranch, List<Row> localBranches, List<String> remoteBranches, Component parent) {
         super(SwingUtilities.getWindowAncestor(parent));
         try {
             InputStream iconStream = getClass().getResourceAsStream("/com/operametrix/ignition/git/icons/ic_branch.svg");
@@ -63,7 +98,11 @@ public class BranchPopup extends JDialog {
         JPanel localPanel = new JPanel(new BorderLayout());
         JButton createBtn = buildIconButton(VectorIcons.get("add"), "Create Branch...", e -> onCreateBranchRequested());
         JButton localRefreshBtn = buildIconButton(VectorIcons.get("refresh"), "Refresh", e -> onRefresh());
-        localPanel.add(buildListHeader("Local Branches", createBtn, localRefreshBtn), BorderLayout.NORTH);
+        JButton cleanupBtn = new JButton("Clean up...");
+        cleanupBtn.setToolTipText("Fetch, then delete local branches that are gone from the remote or already merged");
+        cleanupBtn.setMargin(new Insets(1, 6, 1, 6));
+        cleanupBtn.addActionListener(e -> onCleanupRequested());
+        localPanel.add(buildListHeader("Local Branches", cleanupBtn, createBtn, localRefreshBtn), BorderLayout.NORTH);
         localPanel.add(new JScrollPane(localBranchList), BorderLayout.CENTER);
 
         remoteModel = new DefaultListModel<>();
@@ -99,9 +138,9 @@ public class BranchPopup extends JDialog {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (e.getClickCount() == 2 && SwingUtilities.isLeftMouseButton(e)) {
-                    String selected = localBranchList.getSelectedValue();
-                    if (selected != null && !selected.equals(currentBranch)) {
-                        onCheckoutBranch(selected);
+                    Row selected = localBranchList.getSelectedValue();
+                    if (selected != null && !selected.name().equals(currentBranch)) {
+                        onCheckoutBranch(selected.name());
                     }
                 }
             }
@@ -121,7 +160,8 @@ public class BranchPopup extends JDialog {
                 int index = localBranchList.locationToIndex(e.getPoint());
                 if (index < 0) return;
                 localBranchList.setSelectedIndex(index);
-                String branch = localModel.getElementAt(index);
+                Row row = localModel.getElementAt(index);
+                String branch = row.name();
 
                 JPopupMenu menu = new JPopupMenu();
 
@@ -132,9 +172,11 @@ public class BranchPopup extends JDialog {
 
                 menu.addSeparator();
 
-                JMenuItem deleteItem = new JMenuItem("Delete");
+                String blocked = branch.equals(currentBranch) ? "current" : row.protectedReason();
+                JMenuItem deleteItem = new JMenuItem(blocked == null ? "Delete"
+                        : "Delete (" + ("current".equals(blocked) ? "current branch" : "protected: " + blocked) + ")");
                 deleteItem.setForeground(new Color(0xCC0000));
-                deleteItem.setEnabled(!branch.equals(currentBranch));
+                deleteItem.setEnabled(blocked == null);
                 deleteItem.addActionListener(a -> {
                     int confirm = JOptionPane.showConfirmDialog(BranchPopup.this,
                             "Are you sure you want to delete branch '" + branch + "'?",
@@ -193,7 +235,7 @@ public class BranchPopup extends JDialog {
         });
     }
 
-    private JPanel buildListHeader(String title, JButton... trailingButtons) {
+    private JPanel buildListHeader(String title, AbstractButton... trailingButtons) {
         JPanel header = new JPanel(new BorderLayout());
         header.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
         header.setBackground(UIManager.getColor("Panel.background"));
@@ -204,7 +246,7 @@ public class BranchPopup extends JDialog {
 
         JPanel buttonBox = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
         buttonBox.setOpaque(false);
-        for (JButton btn : trailingButtons) {
+        for (AbstractButton btn : trailingButtons) {
             buttonBox.add(btn);
         }
         header.add(buttonBox, BorderLayout.EAST);
@@ -237,11 +279,11 @@ public class BranchPopup extends JDialog {
         return button;
     }
 
-    public void setData(String currentBranch, List<String> localBranches, List<String> remoteBranches) {
+    public void setData(String currentBranch, List<Row> localBranches, List<String> remoteBranches) {
         this.currentBranch = currentBranch != null ? currentBranch : "";
 
         localModel.clear();
-        for (String b : localBranches) {
+        for (Row b : localBranches) {
             localModel.addElement(b);
         }
 
@@ -261,7 +303,9 @@ public class BranchPopup extends JDialog {
         public Component getListCellRendererComponent(JList<?> list, Object value,
                                                       int index, boolean isSelected, boolean cellHasFocus) {
             super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-            String branch = value != null ? value.toString() : "";
+            Row row = (Row) value;
+            String branch = row != null ? row.name() : "";
+            setText(row != null ? row.label(branch.equals(currentBranch)) : "");
             if (branch.equals(currentBranch)) {
                 setFont(getFont().deriveFont(Font.BOLD));
                 if (!isSelected) {
@@ -283,6 +327,52 @@ public class BranchPopup extends JDialog {
     }
 
     public void onRefresh() {
+    }
+
+    /** Called when the user clicks "Clean up..." — caller fetches, then calls promptCleanup. */
+    public void onCleanupRequested() {
+    }
+
+    /**
+     * Shows gone and merged branches (protected excluded), ticked, for the user to confirm.
+     *
+     * @return the ticked names; empty if cancelled or nothing ticked
+     */
+    public List<String> promptCleanup(List<Row> candidates) {
+        JPanel box = new JPanel();
+        box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
+        List<JCheckBox> boxes = new ArrayList<>();
+        for (Row r : candidates) {
+            JCheckBox cb = new JCheckBox(r.label(false), true);
+            cb.setAlignmentX(Component.LEFT_ALIGNMENT);
+            boxes.add(cb);
+            box.add(cb);
+        }
+        JScrollPane scroll = new JScrollPane(box);
+        scroll.setPreferredSize(new Dimension(420, Math.min(260, 40 + 24 * candidates.size())));
+        JPanel body = new JPanel(new BorderLayout(0, 6));
+        body.add(new JLabel("Branches gone from the remote or already merged:"), BorderLayout.NORTH);
+        body.add(scroll, BorderLayout.CENTER);
+        int choice = JOptionPane.showOptionDialog(this, body, "Clean Up Branches",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE, null,
+                new Object[]{"Delete selected", "Cancel"}, "Cancel");
+        List<String> picked = new ArrayList<>();
+        if (choice == 0) {
+            for (int i = 0; i < boxes.size(); i++) {
+                if (boxes.get(i).isSelected()) picked.add(candidates.get(i).name());
+            }
+        }
+        return picked;
+    }
+
+    public List<Row> localRows() {
+        List<Row> out = new ArrayList<>();
+        for (int i = 0; i < localModel.size(); i++) out.add(localModel.get(i));
+        return out;
+    }
+
+    public String getCurrentBranch() {
+        return currentBranch;
     }
 
     /** Called when the user clicks the Refresh button — fetches from remote first. */

@@ -23,4 +23,16 @@ dependencies {
 
     // Bundles the Config Versioning React page (built by :web-ui) into the gateway jar under mounted/.
     modlImplementation(project(":web-ui"))
+
+    // Tests run outside a Gateway: JGit only, for the pure branch logic.
+    testImplementation("org.eclipse.jgit:org.eclipse.jgit:7.8.0.202609011348-r")
+    testImplementation("org.junit.jupiter:junit-jupiter-api:5.14.4")
+    testImplementation("org.assertj:assertj-core:3.27.7")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.14.4")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.14.4")
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.17")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }

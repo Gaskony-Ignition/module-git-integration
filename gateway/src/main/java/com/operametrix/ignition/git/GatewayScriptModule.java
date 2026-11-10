@@ -3,6 +3,7 @@ package com.operametrix.ignition.git;
 import com.operametrix.ignition.git.automation.GitEvent;
 import com.operametrix.ignition.git.automation.GitEvents;
 import com.operametrix.ignition.git.managers.*;
+import com.operametrix.ignition.git.records.GitSyncRecord;
 import com.operametrix.ignition.git.records.GitProjectsConfigRecord;
 import com.operametrix.ignition.git.records.GitRemoteCredentialsRecord;
 import com.operametrix.ignition.git.records.GitReposUsersRecord;
@@ -24,8 +25,10 @@ import org.eclipse.jgit.transport.URIish;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static com.operametrix.ignition.git.managers.GitImageManager.exportImages;
@@ -511,8 +514,54 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     @Override
-    protected boolean deleteBranchImpl(String projectName, String branchName) throws Exception {
-        return GitManager.deleteBranch(getProjectFolderPath(projectName), branchName);
+    protected String deleteBranchImpl(String projectName, String branchName, boolean force) throws Exception {
+        BranchHygiene.Result r = GitManager.deleteBranch(getProjectFolderPath(projectName), branchName, force,
+                protectedBranches(projectName));
+        return r.ok() ? "" : BranchDeleteResult.encode(r.kind(), r.count(), r.message());
+    }
+
+    @Override
+    protected Dataset getLocalBranchInfoImpl(String projectName) throws Exception {
+        List<BranchHygiene.Info> infos = GitManager.localBranchInfo(getProjectFolderPath(projectName),
+                protectedBranches(projectName));
+        DatasetBuilder builder = new DatasetBuilder();
+        builder.colNames(List.of("name", "upstream", "gone", "ahead", "merged", "protectedReason"));
+        builder.colTypes(List.of(String.class, String.class, Boolean.class, Integer.class, Boolean.class,
+                String.class));
+        for (BranchHygiene.Info i : infos) {
+            builder.addRow(i.name(), i.upstream(), i.gone(), i.ahead(), i.merged(), i.protectedReason());
+        }
+        Dataset ds = builder.build();
+        return ds != null ? ds : new BasicDataset();
+    }
+
+    @Override
+    protected Dataset cleanupBranchesImpl(String projectName, List<String> branchNames) throws Exception {
+        DatasetBuilder builder = new DatasetBuilder();
+        builder.colNames(List.of("branch", "ok", "reason"));
+        builder.colTypes(List.of(String.class, Boolean.class, String.class));
+        Map<String, String> guarded = protectedBranches(projectName);
+        for (String name : branchNames) {
+            try {
+                BranchHygiene.Result r = GitManager.deleteBranch(getProjectFolderPath(projectName), name, false,
+                        guarded);
+                builder.addRow(name, r.ok(), r.ok() ? "" : r.message());
+            } catch (Exception e) {
+                builder.addRow(name, false, String.valueOf(e.getMessage()));
+            }
+        }
+        Dataset ds = builder.build();
+        return ds != null ? ds : new BasicDataset();
+    }
+
+    /** Branches the project's scheduled sync follows: deleting one would break it. */
+    private static Map<String, String> protectedBranches(String projectName) {
+        Map<String, String> out = new HashMap<>();
+        GitSyncRecord sync = GitSyncRecord.findByProject(projectName);
+        if (sync != null && sync.isEnabled() && !sync.getBranch().isBlank()) {
+            out.put(sync.getBranch(), "sync");
+        }
+        return out;
     }
 
     @Override
@@ -814,6 +863,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             FetchCommand fetch = git.fetch();
             fetch.setRemote(remoteName);
             fetch.setUnshallow(true);
+            // Drop remote-tracking refs for branches deleted on the remote, so they stop listing.
+            fetch.setRemoveDeletedRefs(true);
             setAuthentication(fetch, projectName, userName, remoteName);
             fetch.call();
             logger.info("Fetch from '" + remoteName + "' was successful.");

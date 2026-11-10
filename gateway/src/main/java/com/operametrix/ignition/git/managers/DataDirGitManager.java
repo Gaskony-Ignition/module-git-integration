@@ -716,7 +716,7 @@ public class DataDirGitManager {
                 try (Git git = GitManager.getGit(dataDir())) {
                     Repository repo = git.getRepository();
 
-                    FetchCommand fetch = git.fetch().setRemote(ORIGIN)
+                    FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
                             .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
                     GitManager.setAuthenticationFromIds(fetch, remote.getUri(),
                             remote.getSshKeyId(), remote.getHttpsCredentialId());
@@ -806,7 +806,7 @@ public class DataDirGitManager {
             try (Git git = GitManager.getGit(dataDir())) {
                 Repository repo = git.getRepository();
 
-                FetchCommand fetch = git.fetch().setRemote(ORIGIN)
+                FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
                         .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
                 GitManager.setAuthenticationFromIds(fetch, remote.getUri(),
                         remote.getSshKeyId(), remote.getHttpsCredentialId());

@@ -195,7 +195,7 @@ public final class SyncScheduler {
                 }
             }
 
-            FetchCommand fetch = git.fetch().setRemote(remoteName);
+            FetchCommand fetch = git.fetch().setRemote(remoteName).setRemoveDeletedRefs(true);
             GitManager.setAuthentication(fetch, project, user, remoteName);
             fetch.call();
 

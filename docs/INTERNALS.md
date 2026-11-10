@@ -57,6 +57,7 @@ deletes the resource types left over from removed features, both idempotent.
 | `ConfigAutoCommitter` | Listens for config changes and commits them; the only live notification surface (per-resource listeners on the config collection are never called). |
 | `GitProjectManager` / `GitTagManager` / `GitThemeManager` / `GitImageManager` | Per-project resource import, and gateway-resource snapshot (tags/themes/images) into the project tree. |
 | `ConfigSync` | The config repo's Delivery (off, or Sync — replace): settings in `.git/config` section `gitmodule.configsync` (not a resource, which would be versioned and overwritten by the branch), run from the `SyncScheduler` timer; calls `DataDirGitManager.replaceFromBranch`, which holds `ConfigAutoCommitter` and records the applied tip in `refs/git-module/config-synced`. `GET /remote` carries `delivery` and the last run. |
+| `BranchHygiene` | Branch classification and delete rules on a plain JGit `Git`, no gateway context (unit tested). Every `FetchCommand` except the single-branch init clone sets `setRemoveDeletedRefs(true)`, so a branch deleted on the remote loses its `refs/remotes/*` ref and its local twin reads **gone** (upstream configured, ref missing). Merged is measured against the current branch's upstream, else HEAD; ahead is against the branch's own upstream, else all remote refs. Protected: the current branch and the branch an enabled `GitSyncRecord` follows. |
 | `SyncScheduler` | Per-project scheduled fetch, then fast-forward (Pull) or reset to the branch (Replace). |
 | `CredentialCheck` (3.7.0) | Per credential: GitHub token expiry (the `github-authentication-token-expiration` header on `GET /user`; 401 = rejected), and for each remote using it, read (fetch advertisement) and push (receive-pack advertisement — refused there without write, so nothing is sent). Scope: a classic token's `x-oauth-scopes` header (every repository its account can reach) or a fine-grained token's granted repositories. Every failure is kept and shown rather than logged at debug. In memory; startup + 30 s, daily, on add, on attach, on **Check**. |
 | `RunnerAuth` / `RunnerTrigger` / `ReleaseReceiver` | Runner token check; the opt-in guard (`RunnerTrigger.refuse`); the repo-update and release routes. |
@@ -74,7 +75,7 @@ Swing `JDialog`s parented to the Designer frame; callbacks live in `GitActionMan
 | `CommitDetailPopup` | Files in one commit, checkout/revert, historical diff. |
 | `MergeConflictPopup` | Per-file accept ours/theirs, global accept-all/abort/complete. |
 | `PullPopup` / `PushPopup` / `FetchPopup` | Remote selector; single-remote acts immediately. |
-| `BranchPopup` | Local/remote branch lists, create/checkout/delete. |
+| `BranchPopup` | Local/remote branch lists with `[gone]`/`[merged]`/`↑N` marks, create/checkout/safe delete, **Clean up…** (fetch, then a ticked list of gone + merged). |
 | `CreateBranchPopup` | Branch name, always created from HEAD. |
 | `InitRepoPopup` | Wizard: remote (URI + credential) or local-only init. |
 | `RemotesPopup` | Named-remote list/form, picks a saved credential. |

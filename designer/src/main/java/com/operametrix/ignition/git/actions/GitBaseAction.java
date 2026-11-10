@@ -1,5 +1,6 @@
 package com.operametrix.ignition.git.actions;
 
+import com.operametrix.ignition.git.BranchDeleteResult;
 import com.operametrix.ignition.git.InitProgressDialog;
 import com.inductiveautomation.ignition.client.util.gui.ErrorUtil;
 import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
@@ -363,9 +364,36 @@ public class GitBaseAction {
         handleCheckoutAction(branchName);
     }
 
+    /**
+     * Tries a safe delete first. Unmerged or unpushed work gets a second warning with the commit
+     * count and a "Delete anyway"; a protected branch is only reported.
+     */
     public static void handleDeleteBranchAction(String branchName) {
         try {
-            rpc.deleteBranch(projectName, branchName);
+            BranchDeleteResult refused = BranchDeleteResult.parse(rpc.deleteBranch(projectName, branchName, false));
+            if (refused == null) return;
+            if (refused.kind().equals("unmerged") || refused.kind().equals("unpushed")) {
+                String what = refused.kind().equals("unmerged")
+                        ? "not merged into the current branch" : "not on any remote";
+                Object[] options = {"Delete anyway", "Cancel"};
+                int choice = JOptionPane.showOptionDialog(context.getFrame(),
+                        "Branch '" + branchName + "' has " + refused.count() + " commit"
+                                + (refused.count() == 1 ? "" : "s") + " " + what + ".\n"
+                                + "Deleting it loses " + (refused.count() == 1 ? "that commit" : "those commits")
+                                + " unless another branch or tag points at them.",
+                        "Delete Unmerged Branch", JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE,
+                        null, options, options[1]);
+                if (choice == 0) {
+                    BranchDeleteResult again = BranchDeleteResult.parse(rpc.deleteBranch(projectName, branchName, true));
+                    if (again != null) {
+                        JOptionPane.showMessageDialog(context.getFrame(), again.message(), "Delete Branch",
+                                JOptionPane.WARNING_MESSAGE);
+                    }
+                }
+            } else {
+                JOptionPane.showMessageDialog(context.getFrame(), refused.message(), "Delete Branch",
+                        JOptionPane.WARNING_MESSAGE);
+            }
         } catch (Exception ex) {
             ErrorUtil.showError(ex);
         }

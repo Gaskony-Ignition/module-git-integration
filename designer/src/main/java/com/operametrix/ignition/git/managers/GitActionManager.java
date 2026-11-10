@@ -269,7 +269,7 @@ public class GitActionManager {
     public static void showBranchPopup(String projectName, String userName) {
         try {
             String currentBranch = rpc.getCurrentBranch(projectName);
-            List<String> localBranches = rpc.getLocalBranches(projectName);
+            List<BranchPopup.Row> localBranches = BranchPopup.rows(rpc.getLocalBranchInfo(projectName));
             List<String> remoteBranches = rpc.getRemoteBranches(projectName);
 
             if (branchPopup != null) {
@@ -306,12 +306,69 @@ public class GitActionManager {
                     public void onRefresh() {
                         try {
                             String current = rpc.getCurrentBranch(projectName);
-                            List<String> local = rpc.getLocalBranches(projectName);
+                            List<BranchPopup.Row> local = BranchPopup.rows(rpc.getLocalBranchInfo(projectName));
                             List<String> remote = rpc.getRemoteBranches(projectName);
                             setData(current, local, remote);
                         } catch (Exception ex) {
                             logger.error("Error refreshing branch data", ex);
                         }
+                    }
+
+                    @Override
+                    public void onCleanupRequested() {
+                        BranchPopup popup = this;
+                        InitProgressDialog progress = new InitProgressDialog(context.getFrame(), "Fetching");
+                        new SwingWorker<Void, Void>() {
+                            @Override
+                            protected Void doInBackground() throws Exception {
+                                fetchAllRemotes(projectName, userName, progress);
+                                return null;
+                            }
+
+                            @Override
+                            protected void done() {
+                                progress.complete();
+                                try {
+                                    get();
+                                    popup.onRefresh();
+                                    List<BranchPopup.Row> candidates = new ArrayList<>();
+                                    for (BranchPopup.Row r : popup.localRows()) {
+                                        if (r.protectedReason() == null && (r.gone() || r.merged())) {
+                                            candidates.add(r);
+                                        }
+                                    }
+                                    if (candidates.isEmpty()) {
+                                        JOptionPane.showMessageDialog(popup,
+                                                "Nothing to clean up: no local branch is gone from the remote or merged.",
+                                                "Clean Up Branches", JOptionPane.INFORMATION_MESSAGE);
+                                        return;
+                                    }
+                                    List<String> picked = popup.promptCleanup(candidates);
+                                    if (picked.isEmpty()) return;
+                                    Dataset result = rpc.cleanupBranches(projectName, picked);
+                                    StringBuilder sb = new StringBuilder();
+                                    int deleted = 0;
+                                    for (int i = 0; i < result.getRowCount(); i++) {
+                                        if (Boolean.TRUE.equals(result.getValueAt(i, "ok"))) {
+                                            deleted++;
+                                        } else {
+                                            sb.append("\n  ").append(result.getValueAt(i, "reason"));
+                                        }
+                                    }
+                                    String summary = "Deleted " + deleted + " of " + picked.size() + " branch"
+                                            + (picked.size() == 1 ? "" : "es") + ".";
+                                    if (sb.length() > 0) summary += "\n\nNot deleted:" + sb;
+                                    JOptionPane.showMessageDialog(popup, summary, "Clean Up Branches",
+                                            sb.length() > 0 ? JOptionPane.WARNING_MESSAGE : JOptionPane.INFORMATION_MESSAGE);
+                                    popup.onRefresh();
+                                } catch (Exception ex) {
+                                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                                    logger.error("Error cleaning up branches", cause);
+                                    ErrorUtil.showError(cause);
+                                }
+                            }
+                        }.execute();
+                        progress.setVisible(true);
                     }
 
                     @Override
@@ -321,18 +378,7 @@ public class GitActionManager {
                         new SwingWorker<Void, Void>() {
                             @Override
                             protected Void doInBackground() throws Exception {
-                                if (rpc.hasRemoteRepository(projectName)) {
-                                    Dataset remotes = rpc.listRemotes(projectName);
-                                    for (int i = 0; i < remotes.getRowCount(); i++) {
-                                        String remoteName = (String) remotes.getValueAt(i, "name");
-                                        progress.setStatus("Fetching from " + remoteName + "...");
-                                        try {
-                                            rpc.fetch(projectName, userName, remoteName);
-                                        } catch (Exception fetchEx) {
-                                            logger.warn("Fetch from '" + remoteName + "' failed; continuing with local refresh", fetchEx);
-                                        }
-                                    }
-                                }
+                                fetchAllRemotes(projectName, userName, progress);
                                 return null;
                             }
 
@@ -342,7 +388,7 @@ public class GitActionManager {
                                 try {
                                     get();
                                     String current = rpc.getCurrentBranch(projectName);
-                                    List<String> local = rpc.getLocalBranches(projectName);
+                                    List<BranchPopup.Row> local = BranchPopup.rows(rpc.getLocalBranchInfo(projectName));
                                     List<String> remote = rpc.getRemoteBranches(projectName);
                                     popup.setData(current, local, remote);
                                     if (DesignerHook.instance != null) {
@@ -360,6 +406,21 @@ public class GitActionManager {
             }
         } catch (Exception e) {
             logger.error("Error showing branch popup", e);
+        }
+    }
+
+    private static void fetchAllRemotes(String projectName, String userName, InitProgressDialog progress)
+            throws Exception {
+        if (!rpc.hasRemoteRepository(projectName)) return;
+        Dataset remotes = rpc.listRemotes(projectName);
+        for (int i = 0; i < remotes.getRowCount(); i++) {
+            String remoteName = (String) remotes.getValueAt(i, "name");
+            progress.setStatus("Fetching from " + remoteName + "...");
+            try {
+                rpc.fetch(projectName, userName, remoteName);
+            } catch (Exception fetchEx) {
+                logger.warn("Fetch from '" + remoteName + "' failed; continuing with local refresh", fetchEx);
+            }
         }
     }
 
