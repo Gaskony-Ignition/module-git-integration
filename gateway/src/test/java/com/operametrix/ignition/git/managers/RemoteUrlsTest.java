@@ -53,10 +53,36 @@ class RemoteUrlsTest {
         GitPolicy secure = GitPolicy.DEFAULT;
         GitPolicy open = new GitPolicy(null, null, null, null, null, null, null, true);
         assertThat(PolicyGate.decideUrl(secure, "Prod", "file:///srv/r.git").getMessage())
-                .startsWith("Not allowed in deployment mode Prod: A file:// remote");
+                .startsWith("Not allowed in deployment mode Prod: A local folder or file: URL");
         assertThat(PolicyGate.decideUrl(open, null, "file:///srv/r.git")).isNull();
         GitPolicy hosts = new GitPolicy(null, null, null, null, null, List.of("github.com"), null, null);
         assertThat(PolicyGate.decideUrl(hosts, null, "https://gitlab.com/r.git")).isNotNull();
         assertThat(PolicyGate.decideUrl(hosts, null, "https://github.com/r.git")).isNull();
+    }
+
+    @Test
+    void localFormsAreReadAsJGitReadsThem() {
+        for (String u : List.of("file:/srv/x", "FILE:/x", "file:x", "/x", "./x", "file:///srv/x", "C:\\repos\\r")) {
+            assertThat(RemoteUrls.problem(u, false)).as(u).contains("local folder");
+            assertThat(RemoteUrls.problem(u, true)).as(u).isNull();
+            assertThat(PolicyGate.hostOf(u)).as(u).isEmpty();
+        }
+        assertThat(RemoteUrls.problem("host:path", false)).isNull();
+        assertThat(PolicyGate.hostOf("user@host:path")).isEqualTo("host");
+        assertThat(PolicyGate.hostOf("ssh://u@h/p")).isEqualTo("h");
+        assertThat(PolicyGate.hostOf("https://[2001:db8::1]:8443/r.git")).isEqualTo("2001:db8::1");
+        assertThat(RemoteUrls.problem("https://[2001:db8::1]/r.git", false)).isNull();
+    }
+
+    @Test
+    void aHostTheHttpClientWouldReadDifferentlyIsRefused() {
+        for (String u : List.of("https://evil.example\\.github.com/x", "http://evil.example#@github.com/x",
+                "https://evil.example?.github.com/x", "https://exa mple.com/x")) {
+            assertThat(RemoteUrls.problem(u, true)).as(u).isNotNull();
+            assertThat(PolicyGate.hostOf(u)).as(u).isEqualTo(RemoteUrls.INVALID);
+            assertThat(PolicyGate.credentialMismatch("*.github.com", u)).as(u).isNotNull();
+        }
+        GitPolicy hosts = new GitPolicy(null, null, null, null, null, List.of("*.github.com"), null, null);
+        assertThat(PolicyGate.decideHost(hosts, null, "https://evil.example\\.github.com/x")).isNotNull();
     }
 }

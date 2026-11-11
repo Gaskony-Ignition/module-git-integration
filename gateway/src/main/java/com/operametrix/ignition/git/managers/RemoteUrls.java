@@ -22,66 +22,98 @@ public final class RemoteUrls {
     private RemoteUrls() {
     }
 
+    private static final Pattern HOSTNAME =
+            Pattern.compile("[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*");
+    private static final Pattern USER = Pattern.compile("[A-Za-z0-9._~+-]+");
+
+    /**
+     * A URL as JGit reads it, which is what decides where it connects: {@code file:/x} and
+     * {@code /x} are local, {@code host:path} is SSH to host. Never a regex of our own beside it.
+     *
+     * @param scheme  lower case, or null (scp-like or local)
+     * @param host    lower case without IPv6 brackets; "" when local
+     * @param local   a folder on the gateway (a {@code file} scheme or host, or no host)
+     * @param problem why the URL is unusable whatever the policy, or null
+     */
+    record Parsed(String scheme, String host, boolean local, boolean password, String problem) {}
+
+    static Parsed parse(String url) {
+        if (url == null || url.isBlank()) {
+            return new Parsed(null, "", true, false, "A remote URL is required.");
+        }
+        org.eclipse.jgit.transport.URIish u;
+        try {
+            u = new org.eclipse.jgit.transport.URIish(url.trim());
+        } catch (java.net.URISyntaxException e) {
+            return new Parsed(null, "", false, false, "Not a valid remote URL.");
+        }
+        String scheme = u.getScheme() == null ? null : u.getScheme().toLowerCase(Locale.ROOT);
+        String rawHost = u.getHost() == null ? "" : u.getHost().toLowerCase(Locale.ROOT);
+        if ("file".equals(scheme) || rawHost.isEmpty() || rawHost.equals("file")) {
+            return new Parsed(scheme, "", true, u.getPass() != null, null);
+        }
+        String host = rawHost.startsWith("[") && rawHost.endsWith("]")
+                ? rawHost.substring(1, rawHost.length() - 1) : rawHost;
+        boolean validHost = host.contains(":") ? ipLiteral(host) : HOSTNAME.matcher(host).matches();
+        // A backslash, or URL syntax in the user name, is read one way here and another by the
+        // HTTP client (https://evil.example\.github.com, http://evil.example#@github.com).
+        String problem = !validHost || url.indexOf('\\') >= 0
+                || (u.getUser() != null && !USER.matcher(u.getUser()).matches())
+                ? "Not a valid remote URL: the host is not a host name or IP address." : null;
+        return new Parsed(scheme, host, false, u.getPass() != null, problem);
+    }
+
+    private static boolean ipLiteral(String v6) {
+        try {
+            return InetAddress.getByName("[" + v6 + "]") != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /** Why {@code url} may not be a remote, or null when it may. */
     public static String problem(String url, boolean allowInsecure) {
-        if (url == null || url.isBlank()) {
-            return "A remote URL is required.";
+        Parsed p = parse(url);
+        if (p.problem() != null) {
+            return p.problem();
         }
-        String u = url.trim();
-        java.util.regex.Matcher m = SCHEME.matcher(u);
-        String host;
-        if (m.find()) {
-            String scheme = m.group(1).toLowerCase(Locale.ROOT);
-            String authority = u.substring(m.end()).split("[/?#]", 2)[0];
-            int at = authority.lastIndexOf('@');
-            if (at >= 0 && authority.substring(0, at).contains(":")) {
-                return "The remote URL has a password in it. Take it out of the URL and save it as a"
-                        + " credential instead.";
+        if (p.password()) {
+            return "The remote URL has a password in it. Take it out of the URL and save it as a"
+                    + " credential instead.";
+        }
+        if (p.local()) {
+            return allowInsecure ? null : "A local folder or file: URL is a folder on the gateway, not a"
+                    + " remote server." + INSECURE_HINT;
+        }
+        String scheme = p.scheme() == null ? "ssh" : p.scheme();
+        switch (scheme) {
+            case "https", "ssh", "git+ssh", "ssh+git" -> {
             }
-            host = hostOf(at >= 0 ? authority.substring(at + 1) : authority);
-            switch (scheme) {
-                case "https", "ssh", "git+ssh", "ssh+git" -> {
-                }
-                case "http", "git" -> {
-                    if (!allowInsecure) {
-                        return scheme + ":// sends everything unencrypted." + INSECURE_HINT;
-                    }
-                }
-                case "file" -> {
-                    if (!allowInsecure) {
-                        return "A file:// remote is a folder on the gateway, not a remote server."
-                                + INSECURE_HINT;
-                    }
-                }
-                default -> {
-                    return "Remote URLs must be https:// or ssh:// (" + scheme + ":// is not supported).";
+            case "http", "git" -> {
+                if (!allowInsecure) {
+                    return scheme + ":// sends everything unencrypted." + INSECURE_HINT;
                 }
             }
-        } else {
-            host = PolicyGate.hostOf(u);
-            if (host.isEmpty() && !allowInsecure) {
-                return "A local folder is not a remote server." + INSECURE_HINT;
+            default -> {
+                return "Remote URLs must be https:// or ssh:// (" + scheme + ":// is not supported).";
             }
         }
-        if (!allowInsecure && isLocalTarget(host)) {
-            return "The remote " + host + " is this machine or its link-local network." + INSECURE_HINT;
+        if (!allowInsecure && isLocalTarget(p.host())) {
+            return "The remote " + p.host() + " is this machine or its link-local network." + INSECURE_HINT;
         }
         return null;
     }
 
-    /** The host of an authority ({@code host}, {@code host:port}, {@code [v6]:port}), lower case. */
-    static String hostOf(String hostPort) {
-        String h = hostPort;
-        if (h.startsWith("[")) {
-            int end = h.indexOf(']');
-            h = end < 0 ? h.substring(1) : h.substring(1, end);
-        } else {
-            int colon = h.indexOf(':');
-            if (colon >= 0) {
-                h = h.substring(0, colon);
-            }
-        }
-        return h.toLowerCase(Locale.ROOT);
+    /** What {@link #host} returns for a URL whose host cannot be trusted; matches no host pattern. */
+    public static final String INVALID = "\u0000";
+
+    /**
+     * The host a URL contacts, as JGit reads it: lower case, IPv6 without brackets; "" for a local
+     * folder, {@link #INVALID} for anything unusable.
+     */
+    public static String host(String url) {
+        Parsed p = parse(url);
+        return p.problem() != null && !p.local() ? INVALID : p.host();
     }
 
     /** {@code localhost}, or an IP literal that is loopback, link-local (169.254/16, fe80::/10) or any. */

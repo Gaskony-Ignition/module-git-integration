@@ -7,7 +7,6 @@ import com.operametrix.ignition.git.records.ModeStore;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -114,26 +113,9 @@ public final class PolicyGate {
                 + " in its allowed remote hosts.", "host not allowed " + where(mode));
     }
 
-    // scheme://[user@]host[:port]/... or scp-like user@host:path
-    private static final Pattern URL_HOST = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*://(?:[^@/]*@)?([^/:?#]*)");
-    private static final Pattern SCP_HOST = Pattern.compile("^(?:[^@/]+@)?([^/:]+):(?!//)");
-
-    /** The host a git URL contacts, lower case; "" for a local path or {@code file://}. */
+    /** The host a git URL contacts, lower case; "" for a local folder ({@link RemoteUrls#host}). */
     public static String hostOf(String url) {
-        if (url == null) {
-            return "";
-        }
-        String u = url.trim();
-        Matcher m = URL_HOST.matcher(u);
-        if (m.find()) {
-            return u.toLowerCase(Locale.ROOT).startsWith("file:") ? "" : m.group(1).toLowerCase(Locale.ROOT);
-        }
-        m = SCP_HOST.matcher(u);
-        // A Windows drive letter ("C:\repo") is a path, not a host.
-        if (m.find() && m.group(1).length() > 1) {
-            return m.group(1).toLowerCase(Locale.ROOT);
-        }
-        return "";
+        return RemoteUrls.host(url);
     }
 
     /** {@code github.com} matches exactly; {@code *.example.com} matches any subdomain. */
