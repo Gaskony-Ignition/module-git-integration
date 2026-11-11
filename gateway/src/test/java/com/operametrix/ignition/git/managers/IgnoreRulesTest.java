@@ -13,7 +13,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The Git Ignore tab's tick logic with the template plus the Combined block. Checks the tree BELOW
+ * The Git ignore tab's tick logic with the template plus the Combined block. Checks the tree BELOW
  * the root, where 3.9.12/3.10.0 showed everything excluded (the anchored "/*" basename trap).
  */
 class IgnoreRulesTest {

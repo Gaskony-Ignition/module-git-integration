@@ -87,16 +87,19 @@ public final class RunnerTrigger {
 
         try {
             // Runs even when the scheduled timer is off: that says "pull on demand only".
-            String result = SyncScheduler.syncNow(sync);
+            String result = SyncScheduler.syncForRunner(sync);
             logger.info("Runner requested a sync of '{}': {}", project, result);
             JsonObject o = new JsonObject();
             // syncNow reports a failed pull as a result, not an exception; the workflow step
             // must still fail, as it does in the Combined layout.
-            o.addProperty("ok", !result.startsWith("failed"));
+            o.addProperty("ok", !result.startsWith("failed") && !notMerged(result));
             o.addProperty("project", project);
             o.addProperty("result", result);
             if (result.startsWith("failed")) {
                 resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            } else if (notMerged(result)) {
+                // The workflow step fails, so the run shows the gateway did not take it.
+                resp.setStatus(HttpServletResponse.SC_CONFLICT);
             }
             return o.toString();
         } catch (Exception e) {
@@ -117,20 +120,27 @@ public final class RunnerTrigger {
         if (!com.operametrix.ignition.git.managers.ConfigSync.get().runner()) {
             resp.setStatus(HttpServletResponse.SC_CONFLICT);
             return "{\"error\":\"this gateway keeps every project in one repository; set its delivery to"
-                    + " Runner - repo updates (Configure Versioning) first\"}";
+                    + " Runner - repo updates (Configure versioning) first\"}";
         }
         String result = com.operametrix.ignition.git.managers.ConfigSync.syncNow();
         logger.info("Runner requested a pull of the gateway repository: {}", result);
         JsonObject o = new JsonObject();
-        o.addProperty("ok", !result.startsWith("failed"));
+        o.addProperty("ok", !result.startsWith("failed") && !notMerged(result));
         if (project != null) {
             o.addProperty("project", project);
         }
         o.addProperty("result", result);
         if (result.startsWith("failed")) {
             resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        } else if (notMerged(result)) {
+            resp.setStatus(HttpServletResponse.SC_CONFLICT);
         }
         return o.toString();
+    }
+
+    /** A refusal by "Only deliver commits merged on GitHub". */
+    private static boolean notMerged(String result) {
+        return result.startsWith("Not merged through GitHub");
     }
 
     /**

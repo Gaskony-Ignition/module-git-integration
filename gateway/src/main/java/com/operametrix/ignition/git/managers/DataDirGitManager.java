@@ -93,6 +93,16 @@ public class DataDirGitManager {
         return Files.exists(dataDir().resolve(".git"));
     }
 
+    /** The gateway repository's HEAD commit and branch, for an audit row; blanks when unreadable. */
+    public static String[] headAndBranch() {
+        try (Git git = GitManager.getGit(dataDir())) {
+            org.eclipse.jgit.lib.ObjectId h = git.getRepository().resolve("HEAD");
+            return new String[] {h == null ? "" : h.getName(), git.getRepository().getBranch()};
+        } catch (Exception e) {
+            return new String[] {"", ""};
+        }
+    }
+
     /**
      * First-run initialization: {@code git init} at the data dir, write {@code .gitignore}, stage all
      * non-ignored files, and make the baseline commit. Explicit (never auto-run at startup).
@@ -155,7 +165,7 @@ public class DataDirGitManager {
 
                 Set<String> survivors = GitManager.filterJsonOrderingChanges(repo, dataDir(), byPath.keySet());
                 for (Map.Entry<String, String> e : byPath.entrySet()) {
-                    // A staged removal under projects/ comes from a Git Ignore exclusion (git rm
+                    // A staged removal under projects/ comes from a Git ignore exclusion (git rm
                     // --cached); nothing else stages one without committing it, so it is config's.
                     if (survivors.contains(e.getKey()) && !isNestedRepo(e.getKey())
                             && (isConfigPath(e.getKey()) || s.getRemoved().contains(e.getKey()))) {
@@ -310,7 +320,7 @@ public class DataDirGitManager {
                 Files.writeString(dataDir().resolve(POLICY_VERSIONED_MARKER),
                         "Git policy carve-out added by Git Integration 4.1.0.\n");
             } catch (Exception e) {
-                logger.error("Could not version the Git policy; check the Git Ignore tab.", e);
+                logger.error("Could not version the Git policy; check the Git ignore tab.", e);
                 throw new RuntimeException(e);
             }
             return changed;
@@ -335,7 +345,7 @@ public class DataDirGitManager {
                 if (GitManager.combined()) {
                     // The same repository holds every project; stage exactly the config changes,
                     // so a Designer's uncommitted work is never swept into an auto-commit. A staged
-                    // project file that is not a removal (a Git Ignore exclusion's rm --cached) is
+                    // project file that is not a removal (a Git ignore exclusion's rm --cached) is
                     // unstaged rather than committed. Not `commit --only`: that takes each path's
                     // working-tree file, which would put an excluded file straight back.
                     for (String path : changed) {
@@ -967,7 +977,18 @@ public class DataDirGitManager {
 
     /** Outcome of one {@link #replaceFromBranch} run. {@code commit} is empty when nothing was done. */
     public record ReplaceResult(boolean changed, String commit, int discardedCommits,
-                                int discardedChanges, List<String> files, boolean rolledBack) {}
+                                int discardedChanges, List<String> files, boolean rolledBack,
+                                String refused, boolean firstRefusal) {
+        public ReplaceResult(boolean changed, String commit, int discardedCommits, int discardedChanges,
+                             List<String> files, boolean rolledBack) {
+            this(changed, commit, discardedCommits, discardedChanges, files, rolledBack, null, false);
+        }
+
+        /** Not installed: the tip is not merged through GitHub ({@code firstRefusal}: say so in the log). */
+        static ReplaceResult refused(String why, boolean first) {
+            return new ReplaceResult(false, "", 0, 0, List.of(), false, why, first);
+        }
+    }
 
     /** Ref holding the last remote tip a branch-follow replaced the config with. */
     static final String SYNCED_REF = "refs/git-module/config-synced";
@@ -1013,6 +1034,12 @@ public class DataDirGitManager {
                 }
                 ObjectId head = repo.resolve(Constants.HEAD);
                 ObjectId applied = repo.resolve(SYNCED_REF);
+                if (!tip.equals(applied)) {
+                    String notMerged = GitHubMerged.refusal(repo, tip);
+                    if (notMerged != null) {
+                        return ReplaceResult.refused(notMerged, GitHubMerged.firstRefusal("config", tip));
+                    }
+                }
 
                 try (RevWalk walk = new RevWalk(repo)) {
                     RevCommit tipCommit = walk.parseCommit(tip);
@@ -1174,7 +1201,12 @@ public class DataDirGitManager {
     }
 
     /** Outcome of one {@link #pullFromBranch} run. */
-    public record PullResult(boolean changed, String commit, List<String> files, String note) {}
+    /** {@code warn}: a refusal to show on the Logs tab as a warning, once per tip. */
+    public record PullResult(boolean changed, String commit, List<String> files, String note, boolean warn) {
+        public PullResult(boolean changed, String commit, List<String> files, String note) {
+            this(changed, commit, files, note, false);
+        }
+    }
 
     /**
      * Combined layout's "Sync — pull" and runner repo updates: fetch the branch and merge it into
@@ -1218,6 +1250,13 @@ public class DataDirGitManager {
                     throw new RuntimeException(layout);
                 }
                 ObjectId before = repo.resolve(Constants.HEAD);
+                if (!tip.equals(before)) {
+                    String notMerged = GitHubMerged.refusal(repo, tip);
+                    if (notMerged != null) {
+                        return new PullResult(false, "", List.of(), notMerged,
+                                GitHubMerged.firstRefusal("config", tip));
+                    }
+                }
                 ConfigAutoCommitter.hold(30_000);
                 try {
                     if (!branch.equals(repo.getBranch())) {

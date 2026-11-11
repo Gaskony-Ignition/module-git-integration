@@ -147,7 +147,7 @@ public class GitManager {
             GitConfigRemoteRecord gw = GitConfigRemoteRecord.get();
             if (gw == null) {
                 throw new Exception("No remote is set for the gateway repository. Set one on the"
-                        + " Versioning page (Configure Versioning).");
+                        + " Versioning page (Configure versioning).");
             }
             if ("origin".equals(remoteName)) {
                 try (Git git = getGit(root)) {

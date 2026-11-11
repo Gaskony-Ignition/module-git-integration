@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * The data-directory {@code .gitignore}: its template and how the Git Ignore tab decides a path.
+ * The data-directory {@code .gitignore}: its template and how the Git ignore tab decides a path.
  * No gateway context, so the tree's tick logic is unit tested (the 3.10.1 anchored-rule trap).
  */
 public final class IgnoreRules {
@@ -24,7 +24,7 @@ public final class IgnoreRules {
      * default swept tens of thousands of files into the repository.
      */
     public static final String ROOT_RULES_COMMENT =
-            "# Only config/ is versioned by default; tick a data-root path on the Git Ignore tab to add it.";
+            "# Only config/ is versioned by default; tick a data-root path on the Git ignore tab to add it.";
 
     /** The 3.10.0 rule that kept every record of this module out of the repository. */
     public static final String OLD_RECORDS_RULE = "**/com.operametrix.ignition.git/";

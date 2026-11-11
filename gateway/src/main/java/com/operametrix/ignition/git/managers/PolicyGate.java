@@ -28,18 +28,18 @@ public final class PolicyGate {
             this.shortReason = shortReason;
         }
 
-        /** For a menu item: "off in deployment mode Prod". */
+        /** For a menu item: "off in Prod". */
         public String shortReason() {
             return shortReason;
         }
     }
 
     public enum Action {
-        PUSH("pushing"),
-        FORCE_PUSH("force pushing"),
-        DESIGNER_COMMIT("committing from the Designer"),
-        BRANCH_SWITCH("creating, switching or deleting branches"),
-        LAYOUT_SWITCH("switching the repository layout");
+        PUSH("Pushing is"),
+        FORCE_PUSH("Force pushing is"),
+        DESIGNER_COMMIT("Commits from the Designer are"),
+        BRANCH_SWITCH("Branch changes are"),
+        LAYOUT_SWITCH("Layout switches are");
 
         private final String what;
 
@@ -49,12 +49,11 @@ public final class PolicyGate {
     }
 
     private static String where(String mode) {
-        return mode == null ? "on this gateway" : "in deployment mode " + mode;
+        return mode == null ? "on this gateway" : "in " + mode;
     }
 
     private static Refused refused(String mode, String what) {
-        return new Refused("Not allowed " + where(mode) + ": " + what + " is turned off by the gateway's Git policy.",
-                "off " + where(mode));
+        return new Refused(what + " off " + where(mode) + " (Git policy).", "off " + where(mode));
     }
 
     /** Why the policy refuses {@code action}, or null when it allows it. */
@@ -79,7 +78,7 @@ public final class PolicyGate {
         if (kind.equals("off") || p.deliveries().contains(kind)) {
             return null;
         }
-        return refused(mode, "delivery '" + kind + "'");
+        return refused(mode, "Delivery '" + kind + "' is");
     }
 
     static String deliveryKind(String delivery) {
@@ -108,9 +107,8 @@ public final class PolicyGate {
                 return null;
             }
         }
-        return new Refused("Not allowed " + where(mode) + ": the gateway's Git policy does not list "
-                + (host.isEmpty() ? "a remote with no host (" + url + ")" : "the host " + host)
-                + " in its allowed remote hosts.", "host not allowed " + where(mode));
+        return new Refused((host.isEmpty() ? "A remote with no host (" + url + ")" : host)
+                + " is not an allowed remote host " + where(mode) + " (Git policy).", "host not allowed " + where(mode));
     }
 
     /** The host a git URL contacts, lower case; "" for a local folder ({@link RemoteUrls#host}). */
@@ -169,7 +167,8 @@ public final class PolicyGate {
     public static Refused decideUrl(GitPolicy p, String mode, String url) {
         String problem = RemoteUrls.problem(url, p.insecureRemotes());
         if (problem != null) {
-            return new Refused("Not allowed " + where(mode) + ": " + problem, "remote not allowed " + where(mode));
+            return new Refused("Remote refused " + where(mode) + " (Git policy): " + problem,
+                    "remote not allowed " + where(mode));
         }
         return decideHost(p, mode, url);
     }
@@ -207,7 +206,7 @@ public final class PolicyGate {
         GitPolicy p = GitPolicyRecord.get();
         Refused r = decideUrl(p, mode(), url);
         if (r == null && !p.insecureRemotes() && RemoteUrls.resolvesLocal(hostOf(url))) {
-            r = new Refused("Not allowed " + where(mode()) + ": the remote " + hostOf(url)
+            r = new Refused("Remote refused " + where(mode()) + " (Git policy): " + hostOf(url)
                     + " resolves to this machine or its link-local network." + RemoteUrls.INSECURE_HINT,
                     "remote not allowed " + where(mode()));
         }

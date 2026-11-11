@@ -1,5 +1,6 @@
 package com.operametrix.ignition.git;
 
+import com.operametrix.ignition.git.automation.GitAudit;
 import com.operametrix.ignition.git.automation.GitEvent;
 import com.operametrix.ignition.git.automation.ReleaseReceiver;
 import com.operametrix.ignition.git.automation.RunnerAuth;
@@ -90,6 +91,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     private GitSyncRecord.Handler syncHandler;
     private GitRunnerRecord.Handler runnerHandler;
     private GitPolicyRecord.Handler policyHandler;
+    private com.operametrix.ignition.git.records.GitAuditRecord.Handler auditHandler;
     private ConfigAutoCommitter autoCommitter;
 
     /** Gateway context, available after {@link #setup(GatewayContext)} has run. */
@@ -112,6 +114,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         registry.register(GitSyncRecord.META);
         registry.register(GitRunnerRecord.META);
         registry.register(GitPolicyRecord.META);
+        registry.register(com.operametrix.ignition.git.records.GitAuditRecord.META);
         // Metas for types this module no longer registers a live handler for, so the retired
         // resources under them can be found and deleted once in startup() — see the class javadoc.
         RetiredResourceCleanup.registerMetas(registry);
@@ -126,6 +129,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         syncHandler = new GitSyncRecord.Handler(context);
         runnerHandler = new GitRunnerRecord.Handler(context);
         policyHandler = new GitPolicyRecord.Handler(context);
+        auditHandler = new com.operametrix.ignition.git.records.GitAuditRecord.Handler(context);
 
         GitProjectsConfigRecord.setHandler(projectHandler);
         GitReposUsersRecord.setHandler(repoUserHandler);
@@ -136,6 +140,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         GitSyncRecord.setHandler(syncHandler);
         GitRunnerRecord.setHandler(runnerHandler);
         GitPolicyRecord.setHandler(policyHandler);
+        com.operametrix.ignition.git.records.GitAuditRecord.setHandler(auditHandler);
+        com.operametrix.ignition.git.automation.GitAudit.setContext(context);
 
         scriptModule = new GatewayScriptModule(context);
 
@@ -168,6 +174,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         syncHandler.startup();
         runnerHandler.startup();
         policyHandler.startup();
+        auditHandler.startup();
 
         // 3.5.0 handed Release to every project folder on a gateway whose runner was on. A stored
         // delivery is indistinguishable from a chosen one, so 3.7.0 forgets them all once and never
@@ -191,7 +198,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                         .files(untracked).success());
             }
         } catch (Exception e) {
-            logger.error("Could not restrict the config repository to config/; check the Git Ignore tab.", e);
+            logger.error("Could not restrict the config repository to config/; check the Git ignore tab.", e);
         }
 
         // 4.1.0: the Git policy is versioned with the config (every other record stays out), and a
@@ -201,7 +208,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 logger.info("Config repository now versions the Git policy.");
             }
         } catch (Exception e) {
-            logger.error("Could not version the Git policy; check the Git Ignore tab.", e);
+            logger.error("Could not version the Git policy; check the Git ignore tab.", e);
         }
         try {
             GitPolicyRecord.ensureCore();
@@ -212,6 +219,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         // 4.3.0: TLS checks back on, no symlinks in checkouts, no passwords in remote URLs, every
         // stored key encrypted and every HTTPS credential bound to a host, before anything syncs.
         RepoHardening.atStartup();
+        com.operametrix.ignition.git.managers.GitHubMerged.loadNow();
         PolicyWatch.check("start-up: a mode switch or a change made while the gateway was down");
 
         // Scheduled sync. Inert until a project has a sync record configured, so starting it
@@ -257,6 +265,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         CredentialCheck.shutdown();
         if (runnerHandler != null) runnerHandler.shutdown();
         if (policyHandler != null) policyHandler.shutdown();
+        if (auditHandler != null) auditHandler.shutdown();
         if (syncHandler != null) syncHandler.shutdown();
         if (autoCommitter != null) {
             context.getConfigurationManager().removeListener(autoCommitter);
@@ -501,6 +510,50 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         routes.newRoute("/definition").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.READ).nocache()
                 .handler(this::handleGetDefinition).mount();
+        routes.newRoute("/audit").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.READ).nocache()
+                .handler(this::handleGetAudit).mount();
+        routes.newRoute("/audit").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleSaveAudit).mount();
+    }
+
+    /** The audit setting: on/off, the chosen profile (blank: the gateway's), and the choices. */
+    private Object handleGetAudit(RequestContext req, HttpServletResponse resp) {
+        try {
+            com.operametrix.ignition.git.records.GitAuditRecord.Config c =
+                    com.operametrix.ignition.git.records.GitAuditRecord.get();
+            JsonObject o = new JsonObject();
+            o.addProperty("enabled", c.on());
+            o.addProperty("profile", c.profileOrBlank());
+            o.addProperty("gatewayHasProfile", GitAudit.gatewayHasProfile());
+            JsonArray profiles = new JsonArray();
+            GitAudit.available().forEach(profiles::add);
+            o.add("profiles", profiles);
+            return o.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    private Object handleSaveAudit(RequestContext req, HttpServletResponse resp) {
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            boolean enabled = !body.has("enabled") || body.get("enabled").isJsonNull() || body.get("enabled").getAsBoolean();
+            String profile = optString(body, "profile");
+            profile = profile == null ? "" : profile.trim();
+            if (!profile.isEmpty() && !GitAudit.available().contains(profile)) {
+                throw new IllegalArgumentException("There is no audit profile '" + profile + "' on this gateway.");
+            }
+            // Written to the profile in use before the change, so turning auditing off is on record.
+            GitAudit.record(GitAudit.AUDIT, webUser(req).orElse(req.getActor()), null, null, null,
+                    enabled ? "audit profile " + (profile.isEmpty() ? "of the gateway" : profile) : "auditing off");
+            com.operametrix.ignition.git.records.GitAuditRecord.save(
+                    new com.operametrix.ignition.git.records.GitAuditRecord.Config(enabled, profile));
+            return ok();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
     }
 
     /**
@@ -603,6 +656,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     ? RepoLocator.Layout.COMBINED : RepoLocator.Layout.SEPARATE, optBool(body, "restoreHistory"),
                     webUser(req).orElse(null));
             JsonObject o = new JsonObject();
+            GitAudit.record(GitAudit.LAYOUT, webUser(req).orElse(req.getActor()), null,
+                    DataDirGitManager.headAndBranch()[1], DataDirGitManager.headAndBranch()[0],
+                    "to " + layout + (optBool(body, "restoreHistory") ? ", project history restored" : ""));
             o.addProperty("ok", true);
             o.addProperty("layout", layout);
             o.addProperty("projects", r.projects().size());
@@ -840,7 +896,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             if (gateway) {
                 ConfigSync.Settings gw = ConfigSync.get();
                 followed = ConfigSync.MODE_OFF.equals(gw.mode()) ? null : gw.branch();
-                where = "Configure Versioning > Delivery";
+                where = "Configure versioning > Delivery";
             } else {
                 GitSyncRecord sync = GitSyncRecord.findByProject(project.trim());
                 followed = sync != null && sync.isEnabled() ? sync.getBranch() : null;
@@ -887,6 +943,12 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                         .message("Switched to '" + r.branch() + "'" + (r.created() ? " (new tracking branch)" : "")
                                 + (gateway ? " for the whole gateway repository" : ""));
                 GitEvents.fire((gateway ? ev.config() : ev.project(project.trim())).success());
+                org.eclipse.jgit.lib.ObjectId head;
+                try (org.eclipse.jgit.api.Git g = GitManager.getGit(root)) {
+                    head = g.getRepository().resolve("HEAD");
+                }
+                GitAudit.record(GitAudit.BRANCH, who, config ? null : project.trim(), r.branch(),
+                        head == null ? "" : head.getName(), gateway ? "whole gateway repository" : "");
             }
             return o.toString();
         } catch (Exception e) {
@@ -1040,7 +1102,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 // Unsynced-commit count for the header sync indicator.
                 o.addProperty("ahead", DataDirGitManager.aheadCount());
                 o.addProperty("renameMaster", renameTarget(GitManager.getDataFolderPath(), remote.getBranch()));
-                // What Remote Sync pushes: the checked-out branch, and where it goes.
+                // What Remote sync pushes: the checked-out branch, and where it goes.
                 String[] target = DataDirGitManager.pushTargetNow(remote);
                 o.addProperty("pushFrom", target[0]);
                 o.addProperty("pushTo", target[1]);
@@ -1354,6 +1416,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     private Object handlePush(RequestContext req, HttpServletResponse resp) {
         try {
             String[] pushed = DataDirGitManager.push();
+            GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+            GitAudit.record(GitAudit.PUSH, webUser(req).orElse(null), null, pushed[1],
+                    DataDirGitManager.headAndBranch()[0],
+                    "remote=" + (remote == null ? "" : remote.getUri()) + "; from " + pushed[0]);
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             o.addProperty("from", pushed[0]);
@@ -1411,6 +1477,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 }
                 record.save();
                 o.addProperty("id", record.getId());
+                if (editId == 0) {
+                    GitAudit.record(GitAudit.CREDENTIAL_ADDED, actor, null, null, null,
+                            "SSH key '" + name.trim() + "'");
+                }
             } else if ("HTTPS".equalsIgnoreCase(type)) {
                 String host = optString(body, "host");
                 String username = optString(body, "username");
@@ -1439,6 +1509,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 }
                 record.save();
                 o.addProperty("id", record.getId());
+                if (editId == 0) {
+                    GitAudit.record(GitAudit.CREDENTIAL_ADDED, actor, null, null, null,
+                            "HTTPS credential " + record.getUserName() + "@" + record.getHostPattern());
+                }
             } else {
                 throw new RuntimeException("Unknown credential type: " + type);
             }
@@ -1670,6 +1744,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     DataDirGitManager.resyncOrigin();
                 }
                 DataDirGitManager.commitAllIfDirty("Override " + optString(body, "type") + " in " + mode);
+                GitAudit.record(GitAudit.OVERRIDE_CREATED, webUser(req).orElse(req.getActor()), null, null, null,
+                        recordLabel(body) + " in " + mode + " (copied from " + (from == null || from.isBlank()
+                                ? ModeStore.CORE : from) + ")");
             }
             return ok();
         } catch (Exception e) {
@@ -1707,6 +1784,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         o.addProperty("layoutSwitch", p.layout());
         o.addProperty("forcePushAllowed", p.forcePush());
         o.addProperty("allowInsecureRemotes", p.insecureRemotes());
+        o.addProperty("githubMergedOnly", p.githubMerged());
         JsonArray deliveries = new JsonArray();
         p.deliveries().forEach(deliveries::add);
         o.add("deliveryModes", deliveries);
@@ -1746,11 +1824,17 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     throw new IllegalArgumentException("Unknown delivery mode '" + d + "'.");
                 }
             }
-            GitPolicyRecord.save(new GitPolicy(flag.apply("pushAllowed"),
+            GitPolicy saved = new GitPolicy(flag.apply("pushAllowed"),
                     flag.apply("designerCommit"), flag.apply("branchSwitch"),
                     flag.apply("layoutSwitch"), deliveries, trimmed(stringList(body, "allowedRemoteHosts")),
-                    flag.apply("forcePushAllowed"), flag.apply("allowInsecureRemotes")));
+                    flag.apply("forcePushAllowed"), flag.apply("allowInsecureRemotes"),
+                    flag.apply("githubMergedOnly"));
+            GitPolicyRecord.save(saved);
             DataDirGitManager.commitAllIfDirty("Git policy changed");
+            String in = queryParam(req, "saveTo");
+            GitAudit.record(GitAudit.POLICY, webUser(req).orElse(req.getActor()), null, null,
+                    DataDirGitManager.headAndBranch()[0],
+                    "saved to " + (in == null || in.isBlank() ? "where it is defined" : in) + ": " + saved.summary());
             return ok();
         } catch (Exception e) {
             return error(resp, e);
@@ -1778,12 +1862,24 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
             DataDirGitManager.commitAllIfDirty("Remove " + type + " override"
                     + (mode != null ? " in " + mode : ""));
+            GitAudit.record(GitAudit.OVERRIDE_REMOVED, webUser(req).orElse(req.getActor()), null, null, null,
+                    recordLabel(body) + (mode != null ? " in " + mode : ""));
             return ok();
         } catch (Exception e) {
             return error(resp, e);
         }
     }
 
+
+    /** What an override route names, for an audit row: "policy", "credential 3", "sync Example_A". */
+    private static String recordLabel(JsonObject body) {
+        String type = optString(body, "type");
+        String key = optString(body, "project");
+        if (key == null || key.isBlank()) {
+            key = body.has("id") && !body.get("id").isJsonNull() ? body.get("id").getAsString() : "";
+        }
+        return (type == null ? "record" : type) + (key.isBlank() ? "" : " " + key);
+    }
 
     private static String ok() {
         JsonObject o = new JsonObject();
@@ -1800,6 +1896,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 throw new RuntimeException("Missing commit hash.");
             }
             DataDirGitManager.restoreToCommit(hash, req.getActor());
+            String[] hb = DataDirGitManager.headAndBranch();
+            GitAudit.record(GitAudit.RESTORE, webUser(req).orElse(req.getActor()), null, hb[1], hash,
+                    "config restored to this commit");
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             o.addProperty("applied", true);
@@ -1829,6 +1928,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     private Object handleUpdateFromRemote(RequestContext req, HttpServletResponse resp) {
         try {
             String hash = DataDirGitManager.updateFromRemote();
+            GitAudit.record(GitAudit.RESTORE, webUser(req).orElse(req.getActor()), null,
+                    DataDirGitManager.headAndBranch()[1], hash, "config updated from the remote");
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             o.addProperty("hash", hash);
@@ -2015,6 +2116,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     throw new RuntimeException("No such SSH key for this user.");
                 }
                 record.delete();
+                GitAudit.record(GitAudit.CREDENTIAL_REMOVED, actor, null, null, null,
+                        "SSH key '" + record.getKeyName() + "'");
             } else if ("HTTPS".equalsIgnoreCase(type)) {
                 GitUserHttpsCredentialRecord record =
                         GitUserHttpsCredentialRecord.findByIdAndUser(id, actor);
@@ -2022,6 +2125,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     throw new RuntimeException("No such credential for this user.");
                 }
                 record.delete();
+                GitAudit.record(GitAudit.CREDENTIAL_REMOVED, actor, null, null, null,
+                        "HTTPS credential " + record.getUserName() + "@" + record.getHostPattern());
             } else {
                 throw new RuntimeException("Unknown credential type: " + type);
             }
@@ -2363,7 +2468,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             // project. The project's sync record is left as it was, for a switch back to Separate.
             if (!delivery.equals("off") && !delivery.equals("runner-release")) {
                 throw new RuntimeException("In the Combined layout a project's delivery is Off or Runner —"
-                        + " release; pulls are set once for the gateway (Configure Versioning › Delivery).");
+                        + " release; pulls are set once for the gateway (Configure versioning › Delivery).");
             }
             GitRunnerRecord runner = GitRunnerRecord.get();
             if (delivery.equals("off")) {

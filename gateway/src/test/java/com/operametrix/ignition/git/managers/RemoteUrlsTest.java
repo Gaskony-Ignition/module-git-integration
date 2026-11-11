@@ -53,7 +53,7 @@ class RemoteUrlsTest {
         GitPolicy secure = GitPolicy.DEFAULT;
         GitPolicy open = new GitPolicy(null, null, null, null, null, null, null, true);
         assertThat(PolicyGate.decideUrl(secure, "Prod", "file:///srv/r.git").getMessage())
-                .startsWith("Not allowed in deployment mode Prod: A local folder or file: URL");
+                .startsWith("Remote refused in Prod (Git policy): A local folder or file: URL");
         assertThat(PolicyGate.decideUrl(open, null, "file:///srv/r.git")).isNull();
         GitPolicy hosts = new GitPolicy(null, null, null, null, null, List.of("github.com"), null, null);
         assertThat(PolicyGate.decideUrl(hosts, null, "https://gitlab.com/r.git")).isNotNull();

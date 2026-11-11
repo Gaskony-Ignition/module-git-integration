@@ -36,10 +36,12 @@ class PolicyGateTest {
     void refusalTextNamesTheModeAndTheAction() {
         PolicyGate.Refused r = PolicyGate.decide(READ_ONLY, "Prod", PolicyGate.Action.PUSH);
         assertThat(r.getMessage()).isEqualTo(
-                "Not allowed in deployment mode Prod: pushing is turned off by the gateway's Git policy.");
-        assertThat(r.shortReason()).isEqualTo("off in deployment mode Prod");
+                "Pushing is off in Prod (Git policy).");
+        assertThat(r.shortReason()).isEqualTo("off in Prod");
         assertThat(PolicyGate.decide(READ_ONLY, null, PolicyGate.Action.LAYOUT_SWITCH).getMessage())
-                .startsWith("Not allowed on this gateway: switching the repository layout");
+                .isEqualTo("Layout switches are off on this gateway (Git policy).");
+        assertThat(PolicyGate.decide(READ_ONLY, "Prod", PolicyGate.Action.BRANCH_SWITCH).getMessage())
+                .isEqualTo("Branch changes are off in Prod (Git policy).");
     }
 
     @Test
@@ -57,7 +59,7 @@ class PolicyGateTest {
         assertThat(PolicyGate.decideDelivery(READ_ONLY, "Prod", "off")).isNull();
         assertThat(PolicyGate.decideDelivery(READ_ONLY, "Prod", "sync-replace")).isNotNull();
         assertThat(PolicyGate.decideDelivery(READ_ONLY, "Prod", "runner-release").getMessage())
-                .contains("delivery 'runner'");
+                .isEqualTo("Delivery 'runner' is off in Prod (Git policy).");
         GitPolicy none = new GitPolicy(true, true, true, true, List.of(), null, true, null);
         assertThat(PolicyGate.decideDelivery(none, null, "off")).isNull();
         assertThat(PolicyGate.decideDelivery(none, null, "pull")).isNotNull();
@@ -81,8 +83,7 @@ class PolicyGateTest {
         assertThat(PolicyGate.decideHost(c, "Prod", "https://git.corp.example/r.git")).isNull();
         assertThat(PolicyGate.decideHost(c, "Prod", "https://evilgithub.com/r.git")).isNotNull();
         assertThat(PolicyGate.decideHost(c, "Prod", "https://gitlab.com/r.git").getMessage())
-                .isEqualTo("Not allowed in deployment mode Prod: the gateway's Git policy does not list"
-                        + " the host gitlab.com in its allowed remote hosts.");
+                .isEqualTo("gitlab.com is not an allowed remote host in Prod (Git policy).");
         assertThat(PolicyGate.decideHost(c, "Prod", "/srv/repo.git")).isNotNull();
     }
 
@@ -137,5 +138,17 @@ class PolicyGateTest {
         assertThat(prod.weakerThan(open)).isEmpty();
         assertThat(PolicyWatch.decode(PolicyWatch.encode(prod)).weakerThan(prod)).isEmpty();
         assertThat(prod.weakerThan(PolicyWatch.decode(PolicyWatch.encode(prod)))).isEmpty();
+    }
+
+    @Test
+    void githubMergedOnlyIsOffByDefaultAndTurningItOffIsLooser() {
+        assertThat(GitPolicy.DEFAULT.githubMerged()).isFalse();
+        GitPolicy older = new GitPolicy(true, true, true, true, null, null, true, false);
+        assertThat(older.githubMerged()).isFalse();
+        GitPolicy strict = new GitPolicy(true, true, true, true, null, null, true, false, true);
+        assertThat(older.weakerThan(strict)).containsExactly("deliveries not merged on GitHub");
+        assertThat(strict.weakerThan(older)).isEmpty();
+        assertThat(PolicyWatch.decode(PolicyWatch.encode(strict)).githubMerged()).isTrue();
+        assertThat(strict.summary()).endsWith("GitHub-merged only on");
     }
 }

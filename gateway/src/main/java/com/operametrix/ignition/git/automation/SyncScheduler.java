@@ -1,6 +1,7 @@
 package com.operametrix.ignition.git.automation;
 
 import com.operametrix.ignition.git.GatewayHook;
+import com.operametrix.ignition.git.managers.GitHubMerged;
 import com.operametrix.ignition.git.managers.GitManager;
 import com.operametrix.ignition.git.managers.PullGuard;
 import com.operametrix.ignition.git.managers.GitProjectManager;
@@ -132,12 +133,24 @@ public final class SyncScheduler {
         inFlight.remove(project);
     }
 
+    /** Runs one repository's sync for the runner's repo update: as {@link #syncNow}, audited as the runner. */
+    public static String syncForRunner(GitSyncRecord cfg) {
+        VIA.set("Runner — repo update");
+        try {
+            return syncNow(cfg);
+        } finally {
+            VIA.remove();
+        }
+    }
+
+    private static final ThreadLocal<String> VIA = new ThreadLocal<>();
+
     /** Runs one repository's sync. Safe to call outside the timer (the Sync now button). */
     public static String syncNow(GitSyncRecord cfg) {
         String project = cfg.getProject();
         if (GitManager.combined()) {
             throw new IllegalStateException("A project has no delivery of its own in the Combined layout;"
-                    + " the gateway's delivery (Configure Versioning) moves every project.");
+                    + " the gateway's delivery (Configure versioning) moves every project.");
         }
         if (!inFlight.add(project)) {
             return "already running";
@@ -217,6 +230,18 @@ public final class SyncScheduler {
             boolean switched = !branch.equals(current);
             String message;
 
+            if (switched || !tracked.equals(before)) {
+                String notMerged = GitHubMerged.refusal(repo, tracked);
+                if (notMerged != null) {
+                    if (GitHubMerged.firstRefusal("project:" + project, tracked)) {
+                        logger.warn("Project '{}': {}", project, notMerged);
+                        GitEvents.fire(GitEvent.of(GitEvent.SYNC).project(project).user(user).branch(branch)
+                                .remote(remoteName).commit(tracked.getName()).warning(notMerged));
+                    }
+                    return notMerged;
+                }
+            }
+
             if (replace) {
                 // Compared with HEAD, not the working tree: a replace runs when the branch moves,
                 // as a release runs when one is published, not whenever someone edits.
@@ -281,6 +306,9 @@ public final class SyncScheduler {
                             + remoteName + "/" + branch)
                     .files(changed)
                     .success());
+            GitAudit.record(GitAudit.DELIVERY, user, project, branch, after == null ? "" : after.getName(),
+                    (VIA.get() != null ? VIA.get() : replace ? "Sync — replace" : "Sync — pull") + " from " + remoteName + ", "
+                            + changed.size() + " file(s)");
             return (replace ? "replaced, " : "pulled ") + changed.size() + " file(s)";
         }
     }

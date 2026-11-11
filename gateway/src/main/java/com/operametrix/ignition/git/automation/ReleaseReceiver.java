@@ -153,6 +153,8 @@ public final class ReleaseReceiver {
                     .user("runner")
                     .message("Installed " + label + " (" + files + " files)")
                     .success());
+            GitAudit.record(GitAudit.DELIVERY, "runner", project, null, committed,
+                    "Runner — release " + (version.isEmpty() ? "(no version)" : version) + ", " + files + " file(s)");
 
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);

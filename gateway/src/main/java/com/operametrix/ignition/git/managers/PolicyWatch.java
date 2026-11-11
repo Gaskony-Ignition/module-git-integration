@@ -45,9 +45,11 @@ public final class PolicyWatch {
                     GitPolicy was = decode(before);
                     List<String> looser = was == null ? List.of() : now.weakerThan(was);
                     if (!looser.isEmpty()) {
-                        String msg = "The Git policy now allows more (" + cause + "): " + String.join(", ", looser)
-                                + ". Check the branch this gateway follows and its mode overrides.";
-                        logger.warn(msg);
+                        String mode = com.operametrix.ignition.git.records.ModeStore.activeMode().orElse(null);
+                        String msg = "Policy now allows more " + (mode == null ? "on this gateway" : "in " + mode)
+                                + ": " + String.join(", ", looser) + ".";
+                        logger.warn("{} Cause: {}. Check the branch this gateway follows and its mode overrides.",
+                                msg, cause);
                         GitEvents.fire(GitEvent.of("policy").config().warning(msg));
                     }
                 }
@@ -63,7 +65,7 @@ public final class PolicyWatch {
         return "push=" + p.push() + "\nforcePush=" + p.forcePush() + "\ncommit=" + p.commit()
                 + "\nbranches=" + p.branches() + "\nlayout=" + p.layout()
                 + "\ndeliveries=" + String.join(",", p.deliveries()) + "\nhosts=" + String.join(",", p.hosts())
-                + "\ninsecure=" + p.insecureRemotes() + "\n";
+                + "\ninsecure=" + p.insecureRemotes() + "\ngithubMerged=" + p.githubMerged() + "\n";
     }
 
     static GitPolicy decode(String text) {
@@ -78,6 +80,7 @@ public final class PolicyWatch {
                 ? List.of() : List.of(m.get(k).split(","));
         return new GitPolicy(Boolean.valueOf(m.get("push")), Boolean.valueOf(m.get("commit")),
                 Boolean.valueOf(m.get("branches")), Boolean.valueOf(m.get("layout")), list.apply("deliveries"),
-                list.apply("hosts"), Boolean.valueOf(m.get("forcePush")), Boolean.valueOf(m.get("insecure")));
+                list.apply("hosts"), Boolean.valueOf(m.get("forcePush")), Boolean.valueOf(m.get("insecure")),
+                Boolean.valueOf(m.get("githubMerged")));
     }
 }

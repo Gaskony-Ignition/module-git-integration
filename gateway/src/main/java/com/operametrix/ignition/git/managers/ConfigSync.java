@@ -1,5 +1,6 @@
 package com.operametrix.ignition.git.managers;
 
+import com.operametrix.ignition.git.automation.GitAudit;
 import com.operametrix.ignition.git.automation.GitEvent;
 import com.operametrix.ignition.git.automation.GitEvents;
 import org.eclipse.jgit.lib.StoredConfig;
@@ -142,6 +143,14 @@ public final class ConfigSync {
                 return pull(s);
             }
             DataDirGitManager.ReplaceResult r = DataDirGitManager.replaceFromBranch(s.branch());
+            if (r.refused() != null) {
+                if (r.firstRefusal()) {
+                    logger.warn("Config branch follow: {}", r.refused());
+                    GitEvents.fire(GitEvent.of(GitEvent.SYNC).config().branch(s.branch()).warning(r.refused()));
+                }
+                lastRun = new LastRun(System.currentTimeMillis(), false, r.refused(), "");
+                return r.refused();
+            }
             if (!r.changed()) {
                 return "up to date";
             }
@@ -151,6 +160,8 @@ public final class ConfigSync {
                     + " uncommitted change(s)";
             GitEvents.fire(GitEvent.of(GitEvent.SYNC).config().branch(s.branch())
                     .commit(r.commit()).message(message).files(r.files()).success());
+            GitAudit.record(GitAudit.DELIVERY, "gateway", null, s.branch(), r.commit(),
+                    "Sync — replace, " + r.files().size() + " file(s)" + (r.rolledBack() ? ", rolled back" : ""));
             lastRun = new LastRun(System.currentTimeMillis(), true, message, r.commit());
             return message;
         } catch (Exception e) {
@@ -168,7 +179,13 @@ public final class ConfigSync {
         try {
             DataDirGitManager.PullResult r = DataDirGitManager.pullFromBranch(s.branch());
             if (!r.changed()) {
-                if (!r.note().equals("up to date")) {
+                if (r.warn()) {
+                    logger.warn("Gateway pull: {}", r.note());
+                    GitEvents.fire(GitEvent.of(GitEvent.SYNC).config().branch(s.branch()).warning(r.note()));
+                    lastRun = new LastRun(System.currentTimeMillis(), false, r.note(), "");
+                } else if (r.note().startsWith("Not merged through GitHub")) {
+                    lastRun = new LastRun(System.currentTimeMillis(), false, r.note(), "");
+                } else if (!r.note().equals("up to date")) {
                     GitEvents.fire(GitEvent.of(GitEvent.SYNC).config().branch(s.branch()).failure(r.note()));
                     lastRun = new LastRun(System.currentTimeMillis(), false, r.note(), "");
                 }
@@ -178,6 +195,8 @@ public final class ConfigSync {
                     + r.files().size() + " changed file(s)";
             GitEvents.fire(GitEvent.of(GitEvent.SYNC).config().branch(s.branch())
                     .commit(r.commit()).message(message).files(r.files()).success());
+            GitAudit.record(GitAudit.DELIVERY, s.runner() ? "runner" : "gateway", null, s.branch(), r.commit(),
+                    (s.runner() ? "Runner — repo update" : "Sync — pull") + ", " + r.files().size() + " file(s)");
             lastRun = new LastRun(System.currentTimeMillis(), true, message, r.commit());
             return message;
         } catch (Exception e) {

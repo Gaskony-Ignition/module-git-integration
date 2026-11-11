@@ -12,7 +12,15 @@ import java.util.List;
 public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean branchSwitch,
                         Boolean layoutSwitch, List<String> deliveryModes,
                         List<String> allowedRemoteHosts, Boolean forcePushAllowed,
-                        Boolean allowInsecureRemotes) {
+                        Boolean allowInsecureRemotes, Boolean githubMergedOnly) {
+
+    /** A policy saved before 4.4.0: GitHub-merged-only reads as off. */
+    public GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean branchSwitch, Boolean layoutSwitch,
+                     List<String> deliveryModes, List<String> allowedRemoteHosts, Boolean forcePushAllowed,
+                     Boolean allowInsecureRemotes) {
+        this(pushAllowed, designerCommit, branchSwitch, layoutSwitch, deliveryModes, allowedRemoteHosts,
+                forcePushAllowed, allowInsecureRemotes, null);
+    }
 
     public static final List<String> DELIVERY_MODES = List.of("off", "pull", "replace", "runner");
 
@@ -21,7 +29,7 @@ public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean bra
      * SSH only (4.3.0).
      */
     public static final GitPolicy DEFAULT =
-            new GitPolicy(true, true, true, true, DELIVERY_MODES, List.of(), true, false);
+            new GitPolicy(true, true, true, true, DELIVERY_MODES, List.of(), true, false, false);
 
     public boolean push() {
         return pushAllowed == null || pushAllowed;
@@ -48,11 +56,19 @@ public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean bra
      * delivery but off, no remote host at all ("-" is no host name), no insecure remotes.
      */
     public static final GitPolicy LOCKED =
-            new GitPolicy(false, true, false, false, List.of("off"), List.of("-"), false, false);
+            new GitPolicy(false, true, false, false, List.of("off"), List.of("-"), false, false, true);
 
     /** Local folders, file://, git://, http:// and local-network targets. Off unless set. */
     public boolean insecureRemotes() {
         return allowInsecureRemotes != null && allowInsecureRemotes;
+    }
+
+    /**
+     * Deliveries install a branch tip only when GitHub's web-flow key signed it (a pull request
+     * merged in GitHub's UI). Off unless set (4.4.0).
+     */
+    public boolean githubMerged() {
+        return githubMergedOnly != null && githubMergedOnly;
     }
 
     public List<String> deliveries() {
@@ -99,7 +115,23 @@ public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean bra
         if (insecureRemotes() && !before.insecureRemotes()) {
             out.add("insecure remotes");
         }
+        if (!githubMerged() && before.githubMerged()) {
+            out.add("deliveries not merged on GitHub");
+        }
         return out;
+    }
+
+    /** Every setting in one line, for an audit row. */
+    public String summary() {
+        return "push " + onOff(push()) + ", force push " + onOff(forcePush()) + ", Designer commit "
+                + onOff(commit()) + ", branches " + onOff(branches()) + ", layout " + onOff(layout())
+                + ", deliveries " + String.join("/", deliveries()) + ", hosts "
+                + (hosts().isEmpty() ? "any" : String.join(" ", hosts())) + ", insecure remotes "
+                + onOff(insecureRemotes()) + ", GitHub-merged only " + onOff(githubMerged());
+    }
+
+    private static String onOff(boolean b) {
+        return b ? "on" : "off";
     }
 
     public List<String> hosts() {

@@ -1,5 +1,6 @@
 package com.operametrix.ignition.git;
 
+import com.operametrix.ignition.git.automation.GitAudit;
 import com.operametrix.ignition.git.automation.GitEvent;
 import com.operametrix.ignition.git.automation.GitEvents;
 import com.operametrix.ignition.git.managers.*;
@@ -152,7 +153,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         if (GitManager.combined()) {
             throw new RuntimeException(what + " is not available here: this gateway keeps every project"
                     + " in one repository (Combined layout), with one remote set on the gateway's"
-                    + " Versioning page (Configure Versioning).");
+                    + " Versioning page (Configure versioning).");
         }
     }
 
@@ -373,6 +374,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                     .remote(remoteUrlQuietly(projectName, remoteName))
                     .branch(branchQuietly(projectName)).commit(headQuietly(projectName))
                     .message("Pushed to " + remoteName).success());
+            GitAudit.record(GitAudit.PUSH, userName, projectName, branchQuietly(projectName), headQuietly(projectName),
+                    "remote=" + remoteUrlQuietly(projectName, remoteName) + (forcePush ? "; forced" : "") + "; from the Designer");
             return ok;
         } catch (Exception e) {
             GitEvents.fire(GitEvent.of(GitEvent.PUSH)
@@ -792,11 +795,19 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                 result = GitManager.checkoutBranch(repo.root(), branchName);
             }
             afterGatewayWide(projectName, before);
+            auditCheckout(projectName, repo.root(), branchName);
             return result;
         }
         boolean result = GitManager.checkoutBranch(getProjectFolderPath(projectName), branchName);
         GitProjectManager.importProject(projectName);
+        auditCheckout(projectName, getProjectFolderPath(projectName), branchName);
         return result;
+    }
+
+    private static void auditCheckout(String projectName, java.nio.file.Path root, String branchName) {
+        org.eclipse.jgit.lib.ObjectId head = headOf(root);
+        GitAudit.record(GitAudit.BRANCH, caller(null), projectName, branchName, head == null ? "" : head.getName(),
+                "from the Designer");
     }
 
     @Override
@@ -1319,6 +1330,9 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
             String branch = git.getRepository().getBranch();
             pushCommand.setRemote("origin").setRefSpecs(new RefSpec(branch)).call();
+            org.eclipse.jgit.lib.ObjectId head = git.getRepository().resolve("HEAD");
+            GitAudit.record(GitAudit.PUSH, userName, projectName, branch, head == null ? "" : head.getName(),
+                    "first push of the project");
         } catch (GitAPIException e) {
             logger.error(e.toString());
             throw new RuntimeException(e);
@@ -1391,13 +1405,18 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         try {
             // Update an existing key with the same name in place, otherwise create a new one.
             GitUserSshKeyRecord record = GitUserSshKeyRecord.findByUserAndKeyName(ignitionUser, keyName);
-            if (record == null) {
+            boolean added = record == null;
+            if (added) {
                 record = new GitUserSshKeyRecord();
                 record.setIgnitionUser(ignitionUser);
                 record.setKeyName(keyName);
             }
             record.setSSHKey(sshKey);
             record.save();
+            if (added) {
+                GitAudit.record(GitAudit.CREDENTIAL_ADDED, ignitionUser, null, null, null,
+                        "SSH key '" + keyName + "'; from the Designer");
+            }
             return true;
         } catch (Exception e) {
             logger.error("Error saving user SSH key", e);
@@ -1420,6 +1439,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             }
 
             record.delete();
+            GitAudit.record(GitAudit.CREDENTIAL_REMOVED, ignitionUser, null, null, null,
+                    "SSH key '" + record.getKeyName() + "'; from the Designer");
             return true;
         } catch (Exception e) {
             logger.error("Error deleting user SSH key", e);
@@ -1472,6 +1493,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                 record.setUserName(userName);
                 record.setPassword(password);
                 record.save();
+                GitAudit.record(GitAudit.CREDENTIAL_ADDED, ignitionUser, null, null, null,
+                        "HTTPS credential " + userName + "@" + hostPattern + "; from the Designer");
             }
             return true;
         } catch (Exception e) {
@@ -1497,6 +1520,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             }
 
             record.delete();
+            GitAudit.record(GitAudit.CREDENTIAL_REMOVED, ignitionUser, null, null, null,
+                    "HTTPS credential " + record.getUserName() + "@" + record.getHostPattern() + "; from the Designer");
             return true;
         } catch (Exception e) {
             logger.error("Error deleting user HTTPS credential", e);
@@ -1534,7 +1559,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         if (GitManager.combined()) {
             throw new IllegalStateException("Project '" + projectName + "' has no credential of its own in"
                     + " the Combined layout: every project uses the gateway repository's remote and"
-                    + " credential, set in Configure Versioning.");
+                    + " credential, set in Configure versioning.");
         }
         requireOwnCredentials(ignitionUser, sshKeyId, httpsCredentialId);
         try {
