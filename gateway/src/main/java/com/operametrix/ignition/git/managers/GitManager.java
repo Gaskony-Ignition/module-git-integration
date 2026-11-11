@@ -782,10 +782,13 @@ public class GitManager {
                 try {
                     git.stashApply().setStashRef("stash@{" + index + "}").call();
                 } catch (org.eclipse.jgit.api.errors.StashApplyFailureException e) {
-                    // Stash conflicts with the current branch state — reset the
-                    // failed merge and discard the stash so checkout can proceed.
-                    logger.warn("Stash for branch '" + branchName + "' could not be applied cleanly; discarding stashed changes.", e);
+                    // The tree was clean after the checkout, so the hard reset only clears the
+                    // half-applied stash. The stash itself is kept: it is the user's unsaved work.
+                    logger.warn("Uncommitted changes saved for branch '" + branchName + "' conflict with it now;"
+                            + " they are kept in the repository's stash (" + stash.getName().substring(0, 7)
+                            + ") and were not applied.", e);
                     git.reset().setMode(ResetCommand.ResetType.HARD).call();
+                    return;
                 }
                 git.stashDrop().setStashRef(index).call();
                 return;
@@ -1210,17 +1213,7 @@ public class GitManager {
                 }
             }
 
-            if (scope.scoped()) {
-                ProjectScope.revertScoped(git, scope, commitHash, userName, email);
-                return true;
-            }
-            RevCommit result = git.revert().include(commitId).call();
-            if (result == null) {
-                // Revert produced conflicts — abort to avoid leaving repo in conflicted state
-                git.reset().setMode(ResetCommand.ResetType.HARD).call();
-                throw new RuntimeException("Revert failed — conflicts detected. The revert has been aborted.");
-            }
-            ProjectScope.reauthorHead(git, userName, email);
+            ProjectScope.revert(git, scope, commitHash, userName, email);
             return true;
         } catch (RuntimeException e) {
             throw e;

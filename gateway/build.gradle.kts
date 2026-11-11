@@ -42,6 +42,8 @@ dependencies {
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.14.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.14.4")
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.17")
+    // IgnitionReformat parses JSON with the platform's shaded Gson.
+    testRuntimeOnly("com.inductiveautomation.ignitionsdk:ignition-common:${rootProject.extra["sdk_version"]}")
 }
 
 tasks.test {

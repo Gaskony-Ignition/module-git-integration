@@ -356,38 +356,95 @@ public final class ProjectScope {
      */
     public static void revertScoped(Git git, RepoLocator.Repo repo, String commitHash, String userName,
                                     String email) throws Exception {
+        revert(git, repo, commitHash, userName, email);
+    }
+
+    /**
+     * Reverts one commit in either layout, authored by the Designer user. Only the files the commit
+     * changed are ever touched: uncommitted edits to them refuse the revert, and a revert that
+     * conflicts puts just those files back, so no one's uncommitted work elsewhere is lost.
+     */
+    public static void revert(Git git, RepoLocator.Repo repo, String commitHash, String userName,
+                              String email) throws Exception {
         Repository r = git.getRepository();
         ObjectId id = r.resolve(commitHash);
         if (id == null) {
             throw new IllegalArgumentException("Commit not found: " + commitHash);
         }
-        List<String> outside = new ArrayList<>();
-        for (String f : changedFiles(r, id)) {
-            if (!repo.contains(f)) {
-                outside.add(f);
-            }
-        }
-        if (!outside.isEmpty()) {
-            throw new IllegalStateException("Commit " + id.abbreviate(7).name() + " also changed "
-                    + outside.size() + " file(s) outside this project (first: " + outside.get(0)
-                    + "). In the Combined layout a revert from the Designer only touches this"
-                    + " project, so this commit cannot be reverted here.");
-        }
-        Set<String> untrackedBefore = new HashSet<>(status(git, repo).getUntracked());
-        RevCommit result = git.revert().include(id).call();
-        if (result == null) {
-            git.reset().addPath(repo.pathspec()).call();
-            git.checkout().setStartPoint(Constants.HEAD).addPath(repo.pathspec()).call();
-            for (String f : status(git, repo).getUntracked()) {
-                if (!untrackedBefore.contains(f)) {
-                    Files.deleteIfExists(repo.root().resolve(f));
+        List<String> touched = changedFiles(r, id);
+        if (repo.scoped()) {
+            List<String> outside = new ArrayList<>();
+            for (String f : touched) {
+                if (!repo.contains(f)) {
+                    outside.add(f);
                 }
             }
-            r.writeRevertHead(null);
-            r.writeMergeCommitMsg(null);
-            throw new IllegalStateException("Revert failed — conflicts detected. The revert has been aborted.");
+            if (!outside.isEmpty()) {
+                throw new IllegalStateException("Commit " + id.abbreviate(7).name() + " also changed "
+                        + outside.size() + " file(s) outside this project (first: " + outside.get(0)
+                        + "). In the Combined layout a revert from the Designer only touches this"
+                        + " project, so this commit cannot be reverted here.");
+            }
+        }
+        Status before = status(git, repo);
+        Set<String> edited = new java.util.TreeSet<>(IgnitionReformat.realChanges(r, before));
+        edited.retainAll(touched);
+        if (!edited.isEmpty()) {
+            throw new IllegalStateException(edited.size() + " file(s) this commit changed have uncommitted"
+                    + " changes (first: " + repo.toProjectPath(edited.iterator().next())
+                    + "). Commit or discard them, then revert.");
+        }
+        // Ignition rewrites the JSON it imports (after every pull), leaving files that differ from
+        // HEAD only in formatting; HEAD's own bytes go back so they don't block the revert.
+        Set<String> reformatted = new java.util.TreeSet<>(IgnitionReformat.reformatted(r, before));
+        reformatted.retainAll(touched);
+        if (!reformatted.isEmpty()) {
+            org.eclipse.jgit.api.CheckoutCommand co = git.checkout().setStartPoint(Constants.HEAD);
+            reformatted.forEach(co::addPath);
+            co.call();
+        }
+        org.eclipse.jgit.api.RevertCommand cmd = git.revert().include(id);
+        RevCommit result = cmd.call();
+        if (result == null) {
+            undo(git, touched, before.getUntracked());
+            List<String> unmerged = cmd.getUnmergedPaths();
+            // No unmerged path means JGit stopped on a file that changed under it, not a conflict.
+            throw new IllegalStateException(unmerged == null || unmerged.isEmpty()
+                    ? "Revert stopped: a file it needs was being written on the gateway. Nothing was"
+                        + " changed; try again."
+                    : "Revert failed — conflicts detected with later changes to "
+                        + repo.toProjectPath(unmerged.get(0)) + ". The revert has been aborted; nothing was changed.");
         }
         reauthorHead(git, userName, email);
+    }
+
+    /**
+     * Puts back the files a failed revert may have written. They matched HEAD before it started
+     * (anything else refused it), so restoring them from HEAD loses nothing.
+     */
+    private static void undo(Git git, List<String> touched, Set<String> untrackedBefore) throws Exception {
+        Repository r = git.getRepository();
+        if (!touched.isEmpty()) {
+            org.eclipse.jgit.api.ResetCommand reset = git.reset();
+            touched.forEach(reset::addPath);
+            reset.call();
+            org.eclipse.jgit.revwalk.RevTree head = r.parseCommit(r.resolve(Constants.HEAD)).getTree();
+            org.eclipse.jgit.api.CheckoutCommand co = git.checkout().setStartPoint(Constants.HEAD);
+            boolean any = false;
+            for (String f : touched) {
+                if (TreeWalk.forPath(r, f, head) != null) {
+                    co.addPath(f);
+                    any = true;
+                } else if (!untrackedBefore.contains(f)) {
+                    Files.deleteIfExists(r.getWorkTree().toPath().resolve(f));
+                }
+            }
+            if (any) {
+                co.call();
+            }
+        }
+        r.writeRevertHead(null);
+        r.writeMergeCommitMsg(null);
     }
 
     /**

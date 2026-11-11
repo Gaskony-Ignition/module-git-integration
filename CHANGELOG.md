@@ -3,6 +3,18 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [4.4.2] - 2026-11-12
+
+### Fixed
+- A revert that failed (a conflict with later changes) discarded every uncommitted change in the
+  project, not just its own; in the Combined layout, every uncommitted change in the project. It
+  now puts back only the files the commit changed, and a revert whose files have uncommitted
+  edits is refused before anything is touched.
+- A revert straight after Pull and Import no longer fails with "conflicts detected": files
+  Ignition only reformatted on import (same content as the commit) no longer count as edits.
+- Switching to a branch whose saved uncommitted changes no longer apply keeps them in the stash
+  (and says so on the Logs tab) instead of dropping them.
+
 ## [4.4.1] - 2026-11-12
 
 ### Added
