@@ -3,6 +3,28 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## 4.3.1 (unreleased)
+
+### Security
+- Testing a remote on the Versioning page followed an HTTP redirect, credential and all, to
+  whichever host the server named. It no longer follows redirects, like every other remote
+  operation since 4.3.0.
+- A project's delivery could be saved under a name that is not a project name (`..`, `a/b`);
+  it is now refused.
+
+### Fixed
+- Versioning page: the Configure Versioning drawer lost all its spacing (hints ran into the next
+  label, Test connection touched Remove remote); the Branches graph cut off each commit's hash,
+  author and age on a laptop screen instead of shortening the message; the layout drawer's
+  restore-history tick stayed active when the policy refuses a layout switch; the checked-out
+  branch's row now says Checked out instead of a greyed Switch button.
+- Shorter page text: the header's "Push off in Prod", and the History, Credentials, Policy,
+  credential and Configure Versioning hints.
+
+### Added
+- A regression suite (`test/regression/run.sh`, docs/TESTING.md) that runs the module on a
+  throwaway gateway against TLS git servers in both layouts and three deployment modes.
+
 ## [4.3.0] - 2026-11-11
 
 ### Security

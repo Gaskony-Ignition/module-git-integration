@@ -23,8 +23,8 @@ jars and the `.modl` ships both. Prettier violations fail webpack — run
 `node_modules/.bin/prettier --write "src/**/*.{ts,tsx}"` in `web-ui/`.
 
 Tests: `./gradlew test` covers the pure branch, layout, Git Ignore, policy and
-origin logic (`gateway/src/test`); for the rest install the `.modl` and exercise
-the Designer and Versioning page in both layouts.
+origin logic (`gateway/src/test`); the gateway side is `test/regression/run.sh`
+(docs/TESTING.md); the Designer is checked by hand in both layouts.
 
 ## Architecture
 
