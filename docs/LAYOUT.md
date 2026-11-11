@@ -10,8 +10,8 @@ either way at any time.
 | Repositories | One per project at `projects/<name>`, plus the config repository at the data directory | One at the data directory, holding `config/` and `projects/` |
 | Designer commit, diff, history, revert, badges | That project's repository | Limited to `projects/<name>/`; a commit never takes config or another project with it |
 | Branches, checkout, pull, push, fetch | Per project | Gateway-wide: checking out a branch switches config and every project, then reloads them |
-| Remote and credential | Per project, in the Designer's Remotes popup | One, set in Configure Versioning; the Designer shows it read-only |
-| Delivery | Per project on the Projects tab | Pulls set once in Configure Versioning › Delivery (Sync — pull, Sync — replace, Runner — repo updates); a project keeps Off or Runner — release |
+| Remote and credential | Per project, in the Designer's Remotes popup | One, set in Configure versioning; the Designer shows it read-only |
+| Delivery | Per project on the Projects tab | Pulls set once in Configure versioning › Delivery (Sync — pull, Sync — replace, Runner — repo updates); a project keeps Off or Runner — release |
 
 **Branches.** One gateway has one checked-out branch per project (Combined: one for
 everything), shared by everyone editing it, so the gateway page shows it. The
@@ -35,7 +35,7 @@ branch switch within ten seconds, without reopening.
 
 ![The Repository layout setting](images/versioning-layout.png)
 
-To switch: **Versioning → Configure Versioning → Repository layout**. It is
+To switch: **Versioning → Configure versioning → Repository layout**. It is
 refused, with nothing changed, while any project has uncommitted work.
 
 - **Separate → Combined** moves each project's `.git` to
@@ -69,7 +69,7 @@ git push
 ```
 
 Then bring the two histories together once: set the gateway's remote branch to a
-new name (say `gateway-import`) and Remote Sync, which pushes a branch the remote
+new name (say `gateway-import`) and Remote sync, which pushes a branch the remote
 does not have yet; in a clone, merge it into the restructured branch with
 `git merge --allow-unrelated-histories origin/gateway-import`, push, and set the
 gateway's branch back to that one. From then on the histories are related.

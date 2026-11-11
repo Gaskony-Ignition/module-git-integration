@@ -20,6 +20,7 @@ are the two runner routes — see Delivery below.
 | Delivery & logs | `GET /events`, `/runner` |
 | Delivery & logs | `POST /delivery`, `/sync-now`, `/events-clear`, `/runner`, `/runner-sync`, `/runner-release` |
 | Modes & policy (4.1.0) | `POST /policy`, `/mode-override` (Create Override: `mode`, `from`), `/mode-reset` (Remove Override: `mode`, blank = active); each takes `type` policy, remote, runner, sync + `project`, credential + `id`/`credType`. `GET /definition` (same keys + `collection`) answers one collection's definition in the shape of the record's own GET, plus `defined`. `GET /status` carries `policy` and `modes` |
+| Audit (4.4.0) | `GET /audit` (on/off, profile, `gatewayHasProfile`, the profiles), `POST /audit` (`enabled`, `profile`; blank follows the gateway's) |
 | Branch names (4.2.0) | `POST /branch-rename-master` (`project` or `repo:"config"`); `GET /remote` and `/projects` carry `renameMaster` when it applies |
 
 `POST /remote`, `/credentials`, `/project-init`, `/delivery`, `/runner` and `/policy` take
@@ -38,7 +39,7 @@ gateway-side, stored encrypted, and returned exactly once.
 
 ## Persisted resource types
 
-Nine types on the 8.3 resource/config system; each `*Record` is a mutable
+Ten types on the 8.3 resource/config system; each `*Record` is a mutable
 DTO façade over a `NamedResourceHandler` whose config is a nested Java
 `record`. The config remote, sync, runner, SSH key, HTTPS credential and policy
 metas come from `ModeStore.overridable` (`ResourceActionSet.DEFAULT` plus a route
@@ -57,6 +58,7 @@ above it — and `ModeStore.reset` deletes the active mode's copy.
 | `GitSyncRecord` | Per-project sync: enabled, Pull/Replace, remote, branch, interval, authenticating user. Kept disabled for a runner repo update's branch and credential. |
 | `GitRunnerRecord` | Gateway-level singleton: runner on/off, bearer token (`SecretConfig`), per-project runner mode (release/repo — absent is Off), and `optIn` (the 3.5.0 migration has run). |
 | `GitUserHttpsCredentialRecord` | User-level HTTPS credential (host, username, encrypted password). Auth resolves via the FK, never a pattern match; the host binds the credential (4.3.0: always — a credential with no host goes nowhere). |
+| `GitAuditRecord` (4.4.0) | Gateway-level singleton `audit`: on/off and the audit profile (blank: the gateway's own). Not per mode, not versioned. |
 | `GitPolicyRecord` (4.1.0) | Gateway-level singleton `policy`, fields in the pure `GitPolicy` record (boxed: absent = default). The only record versioned with the config; written to core with the default at startup. |
 
 A one-time `records.legacy.GitLegacyImporter` migrates the old SimpleORM
@@ -78,13 +80,15 @@ deletes the resource types left over from removed features, both idempotent.
 | `OriginSync` (4.1.0) | Sets the gateway repository's `origin` from the effective config remote record (URL, no push URL, upstreams moved when the branch changed; applied branch in `gitmodule.origin.branch`). `DataDirGitManager.authOrigin` runs it before every config push and fetch, and `setAuthentication` before a Combined `origin` op. |
 | `SafePaths` / `RemoteUrls` / `RepoHardening` (4.3.0) | `SafePaths`: project names (`[A-Za-z0-9_-]+`), repo-relative paths (no absolute, `..` or `.git`, symlinks followed and kept inside), 5 MB regular-file reads, error text without install folders. `RemoteUrls`: https/ssh only, no URL passwords, no loopback/link-local targets, unless the policy's `allowInsecureRemotes`; called from `PolicyGate.checkHost`. `RepoHardening`: `harden` (no `http.sslVerify`, `core.symlinks=false`, `http.followRedirects=false`) on every repository created, and at startup on existing ones, plus URL passwords stripped, legacy plaintext SSH keys encrypted, label-only HTTPS credentials bound to their remotes' one host, and the `IgnoreRules.DENY` block kept last in `.gitignore`. |
 | `PolicyWatch` (4.3.0) | Compares the effective policy with the last one seen (`.git-module-policy-seen` in the data dir) on every config change and at startup; `GitPolicy.weakerThan` names what got looser, logged as a warning event. `GitPolicyRecord.get` returns `GitPolicy.LOCKED` for a policy it cannot read. |
-| `IgnoreRules` | The `.gitignore` template and the Git Ignore tab's rule matching (`decide`, `matchRule`, `isOwnLine`), pure so it is unit tested. `versionPolicy` rewrites the 3.10.0 records line into the 4.1.0 pair; `DataDirGitManager.versionPolicyOnce` applies it once at startup (marker `.git-module-policy-versioned`). |
+| `IgnoreRules` | The `.gitignore` template and the Git ignore tab's rule matching (`decide`, `matchRule`, `isOwnLine`), pure so it is unit tested. `versionPolicy` rewrites the 3.10.0 records line into the 4.1.0 pair; `DataDirGitManager.versionPolicyOnce` applies it once at startup (marker `.git-module-policy-versioned`). |
 | `ConfigSync` | The config repo's Delivery (off, or Sync — replace; in Combined also Sync — pull and Runner — repo updates via `DataDirGitManager.pullFromBranch`, kept but inactive in Separate): settings in `.git/config` section `gitmodule.configsync` (not a resource, which would be versioned and overwritten by the branch), run from the `SyncScheduler` timer; calls `DataDirGitManager.replaceFromBranch`, which holds `ConfigAutoCommitter` and records the applied tip in `refs/git-module/config-synced`. `GET /remote` carries `delivery` and the last run. |
 | `BranchHygiene` | Branch classification and delete rules on a plain JGit `Git`, no gateway context (unit tested). Every `FetchCommand` except the single-branch init clone sets `setRemoveDeletedRefs(true)`, so a branch deleted on the remote loses its `refs/remotes/*` ref and its local twin reads **gone** (upstream configured, ref missing). Merged is measured against the current branch's upstream, else HEAD; ahead is against the branch's own upstream, else all remote refs. Protected: the current branch and the branch an enabled `GitSyncRecord` follows (`sync`) — the Projects drawer's delivery branch is stored on that record, so there is no other; in Combined, instead, the gateway delivery's `ConfigSync` branch (`delivery`). |
 | `SyncScheduler` | Per-project scheduled fetch, then fast-forward (Pull) or reset to the branch (Replace). |
 | `CredentialCheck` (3.7.0) | Per credential: GitHub token expiry (the `github-authentication-token-expiration` header on `GET /user`; 401 = rejected), and for each remote using it, read (fetch advertisement) and push (receive-pack advertisement — refused there without write, so nothing is sent). Scope: a classic token's `x-oauth-scopes` header (every repository its account can reach) or a fine-grained token's granted repositories. Every failure is kept and shown rather than logged at debug. In memory; startup + 30 s, daily, on add, on attach, on **Check**. |
 | `RunnerAuth` / `RunnerTrigger` / `ReleaseReceiver` | Runner token check; the opt-in guard (`RunnerTrigger.refuse`); the repo-update and release routes. |
 | `IgnitionReformat` | Counts local changes by parsed JSON content, ignoring Ignition's rewrite of imported files. |
+| `GitAudit` (4.4.0) | One audit row per essential action (push, delivery installed, branch/layout switch, restore, policy, credential and override add/remove), queued to one background thread; a failing profile is logged once. Call sites are the routes and RPCs that complete those actions, never pollers or the auto-committer. |
+| `WebFlowSignature` / `GitHubMerged` (4.4.0) | "Only deliver commits merged on GitHub". `WebFlowSignature` is pure (unit tested): the commit split into payload and `gpgsig` as git signs it, a v4 RSA OpenPGP signature checked with JDK crypto (type 0x00, SHA-256/384/512, issuer and creation time from hashed subpackets, key expiry and revocation from the bundled key block). `GitHubMerged` loads the bundled `github-web-flow.asc` (or `-Dgitmodule.trustedSigningKeys`, for the suite) and is asked by `SyncScheduler`, `replaceFromBranch` and `pullFromBranch` before a tip is installed; one Logs warning per refused tip. |
 | `GitEvents` | Synchronous, log-only ring buffer (50 entries) behind the Logs tab; never throws or blocks the operation that fired it. |
 
 ## Designer popups
@@ -105,7 +109,7 @@ Swing `JDialog`s parented to the Designer frame; callbacks live in `GitActionMan
 | `UserCredentialsPopup` | User-level SSH keys + per-host HTTPS credentials. |
 | `InitProgressDialog` | Modal progress for long operations, keeps the EDT responsive. |
 
-## Git Ignore tree rules
+## Git ignore tree rules
 
 Re-including under a glob appends a negation rather than editing the glob:
 deleting `**/logs` to recover one file would version a gigabyte. Nothing under an

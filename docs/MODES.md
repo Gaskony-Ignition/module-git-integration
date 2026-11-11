@@ -23,31 +23,34 @@ wrapper.java.additional.20=-Dignition.config.mode=Prod
 
 ## The Git policy
 
-**Versioning › Policy** lists what the module may do on this gateway, each
-setting's value and where it comes from (`from core` or `from Prod`).
+**Versioning › Policy** lists what the module may do on this gateway and, once at the top,
+where the settings come from ("Settings from Prod"). A value is red only when it is the less safe
+choice (Insecure remotes: On).
 
 | Setting | Off means |
 | --- | --- |
-| Push to remotes | The page's Remote Sync, the Designer's Push and a project's first push from Initialise are refused. |
+| Push to remotes | The page's Remote sync, the Designer's Push and a project's first push from Initialise are refused. |
 | Force push | The Designer no longer offers to force push after a rejected push. |
 | Commit from the Designer | Commit, amend, revert and completing a merge are refused in the Designer. The gateway's own config auto-commits carry on. |
 | Create, switch and delete branches | The Designer's branch actions and the page's Switch to this branch are refused. |
-| Switch the repository layout | The layout switch in Configure Versioning is refused. |
+| Switch the repository layout | The layout switch in Configure versioning is refused. |
 | Deliveries | Only the listed kinds (Sync — pull, Sync — replace, Runner) can be chosen, and the timer and the runner refuse the others. Off is always allowed. |
 | Allowed remote hosts | Blank allows any. Otherwise every remote URL is checked before the gateway contacts it, and when a remote is saved or tested. `*.example.com` matches any subdomain. |
 | Insecure remotes | Off by default (4.3.0). Off, a remote must be `https://` or `ssh://` (or `git@host:path`) on a host that is not this machine or its link-local network. On allows local folders, `file://`, `git://`, `http://`, `localhost` and `169.254.x.x` — for a lab, not production. |
+| Only deliver commits merged on GitHub | Off by default (4.4.0). On, a delivery installs a branch tip only when GitHub signed it — see below. |
 
 The default allows everything earlier versions allowed, any host, except
 insecure remotes. A URL with a password in it (`https://user:pass@host`) is
 refused whatever the policy; save the password as a credential.
 
-![The Policy tab in deployment mode Prod: each setting, its value and where it comes from](images/versioning-policy.png)
+![The Policy tab in deployment mode Prod: each setting and its value, and where the settings come from](images/versioning-policy.png)
 
 A refused action stays on screen, disabled, with the reason: on the page as
-text, in the Designer in the menu or button ("Checkout (off in deployment mode
-Prod)"). The gateway refuses it either way — a route answers 403 and the
-Designer shows the message, for example *Not allowed in deployment mode Prod:
-pushing is turned off by the gateway's Git policy.*
+text, in the Designer in the menu or button ("Checkout (off in Prod)"). The
+gateway refuses it either way — a route answers 403 and the Designer shows the
+message, for example *Branch changes are off in Prod (Git policy).* A host
+outside the list reads *gitlab.com is not an allowed remote host in Prod (Git
+policy).*
 
 ![The layout switch disabled, with the reason, in deployment mode Prod](images/versioning-policy-refused.png)
 
@@ -147,9 +150,42 @@ see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
   "Who can push is who can deploy"), the config branch above all: the policy travels in it, so
   whoever can push there can loosen Prod's policy. When a delivery, restore, override or mode
   switch makes the effective policy allow more, the gateway log and the Logs tab get a warning
-  naming each loosened setting.
+  naming each loosened setting: *Policy now allows more in Prod: push to remotes, branches.*
+- Optionally, **Only deliver commits merged on GitHub** in Prod (below).
+- An audit profile for the module's essential actions (below).
 - The Versioning page needs WRITE permission: give it to gateway administrators
   only.
+
+## Only deliver commits merged on GitHub
+
+For a security-conscious site, optional and off by default. On, every delivery — Sync — pull and
+Sync — replace for a project or the gateway repository, and Runner — repo updates — installs a
+branch tip only when its commit carries a valid signature by GitHub's web-flow key. GitHub signs
+the commits it makes itself: a pull request merged with its merge or squash button, and an
+edit made in its web editor. A commit pushed from someone's machine is not signed by that key, so
+the gateway stays on what it has and the Logs tab gets one warning per refused tip: *Not merged
+through GitHub: 1a2b3c4 — the commit is not signed.* Branch protection that requires a pull request
+(and blocks edits in the web editor where that matters) is what makes "signed by GitHub" mean
+"reviewed". Runner — release installs a zip, not a commit, so the option does not apply to it;
+manual actions on the page (Update from remote, restore, switch branch) are not deliveries either.
+
+The check is a v4 OpenPGP RSA signature over SHA-256/384/512, issuer and time from the signed part
+only, against the keys bundled in the module — nothing is fetched at run time. The bundle holds
+the keys published at `https://github.com/web-flow.gpg`: `968479A1AFF927E37D1A566BB5690EEEBB952194`
+(from 16/01/2024) and `5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23` (expired 16/01/2024, accepted only
+for signatures made before then). When GitHub publishes a new key, a module release carries it
+(`gateway/src/main/resources/com/operametrix/ignition/git/managers/github-web-flow.asc`).
+
+## Audit log
+
+The module writes one row to an audit profile for each essential action: a push (page or
+Designer), a delivery installed (sync or runner), a branch switch, a layout switch, a restore or
+update from the remote, a policy change, a credential added or removed, and a mode override created
+or removed. Each row carries the user, the project (or `gateway`), the branch and the commit.
+Nothing is written per file, per poll, per fetch or per auto-commit, and refusals are not audited;
+those stay on the Logs tab. **Policy › Audit log** picks the profile: by default the gateway's own
+audit profile (Gateway Audit Profile under Security › General Settings), so nothing is written when the gateway has none; or Off. An audit
+write never holds up the git action; a profile that cannot be written to is logged once.
 
 ## Commit trailer
 

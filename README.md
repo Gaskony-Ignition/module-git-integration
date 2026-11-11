@@ -30,13 +30,13 @@ under it was deleted, since a deleted resource has no tree node of its own.
 ![Change badges in the Designer's Project Browser](docs/images/project-browser-badges.png)
 
 The gateway's Versioning page decides what config-as-code covers. The **Git
-Ignore** tree shows the whole data directory: a ticked row is versioned, an
+ignore** tree shows the whole data directory: a ticked row is versioned, an
 unticked one is greyed and says why on the right (its own `.gitignore` line, an
 inherited rule, or its parent folder). By default only `config/` is versioned.
 The tree has a search, a jump to any top-level folder, a filter that hides
 everything excluded, and Expand/Collapse.
 
-![The Git Ignore tree on the gateway Versioning page](docs/images/excluded-files.png)
+![The Git ignore tree on the gateway Versioning page](docs/images/excluded-files.png)
 
 The **Projects** tab lists every project on the gateway, unversioned ones
 included, and how changes reach each one. **Edit** opens a drawer with the
@@ -71,12 +71,12 @@ push or pull.
 
 **On the gateway** — versions the data directory as code, commits automatically
 when a config resource changes, shows history and per-commit diffs, restores a
-previous commit, and pushes to a remote. **Git Ignore** edits `.gitignore`
+previous commit, and pushes to a remote. **Git ignore** edits `.gitignore`
 directly: unticking a tracked path also untracks it, and rules you wrote by hand
 are never rewritten.
 
 **Repository layout** — one repository per project (default), or the whole
-gateway as one repository. Switch under **Versioning → Configure Versioning →
+gateway as one repository. Switch under **Versioning → Configure versioning →
 Repository layout**. [docs/LAYOUT.md](docs/LAYOUT.md) has the differences,
 branch handling and what a switch does.
 
@@ -98,7 +98,11 @@ Repo updates and sync need a remote and a credential.
 **Policy** tab sets what the module may do there: push, Designer commits,
 branch and layout switches, which deliveries, which remote hosts. Remotes,
 credentials and deliveries can be saved for one mode only. Only the policy is
-versioned, so a Prod override written on Dev travels with the branch.
+versioned, so a Prod override written on Dev travels with the branch. For a
+stricter site, **Only deliver commits merged on GitHub** makes every delivery
+refuse a branch tip that GitHub did not sign (a pull request merged on GitHub).
+Pushes, deliveries, branch and layout switches, restores, policy, credential and
+override changes each write one row to the gateway's audit profile.
 [docs/MODES.md](docs/MODES.md) has the setup.
 
 ![The Policy tab in deployment mode Prod](docs/images/versioning-policy.png)
@@ -124,7 +128,7 @@ Install or Upgrade Module**, then restart the gateway.
   ![Branch list with gone and merged marks, and Clean up](docs/images/designer-branch-cleanup.png)
 
 - **Gateway config:** **Platform → System → Versioning → Initialize versioning**.
-  Adjust what is covered under **Git Ignore**.
+  Adjust what is covered under **Git ignore**.
 - **Delivery:** **Versioning → Projects → Edit**, choose the delivery, Save. The
   project must exist on the gateway first; for its first release, create it
   empty under **Platform → Projects**.

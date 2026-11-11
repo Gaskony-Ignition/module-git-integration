@@ -22,7 +22,7 @@ Clear `build/moduleContent` first: after a version bump it keeps the old
 jars and the `.modl` ships both. Prettier violations fail webpack — run
 `node_modules/.bin/prettier --write "src/**/*.{ts,tsx}"` in `web-ui/`.
 
-Tests: `./gradlew test` covers the pure branch, layout, Git Ignore, policy and
+Tests: `./gradlew test` covers the pure branch, layout, Git ignore, policy and
 origin logic (`gateway/src/test`); the gateway side is `test/regression/run.sh`
 (docs/TESTING.md); the Designer is checked by hand in both layouts.
 
@@ -65,7 +65,7 @@ No Vision client scope.
 - **`GITIGNORE_LINES` must ignore the SQLite sidecars `*-wal`/`*-shm`**, or
   `git add .` races the tag value store and dies with `FileNotFoundException`,
   so init never completes on a live gateway.
-- **Git Ignore tree**: excluding a tracked path also runs `git rm --cached`;
+- **Git ignore tree**: excluding a tracked path also runs `git rm --cached`;
   re-including under a glob appends a negation, never edits it. Rules in
   `docs/INTERNALS.md`.
 - **Change badges are a `DotBorder`, not `addBadge`** (the renderer stops painting

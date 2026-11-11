@@ -3,6 +3,34 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## 4.4.0 (unreleased)
+
+### Added
+- **Audit log.** One row in an audit profile per essential action: a push (page or Designer), a
+  delivery installed (sync or runner), a branch switch, a layout switch, a restore or update from
+  the remote, a policy change, a credential added or removed, a mode override created or removed.
+  Each carries the user, project, branch and commit. Polls, fetches, auto-commits, per-file detail
+  and refusals stay on the Logs tab only. **Policy › Audit log** picks the profile: by default the
+  gateway's own (Security › General Settings), else Off. Writes run in the background and never
+  hold up the git action; a failing profile is logged once.
+- **Only deliver commits merged on GitHub**, a policy option, off by default and overridable per
+  mode: deliveries (Sync — pull/replace for projects and the gateway repository, Runner — repo
+  updates) install a branch tip only when GitHub's web-flow key signed it. Others are refused,
+  with one warning per tip on the Logs tab; the runner route answers 409. GitHub's keys are bundled
+  in the module (docs/MODES.md); nothing is fetched at run time.
+- Regression suite: audit rows for each essential action and none for a busy sync loop, and
+  GitHub-merged-only refusing an unsigned tip and installing a signed one (a throwaway key stands
+  in for GitHub's).
+
+### Changed
+- Shorter policy refusals ("Branch changes are off in Prod (Git policy).") on the page and in the
+  Designer, and the loosened-policy warning ("Policy now allows more in Prod: push to remotes.").
+- Versioning page: sentence case throughout (Configure versioning, Remote sync, Git ignore) apart
+  from the platform's own labels; a row count beside each tab's title and a fade at the bottom of a
+  table while more rows sit below; the Policy tab names where its settings come from once and
+  colours a value red only when it is the less safe choice; Remove buttons in the platform's
+  destructive style.
+
 ## [4.3.1] - 2026-11-11
 
 ### Security

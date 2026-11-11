@@ -1,7 +1,7 @@
 # Delivery — design note
 
 Delivery only brings changes into this gateway; it never pushes. The
-gateway-config repository pushes separately, by hand, from the Remote Sync
+gateway-config repository pushes separately, by hand, from the Remote sync
 button on the Versioning page.
 
 ## One delivery per project, opt-in
@@ -70,7 +70,7 @@ delivery on a gateway GitHub cannot reach — which is most of them.
 
 ## The config repository follows a branch too
 
-Configure Versioning has the same choice for the gateway config repo: Off, or **Sync — replace**
+Configure versioning has the same choice for the gateway config repo: Off, or **Sync — replace**
 with a branch and an interval. It fetches on the same timer, and when the branch tip is not the
 one last applied (or HEAD's tree no longer matches it) it points the local branch and HEAD at the
 tip, hard-resets, removes untracked files the repository does not ignore, and applies with a
@@ -84,7 +84,7 @@ be versioned, and the branch's copy would overwrite it.
 ## Combined layout: one delivery for the gateway
 
 In the Combined repository layout (see README) config and every project are one repository, so a
-pull cannot be per project. The gateway delivery in Configure Versioning then offers **Sync — pull**
+pull cannot be per project. The gateway delivery in Configure versioning then offers **Sync — pull**
 (merge the branch in on a timer, refused while anything on the gateway is uncommitted, a branch
 moved backwards not followed), **Sync — replace** as before but for the whole gateway, and **Runner —
 repo updates** (`POST /runner-sync` pulls the gateway branch whatever project the body names; 409
