@@ -1,5 +1,5 @@
 // Git Integration regression checks, run by run.sh against one rig gateway. Phases run in order
-// (sep1 → comb → sep2 → audit → merged → modes; ONLY=comma list picks some) and each check is one PASS/FAIL row.
+// (sep1 → comb → sep2 → sep3 → audit → merged → modes; ONLY=comma list picks some) and each check is one PASS/FAIL row.
 // Env from run.sh: GW_URL GW_PASS CONTAINER LOCAL RIG_TOOL RIG_NAME RIG_RIG GIT_PORT LANIP W_PW R_PW STATE_DIR.
 const path = require('path');
 const fs = require('fs');
@@ -173,10 +173,10 @@ async function sep1() {
     const before = (await api('GET', '/ignore')).json.text;
     const r = await api('POST', '/ignore', { text: before + '\n!**/config/local/\n!/ignition.conf\n' });
     const after = (await api('GET', '/ignore')).json.text;
-    const tail = after.trim().split('\n').slice(-11).map((l) => l.trim());
+    const tail = after.trim().split('\n').slice(-12).map((l) => l.trim());
     const loc = ((await api('GET', '/tree?path=config')).json.entries || []).find((e) => e.name === 'local');
     await api('POST', '/ignore', { text: before });
-    return pass(ok(r) && tail[0] === '**/config/local/' && tail[10] === '*.keystore' && (!loc || loc.excluded),
+    return pass(ok(r) && tail[0] === '**/config/local/' && tail[11] === '*.keystore' && (!loc || loc.excluded),
       `save ${r.status}; tail=${tail.join(' ')}; config/local excluded=${loc && loc.excluded}`);
   });
   await check('HTTPS credentials saved (writer, reader)', async () => {
@@ -195,12 +195,35 @@ async function sep1() {
       && lines.some((l) => /-dev writer POST .*git-receive-pack 200/.test(l)),
     `save ${s.status} ${s.text.slice(0, 150)} push ${p.status} ${p.text.slice(0, 150)}`);
   });
+  await check("an internal user source never commits its users' password hashes", async () => {
+    const before = await topCommit();
+    const r = await plat('POST', '/resources/ignition/user-source', [{ name: 'RegtestUsers', enabled: true,
+      config: { profile: { type: 'INTERNAL' }, settings: {} } }]);
+    const base = `${DATA}/config/resources/core/ignition/user-source`;
+    dexec(`cp ${base}/default/users.json ${base}/RegtestUsers/users.json && sed -i 's/"admin"/"regtest"/' ${base}/RegtestUsers/users.json`);
+    await plat('POST', '/scan/config');
+    const c = await until(async () => { const t = await topCommit(); return t && (!before || t.hash !== before.hash) ? t : null; }, 40000);
+    await sleep(5000);
+    const tracked = cgit('.', 'ls-files').split('\n').filter((f) => /user-source\/[^/]+\/users\.json$/.test(f));
+    const files = c ? ((await api('GET', '/commit-files?hash=' + c.hash)).json.files || []).map((f) => f.path) : [];
+    const users = dexec(`test -f ${base}/RegtestUsers/users.json && echo yes || echo no`);
+    return pass(ok(r) && c && files.some((f) => f.includes('RegtestUsers')) && !files.some((f) => f.endsWith('users.json'))
+      && !tracked.length && users === 'yes', `create ${r.status}; commit files=${files.join(',')}; tracked=${tracked.join(',')}`);
+  });
   await check('config remote: branch cfg-main pushes main → cfg-main', async () => {
     const s = await api('POST', '/remote', { uri: `${SRV.dev}/gateway.git`, branch: 'cfg-main', mode: 'inline', username: 'writer' });
     const p = await api('POST', '/push', {});
     const ok2 = ok(p) && p.json.to === 'cfg-main' && bareRev('dev', 'gateway', 'cfg-main') === cgit('.', 'rev-parse HEAD');
     await api('POST', '/remote', { uri: `${SRV.dev}/gateway.git`, branch: 'main', mode: 'inline', username: 'writer' });
     return pass(ok(s) && ok2, `save ${s.status} ${s.text.slice(0, 120)}; push ${p.status} ${JSON.stringify(p.json).slice(0, 150)}`);
+  });
+
+  await check('gateway repository: a lone master behind a remote main is renamed', async () => {
+    cgit('.', 'branch -m main master');
+    const offer = (await api('GET', '/remote')).json.renameMaster;
+    const r = await api('POST', '/branch-rename-master', { repo: 'config' });
+    const b = cgit('.', 'rev-parse --abbrev-ref HEAD');
+    return pass(offer === 'main' && ok(r) && b === 'main', `offer=${offer} rename ${r.status} ${r.text.slice(0, 120)} now=${b}`);
   });
 
   await check('link Example_A to its remote (Separate)', async () => {
@@ -488,17 +511,46 @@ async function comb() {
     const r = await api('POST', '/delivery', { project: 'Example_A', delivery: 'sync-pull', branch: 'main' });
     return pass(refused(r), `${r.status} ${r.text.slice(0, 160)}`);
   });
+  await check('Combined ignore rules: config globs scoped, projects/ rules apply, data.bin an ordinary tick', async () => {
+    const text = (await api('GET', '/ignore')).json.text || '';
+    dexec(`mkdir -p ${DATA}/projects/Example_A/ignition/script-python/db && printf 'x = 1\\n' > ${DATA}/projects/Example_A/ignition/script-python/db/code.py`);
+    const db = ((await api('GET', '/tree?path=' + q('projects/Example_A/ignition/script-python/db'))).json.entries || []).find((e) => e.name === 'code.py');
+    const gp = ((await api('GET', '/tree?path=' + q('projects/Example_A/ignition/global-props'))).json.entries || []).find((e) => e.name === 'data.bin');
+    const lines = text.split('\n').map((l) => l.trim());
+    const ok2 = lines.includes('!/projects/') && !lines.includes('!/projects/**') && lines.includes('/config/**/db/*')
+      && lines.indexOf('/projects/*/ignition/global-props/data.bin') > lines.indexOf('# --- end of Combined layout ---');
+    cgit('.', 'add projects/Example_A/ignition/script-python/db/code.py');
+    cgit('.', 'commit -q -m "db package" --only projects/Example_A/ignition/script-python/db/code.py');
+    return pass(ok2 && db && !db.excluded && (!gp || gp.excluded), `rules ok=${ok2} db/code.py excluded=${db && db.excluded} data.bin excluded=${gp && gp.excluded}`);
+  });
+  await check('switch to Separate refused for a project folder linked outside the data directory', async () => {
+    dexec(`rm -rf /tmp/outside-project && mkdir -p /tmp/outside-project && cp ${DATA}/projects/Example_B/project.json /tmp/outside-project/ && ln -s /tmp/outside-project ${DATA}/projects/Linked`);
+    const r = await api('POST', '/layout', { layout: 'separate', restoreHistory: true });
+    dexec(`rm -f ${DATA}/projects/Linked; rm -rf /tmp/outside-project`);
+    const s2 = (await api('GET', '/status')).json;
+    const left = dexec(`test -d /tmp/outside-project/.git && echo yes || echo no`);
+    return pass(refused(r) && /projects\/Linked/.test(r.text) && s2.layout === 'combined' && left === 'no', `${r.status} ${r.text.slice(0, 200)}`);
+  });
+  await check('switch to Separate refused for a leftover .git, naming the archive option', async () => {
+    cgit('projects/Example_B', 'init -q');
+    const r = await api('POST', '/layout', { layout: 'separate', restoreHistory: true });
+    return pass(refused(r) && /Example_B already has its own .git/.test(r.text) && /Archive leftover/.test(r.text), `${r.status} ${r.text.slice(0, 220)}`);
+  });
   await security('comb');
 }
 
 async function sep2() {
   phase = 'sep2';
   await check('switch back to Separate, restoring history', async () => {
-    const r = await api('POST', '/layout', { layout: 'separate', restoreHistory: true });
+    const r = await api('POST', '/layout', { layout: 'separate', restoreHistory: true, archiveLeftovers: true });
     const s = (await api('GET', '/status')).json;
     const g = (await api('GET', '/branch-graph?project=Example_A')).json;
     return pass(ok(r) && s.layout === 'separate' && r.json.restored >= 1 && (g.commits || []).some((c) => /Fixture example-a/.test(c.subject)),
       `${r.status} ${r.text.slice(0, 150)} scope=${g.scope}`);
+  });
+  await check('the leftover .git was archived, not lost', async () => {
+    const a = dexec(`ls ${DATA}/var/git-archive | grep -c '^Example_B-leftover-' || true`);
+    return pass(+a >= 1, `archived leftovers=${a}`);
   });
   await check('config change auto-commits only config/ (Separate again)', async () => {
     const { files } = await configChange();
@@ -514,6 +566,64 @@ async function sep2() {
   await check('push again after the switch back', async () => {
     const p = await api('POST', '/push', {});
     return pass(ok(p) && p.json.to === 'main', `${p.status} ${p.text.slice(0, 200)}`);
+  });
+}
+
+// Separate, 4.4.0: add a project from its repository; Fetch, Pull and Join for the gateway repository.
+async function sep3() {
+  phase = 'sep3';
+  await check('read a repository: branches and a project name from its title', async () => {
+    const r = await api('POST', '/project-add-peek', { url: `${SRV.dev}/example-b.git`, httpsCredentialId: credId.writer });
+    return pass(ok(r) && (r.json.branches || []).includes('main') && r.json.defaultBranch === 'main' && r.json.suggestedName === 'Example_B',
+      `${r.status} ${r.text.slice(0, 200)}`);
+  });
+  await check('add a project from its repository: it appears, loads and shows its branch', async () => {
+    const r = await api('POST', '/project-add', { name: 'Example_D', url: `${SRV.dev}/example-b.git`, httpsCredentialId: credId.writer });
+    const p = await until(async () => { const x = await project('Example_D'); return x && x.versioned ? x : null; }, 30000);
+    const loaded = await until(async () => {
+      const l = await plat('GET', '/projects/list');
+      return /Example_D/.test(l.text) ? l : null;
+    }, 60000, 3000);
+    return pass(ok(r) && p && p.branch === 'main' && p.remoteUrl && loaded, `${r.status} ${r.text.slice(0, 160)} branch=${p && p.branch} loaded=${!!loaded}`);
+  });
+  await check('adding the same name again is refused', async () => {
+    const r = await api('POST', '/project-add', { name: 'Example_D', url: `${SRV.dev}/example-b.git`, httpsCredentialId: credId.writer });
+    return pass(refused(r) && /already a project/.test(r.text), `${r.status} ${r.text.slice(0, 160)}`);
+  });
+  await check('a branch with no project.json at its root is refused and leaves nothing behind', async () => {
+    const r = await api('POST', '/project-add', { name: 'Example_E', url: `${SRV.dev}/gateway.git`, httpsCredentialId: credId.writer });
+    const left = dexec(`test -e ${DATA}/projects/Example_E && echo yes || echo no; ls ${DATA}/var/git-module-add 2>/dev/null | wc -l`);
+    return pass(refused(r) && /project.json/.test(r.text) && left.startsWith('no') && left.endsWith('0'), `${r.status} ${r.text.slice(0, 160)} left=${left.replace('\n', ' ')}`);
+  });
+  await check('a file: URL is refused', async () => {
+    const r = await api('POST', '/project-add', { name: 'Example_F', url: 'file:///tmp/x.git', httpsCredentialId: credId.writer });
+    return pass(r.status === 403, `${r.status} ${r.text.slice(0, 160)}`);
+  });
+  await plat('DELETE', '/projects/Example_D');
+  await sleep(3000);
+
+  await check('Fetch shows the remote ahead; Pull brings it in', async () => {
+    await api('POST', '/push', {});
+    remoteCommit('dev', 'gateway', 'echo pulled > config/regtest-pulled.md && git add -A && git commit -qm "pull me"');
+    const f = await api('POST', '/config-fetch', {});
+    const pl = await api('POST', '/config-pull', {});
+    return pass(ok(f) && f.json.behind === 1 && !f.json.unrelated && ok(pl) && pl.json.changed && fileIn('config/regtest-pulled.md').includes('pulled'),
+      `fetch ${f.text.slice(0, 120)}; pull ${pl.text.slice(0, 160)}`);
+  });
+  await check('Delete versioning keeps the remote; a new repository joins the remote history', async () => {
+    const d = await api('POST', '/deinit', {});
+    const kept = (await api('GET', '/remote')).json.configured;
+    const i = await api('POST', '/init', {});
+    const f = await api('POST', '/config-fetch', {});
+    const refusedPush = await api('POST', '/push', {});
+    const remoteTip = bareRev('dev', 'gateway', 'main');
+    const j = await api('POST', '/config-join', {});
+    const parent = cgit('.', 'rev-parse HEAD~1');
+    const p = await api('POST', '/push', {});
+    const again = await api('POST', '/config-join', {});
+    return pass(ok(d) && kept && ok(i) && f.json.unrelated === true && refused(refusedPush) && ok(j) && parent === remoteTip
+      && ok(p) && refused(again),
+    `deinit ${d.status} kept=${kept} unrelated=${f.json.unrelated} push-before ${refusedPush.status} join ${j.status} ${j.text.slice(0, 120)} parent ok=${parent === remoteTip} push ${p.status} ${p.text.slice(0, 100)} again ${again.status}`);
   });
 }
 
@@ -588,6 +698,25 @@ async function audit() {
     remoteCommit('dev', 'example-a', `printf "def hello():\\n\\treturn 'audit'\\n" > ${CODE} && git commit -qam audit`);
     return oneRow(Date.now(), 'git delivery installed', async () => /pulled/.test((await api('POST', '/sync-now', { project: 'Example_A' })).json.result || ''),
       /^Example_A branch=main; commit=[0-9a-f]{40}; Sync — pull/);
+  });
+  await check('Pull writes one row when commits come in, none when up to date', async () => {
+    await api('POST', '/push', {});
+    remoteCommit('dev', 'gateway', 'echo audit > config/regtest-audit-pull.md && git add -A && git commit -qm "audit pull"');
+    const t0 = Date.now();
+    await api('POST', '/config-fetch', {});
+    const a = await api('POST', '/config-pull', {});
+    const b = await api('POST', '/config-pull', {});
+    const rows = (await auditRows(t0)).filter((i) => i.action === 'git pull');
+    return pass(a.json.changed && !b.json.changed && rows.length === 1 && /commit=[0-9a-f]{40}/.test(rows[0].actionValue),
+      `pull1 ${a.text.slice(0, 80)} pull2 ${b.text.slice(0, 60)} rows=${rows.length}`);
+  });
+  await check('project added from repository writes one row', async () => {
+    const r = await oneRow(Date.now(), 'git project added from repository', async () =>
+      ok(await api('POST', '/project-add', { name: 'Example_D', url: `${SRV.dev}/example-b.git`, httpsCredentialId: credId.writer })),
+    /^Example_D branch=main; commit=[0-9a-f]{40}/);
+    await plat('DELETE', '/projects/Example_D');
+    await sleep(3000);
+    return r;
   });
   await check('a busy sync loop with nothing to install writes no rows', async () => {
     const t0 = Date.now();
@@ -788,12 +917,12 @@ async function modes() {
 
 (async () => {
   await login();
-  const want = (E.ONLY || 'sep1,comb,sep2,audit,merged,modes').split(',');
+  const want = (E.ONLY || 'sep1,comb,sep2,sep3,audit,merged,modes').split(',');
   if (!E.RUNNER_TOKEN && !want.includes('sep1')) {
     const t = await api('POST', '/runner', { enabled: true, generateToken: true });
     E.RUNNER_TOKEN = t.json.token;
   }
-  for (const [n, f] of [['sep1', sep1], ['comb', comb], ['sep2', sep2], ['audit', audit], ['merged', merged], ['modes', modes]]) {
+  for (const [n, f] of [['sep1', sep1], ['comb', comb], ['sep2', sep2], ['sep3', sep3], ['audit', audit], ['merged', merged], ['modes', modes]]) {
     if (want.includes(n)) {
       try { await f(); } catch (e) { rows.push({ phase: n, name: 'phase aborted', res: 'FAIL', detail: e.message.slice(0, 300) }); console.log('FAIL phase ' + n + ': ' + e.message); }
     }
