@@ -43,7 +43,7 @@ fi
 cleanup() {
   local rc=$?
   if [ -z "$KEEP" ]; then
-    echo "pkill -f 'gitserver[.]py $NAME-'; rm -rf /tmp/gitreg-$NAME; true" | hsh >/dev/null 2>&1 || true
+    echo "pkill -f 'gitserver[.]py $NAME-'; GNUPGHOME=/tmp/gitreg-$NAME/gnupg gpgconf --kill gpg-agent 2>/dev/null; rm -rf /tmp/gitreg-$NAME; true" | hsh >/dev/null 2>&1 || true
     if [ -n "$LOCAL" ]; then docker rm -f -v "$CONTAINER" >/dev/null 2>&1 || true; else "$RIG" down "$NAME" || true; fi
     rm -rf "$ST"
   else
@@ -135,6 +135,14 @@ if [ -n "$fresh" ] || [ ! -f "$ST/env" ]; then
   K=/usr/local/bin/ignition/lib/runtime/jre-nix
   { echo "cat > /tmp/gitreg-$NAME/ca.pem <<'PEM'"; cat "$ST/ca.crt"; echo PEM
     echo "docker cp /tmp/gitreg-$NAME/ca.pem $CONTAINER:/tmp/gitreg-ca.pem && docker exec -u 0 $CONTAINER $K/bin/keytool -importcert -noprompt -alias gitreg-ca -file /tmp/gitreg-ca.pem -cacerts -storepass changeit"; } | hsh >/dev/null
+  # A throwaway signing key stands in for GitHub's web-flow key: the gateway trusts it instead
+  # (-Dgitmodule.trustedSigningKeys, read at start-up), and the suite signs commits with it.
+  { echo "set -e; G=/tmp/gitreg-$NAME/gnupg; rm -rf \$G; mkdir -m 700 -p \$G"
+    echo "GNUPGHOME=\$G gpg -q --batch --pinentry-mode loopback --passphrase '' --quick-gen-key 'gitreg signer <gitreg@example.com>' rsa3072 sign 1d"
+    echo "GNUPGHOME=\$G gpg -q --armor --export > /tmp/gitreg-$NAME/signing.asc"
+    echo "docker cp /tmp/gitreg-$NAME/signing.asc $CONTAINER:/usr/local/bin/ignition/gitreg-signing.asc"
+    echo "docker exec -u 0 $CONTAINER sh -c \"sed -i '/gitmodule.trustedSigningKeys/d' /usr/local/bin/ignition/data/ignition.conf; echo 'wrapper.java.additional.91=-Dgitmodule.trustedSigningKeys=/usr/local/bin/ignition/gitreg-signing.asc' >> /usr/local/bin/ignition/data/ignition.conf\""
+  } | hsh >/dev/null
   if [ -n "$LOCAL" ]; then install_local
   else "$RIG" modl "$NAME" "$MODL" --project "$HERE/fixtures/Example_A" --project "$HERE/fixtures/Example_B"; fi
   # git inside the throwaway container, so the suite can stage states (dirty files, a lone master,

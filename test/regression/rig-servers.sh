@@ -50,8 +50,9 @@ start prod "$BR" "$((PORT + 1))" prod srv
 start untrusted "$BR" "$((PORT + 2))" dev self
 start redirect "$BR" "$((PORT + 3))" dev srv "https://$LANIP:$((PORT + 4))"
 start sink 0.0.0.0 "$((PORT + 4))" dev srv
-sleep 1.5
+# A loaded host takes a few seconds to start five Pythons; wait up to 30 s for each.
 for p in 0 1 2 3 4; do
+  for _ in $(seq 60); do ss -ltn | grep -q ":$((PORT + p)) " && break; sleep 0.5; done
   ss -ltn | grep -q ":$((PORT + p)) " || { echo "server on $((PORT + p)) did not start"; cat "$D"/*.out; exit 1; }
 done
 echo CA-BEGIN; cat ca.crt; echo CA-END
