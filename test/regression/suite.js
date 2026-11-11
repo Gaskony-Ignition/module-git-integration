@@ -230,18 +230,18 @@ async function sep1() {
   await check('switch branch refused against the followed branch', async () => {
     remoteCommit('dev', 'example-a', `git checkout -qb feature-1 && printf "def hello():\\n\\treturn 'feature'\\n" > ${CODE} && git commit -qam feature`, 'git push -q origin feature-1');
     const s = await api('POST', '/sync-now', { project: 'Example_A' });
-    const r = await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'feature-1' });
+    const r = await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'origin/feature-1' });
     return pass(r.json.ok === false && r.json.refused === 'followed', `sync: ${s.json.result}; switch: ${r.text.slice(0, 200)}`);
   });
   await check('switch branch refused while dirty', async () => {
     await api('POST', '/delivery', { project: 'Example_A', delivery: 'off' });
     dexec(`echo '# local edit' >> ${DATA}/projects/Example_A/${CODE}`);
-    const r = await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'feature-1' });
+    const r = await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'origin/feature-1' });
     cgit('projects/Example_A', `checkout -q -- ${CODE}`);
     return pass(r.json.ok === false && r.json.refused === 'dirty' && (r.json.files || []).some((f) => f.includes('code.py')), r.text.slice(0, 250));
   });
   await check('switch branch succeeds and the content changes', async () => {
-    const r = await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'feature-1' });
+    const r = await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'origin/feature-1' });
     const p = await project('Example_A');
     return pass(r.json.ok && p.branch === 'feature-1' && fileIn(`projects/Example_A/${CODE}`).includes("'feature'"), r.text.slice(0, 200));
   });
@@ -440,9 +440,9 @@ async function comb() {
     remoteCommit('dev', 'gateway', `git checkout -qb gw-feature && printf "def hello():\\n\\treturn 'gw'\\n" > projects/Example_A/${CODE} && git commit -qam gw`, 'git push -q origin gw-feature');
     cgit('.', `fetch -q ${bare('dev', 'gateway')} +refs/heads/*:refs/remotes/origin/*`);
     dexec(`echo '# dirty' >> ${DATA}/projects/Example_A/${CODE}`);
-    const d = await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'gw-feature' });
+    const d = await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'origin/gw-feature' });
     cgit('.', `checkout -q -- projects/Example_A/${CODE}`);
-    const r = await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'gw-feature' });
+    const r = await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'origin/gw-feature' });
     const c = fileIn(`projects/Example_A/${CODE}`);
     const back = await api('POST', '/branch-checkout', { repo: 'config', branch: 'main' });
     return pass(d.json.refused === 'dirty' && r.json.ok && c.includes("'gw'") && back.json.ok, `dirty: ${d.text.slice(0, 120)}; switch: ${r.text.slice(0, 120)}; back: ${back.text.slice(0, 80)}`);
@@ -458,7 +458,10 @@ async function comb() {
     const got = fileIn('projects/Example_A/NOTES-replace.md');
     const w = (await events()).find((e) => e.outcome === 'warning' && /Example_C/.test(e.message) && Date.parse(e.timestamp) >= t0 - 5000);
     await api('POST', '/config-delivery', { mode: 'off', branch: 'main', intervalSeconds: 3600 });
-    return pass(ok(d) && ok(s) && kept === 'yes' && got.includes('replaced') && w, `delivery ${d.status} sync ${s.text.slice(0, 150)} kept=${kept} warn=${!!w}`);
+    // Untracked, Example_C is uncommitted work: a later Sync — pull or layout switch refuses it.
+    const del = await plat('DELETE', '/projects/Example_C');
+    await sleep(4000);
+    return pass(ok(d) && ok(s) && kept === 'yes' && got.includes('replaced') && w && del.status < 300, `delivery ${d.status} sync ${s.text.slice(0, 150)} kept=${kept} warn=${!!w}`);
   });
   await check('Sync — pull merges the branch in (Combined)', async () => {
     remoteCommit('dev', 'gateway', 'echo pulled > projects/Example_A/NOTES-pull.md && git add -A && git commit -qm "pull me"');
@@ -480,12 +483,6 @@ async function comb() {
     return pass(refused(r), `${r.status} ${r.text.slice(0, 160)}`);
   });
   await security('comb');
-  phase = 'comb';
-  await check('remove gateway-only project before switching back', async () => {
-    const r = await plat('DELETE', '/projects/Example_C');
-    await sleep(4000);
-    return pass(ok(r) || r.status === 204, `${r.status} ${r.text.slice(0, 100)}`);
-  });
 }
 
 async function sep2() {
@@ -580,7 +577,9 @@ async function modes() {
     const n = logLines().length;
     const u = await api('POST', '/update-from-remote', {});
     const lines = logLines().slice(n);
-    return pass(ok(u) && lines.some((l) => /-prod reader /.test(l)) && !lines.some((l) => /-dev /.test(l)), `${u.status} ${u.text.slice(0, 150)} ${lines.map((l) => l.split(' ').slice(0, 2).join(' ')).join('|')}`);
+    // Local config commits made since the seed are not on prod, so the update itself may refuse;
+    // what matters here is which credential reached which server.
+    return pass((ok(u) || /not on the remote/.test(u.text)) && lines.some((l) => /-prod reader .* 200$/.test(l)) && !lines.some((l) => /-dev /.test(l)), `${u.status} ${u.text.slice(0, 150)} ${lines.map((l) => l.split(' ').slice(0, 2).join(' ')).join('|')}`);
   });
   await check('Prod: commits carry the Gateway-Mode: Prod trailer', async () => {
     await configChange();
