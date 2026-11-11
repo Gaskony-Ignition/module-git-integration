@@ -41,7 +41,7 @@ upstream's; everything below is this fork.
   (earlier commits still hold them).
 - Runner release: unpacks to at most 1 GB and 50,000 entries, and the `version` label is limited
   to 64 letters, digits and `. _ + -`. A bad runner token is logged once a minute per address.
-- `GET /secret-providers` needs WRITE permission. Errors shown on the page and in the Designer no
+- Listing Secret Provider secrets needs WRITE permission (`POST /secret-providers`, was `GET`). Errors shown on the page and in the Designer no
   longer name the gateway's install folders; the gateway log keeps the detail.
 - History pages return at most 500 commits; fetch, push, pull and ls-remote time out after 60 s.
   In the Combined layout the Designer's pull fetches before taking the gateway repository's lock;

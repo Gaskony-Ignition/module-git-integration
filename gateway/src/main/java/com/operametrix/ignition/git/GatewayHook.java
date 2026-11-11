@@ -333,8 +333,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 .requirePermission(PermissionType.READ).nocache()
                 .handler(this::handleGetCredentials).mount();
 
-        // WRITE, unlike the other reads: it names every secret in every provider.
-        routes.newRoute("/secret-providers").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
+        // WRITE, unlike the other reads: it names every secret in every provider. POST, because
+        // the gateway only mounts a WRITE route on an unsafe method (and wants its CSRF token).
+        routes.newRoute("/secret-providers").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE).nocache()
                 .handler(this::handleGetSecretProviders).mount();
 

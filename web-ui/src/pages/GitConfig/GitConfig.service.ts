@@ -424,7 +424,12 @@ export const gitConfigApi = baseApi.injectEndpoints({
       invalidatesTags: ["remote", "history"],
     }),
     getSecretProviders: builder.query<SecretProvidersResp, void>({
-      query: () => `${BASE}/secret-providers`,
+      // POST: the route needs WRITE, and the gateway only grants WRITE to unsafe methods.
+      query: () => ({
+        url: `${BASE}/secret-providers`,
+        method: "POST",
+        body: {},
+      }),
       providesTags: ["secretProviders"],
     }),
     // With an id, edits that credential in place.

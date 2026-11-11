@@ -7,15 +7,14 @@ instructions and gotchas; this file is the lookup material it links to.
 ## REST routes
 
 Mounted in `GatewayHook.mountRouteHandlers`, under `/data/git-config/…`, not
-the RPC interface. Reads require `PermissionType.READ` (`/secret-providers`, which names every
-provider secret, `WRITE`), mutations `WRITE`,
+the RPC interface. Reads require `PermissionType.READ`, mutations `WRITE`,
 and mutations need an `X-CSRF-Token` fetched from `/csrf`. The one exception
 are the two runner routes — see Delivery below.
 
 | Area | Method + path |
 | --- | --- |
-| Config-as-code | `GET /status` (also carries the module version, shown under the page title), `/history`, `/commit-files`, `/file-diff`, `/remote`, `/secret-providers`, `/tree`, `/tree-search`, `/ignore`, `/branch-graph` (`?project=` or `?repo=config`, `&limit=`) |
-| Config-as-code | `POST /restore`, `/init`, `/deinit`, `/remote`, `/remote-remove`, `/remote-test`, `/push`, `/ignore`, `/update-from-remote`, `/config-delivery` (follow a branch: off, replace, or in Combined pull/runner; branch, interval), `/config-sync-now`, `/layout` (`separate`/`combined`, `restoreHistory`), `/branch-checkout` (`project` or `repo:"config"`, `branch`) |
+| Config-as-code | `GET /status` (also carries the module version, shown under the page title), `/history`, `/commit-files`, `/file-diff`, `/remote`, `/tree`, `/tree-search`, `/ignore`, `/branch-graph` (`?project=` or `?repo=config`, `&limit=`) |
+| Config-as-code | `POST /restore`, `/init`, `/deinit`, `/secret-providers` (lists them; WRITE), `/remote`, `/remote-remove`, `/remote-test`, `/push`, `/ignore`, `/update-from-remote`, `/config-delivery` (follow a branch: off, replace, or in Combined pull/runner; branch, interval), `/config-sync-now`, `/layout` (`separate`/`combined`, `restoreHistory`), `/branch-checkout` (`project` or `repo:"config"`, `branch`) |
 | Projects & credentials | `GET /projects`, `/credentials` |
 | Projects & credentials | `POST /project-init`, `/project-remote`, `/project-credential`, `/project-images`, `/project-snapshot-images`, `/credentials`, `/credential-remove`, `/credential-check` |
 | Delivery & logs | `GET /events`, `/runner` |

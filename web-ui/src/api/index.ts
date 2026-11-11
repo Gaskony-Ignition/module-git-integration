@@ -27,9 +27,10 @@ async function getCsrfToken(): Promise<string | null> {
 
 const baseQuery = fetchBaseQuery({
   baseUrl: "",
-  prepareHeaders: async (headers, { type }) => {
+  prepareHeaders: async (headers, { type, endpoint }) => {
     headers.set("Accept", "application/json");
-    if (type === "mutation") {
+    // getSecretProviders is a query sent as POST (its route needs WRITE).
+    if (type === "mutation" || endpoint === "getSecretProviders") {
       const token = await getCsrfToken();
       if (token) {
         headers.set("X-CSRF-Token", token);
