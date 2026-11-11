@@ -5,9 +5,30 @@ upstream's; everything below is this fork.
 
 ## 4.4.0 (unreleased)
 
+### Security
+- Internal user sources' `users.json` (password hashes and their history) is never versioned, in
+  every collection. Start-up untracks it in an existing repository in one commit and warns on the
+  Logs tab: older commits still hold the hashes, so rotate those passwords if the repository was
+  shared.
+- Switching Combined → Separate is refused, naming the folder, when a project folder is a link or
+  mount leading outside the data directory or sits inside another git work tree, so no `.git` is
+  planted in someone else's checkout.
+
 ### Added
+- **Add from repository** on the Projects tab: brings in a project the gateway does not have —
+  repository URL, your credential, branch (the remote's default), project name (from the
+  project's title) and an optional delivery. Cloned under `var/` first; refused without a root
+  `project.json`, for a name already in use or a URL the policy refuses, and nothing is left
+  behind on failure. Separate layout only.
+- **Fetch** and **Pull** for the gateway repository beside Remote sync, and **Join remote
+  history** for a remote branch another gateway started (no common history): this gateway's
+  config is committed on top of the remote tip, and nothing on the gateway changes.
+- Delete versioning keeps the saved remote unless *Also remove the saved remote* is ticked.
+- A leftover `projects/<name>/.git` no longer blocks switching back to Separate for good: tick
+  *Archive leftover .git folders*.
 - **Audit log.** One row in an audit profile per essential action: a push (page or Designer), a
-  delivery installed (sync or runner), a branch switch, a layout switch, a restore or update from
+  delivery installed (sync or runner), a Pull that brought commits in, Join remote history, a
+  project added from its repository, a branch switch, a layout switch, a restore or update from
   the remote, a policy change, a credential added or removed, a mode override created or removed.
   Each carries the user, project, branch and commit. Polls, fetches, auto-commits, per-file detail
   and refusals stay on the Logs tab only. **Policy › Audit log** picks the profile: by default the
@@ -18,6 +39,10 @@ upstream's; everything below is this fork.
   updates) install a branch tip only when GitHub's web-flow key signed it. Others are refused,
   with one warning per tip on the Logs tab; the runner route answers 409. GitHub's keys are bundled
   in the module (docs/MODES.md); nothing is fetched at run time.
+- Combined layout: the config ignore rules apply under `config/` only, so `!/projects/` alone
+  re-includes projects and rules written under `projects/` work; `global-props/data.bin` is an
+  ordinary Git ignore tick (excluded by default). Existing Combined repositories are updated once
+  at start-up.
 - Regression suite: audit rows for each essential action and none for a busy sync loop, and
   GitHub-merged-only refusing an unsigned tip and installing a signed one (a throwaway key stands
   in for GitHub's).

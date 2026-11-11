@@ -40,14 +40,23 @@ refused, with nothing changed, while any project has uncommitted work.
 
 - **Separate → Combined** moves each project's `.git` to
   `var/git-archive/<name>-<time>.git` (kept, so its history and remotes can come
-  back), adds `projects/` to the gateway repository's `.gitignore` rules with
-  each project's `global-props/data.bin` left out, and commits every project in
-  one commit. History is not merged in.
+  back), adds `projects/` to the gateway repository's `.gitignore` rules, and
+  commits every project in one commit. History is not merged in. The config
+  rules (`db/`, `logs`, `*.log`…) are scoped to `config/` so they never drop a
+  project's files, and rules you add under `projects/` on the Git ignore tab
+  apply. Each project's `global-props/data.bin` (per-gateway project properties)
+  is left out by an ordinary line: tick it on the Git ignore tab to share it.
+  A Combined repository from before 4.4.0 has its rules updated this way once
+  at start-up, in one commit.
 - **Combined → Separate** gives each project its own repository again — its
   archived one if you tick *Restore each project's earlier history* and one
   exists, with one commit for what changed meanwhile; otherwise a new repository
   with one commit of its current files — and takes `projects/` back out of the
-  gateway repository.
+  gateway repository. It is refused, naming the folder, when a project folder
+  is a link or mount leading outside the data directory, or sits inside another
+  git work tree: a new `.git` there would land in someone else's checkout. A
+  `projects/<name>/.git` left from before blocks the switch until you tick
+  *Archive leftover .git folders*, which moves it to `var/git-archive`.
 
 Per-project remotes, credentials and deliveries are kept while Combined and
 work again after switching back; the gateway's Pull and Runner deliveries stop
@@ -68,11 +77,22 @@ git commit -m "Gateway repository layout"
 git push
 ```
 
-Then bring the two histories together once: set the gateway's remote branch to a
-new name (say `gateway-import`) and Remote sync, which pushes a branch the remote
-does not have yet; in a clone, merge it into the restructured branch with
-`git merge --allow-unrelated-histories origin/gateway-import`, push, and set the
-gateway's branch back to that one. From then on the histories are related.
+Then bring the two histories together once. Every gateway's repository starts
+with its own first commit, so a remote branch another gateway created shares no
+history with this one: after **Fetch**, the page offers **Join remote history**.
+It moves this gateway's branch onto the remote's latest commit, keeping every file
+on the gateway as it is, and commits the differences as one commit ("This
+gateway's config on top of origin/main"). Push and Pull work from then on. It
+is refused when the remote's layout does not match, and needs the policy's
+branch changes.
+
+**Fetch** and **Pull** sit beside Remote sync: Fetch updates how far the remote
+is ahead, Pull merges it in (fast-forward or merge), refused with the file list
+while anything is uncommitted and when the policy does not allow Sync — pull.
+
+**Delete versioning** keeps the saved remote and its credential unless you tick
+*Also remove the saved remote*, so initialising again reconnects (Update from
+remote, or a new repository and Join remote history).
 
 New repositories start on the configured remote branch (default `main`). One
 made before 4.2.0 may sit on `master` while the remote's branch is `main`; the

@@ -153,6 +153,9 @@ see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
   naming each loosened setting: *Policy now allows more in Prod: push to remotes, branches.*
 - Optionally, **Only deliver commits merged on GitHub** in Prod (below).
 - An audit profile for the module's essential actions (below).
+- Internal user sources keep password hashes in `users.json`; the gateway repository never
+  versions it (4.4.0). A repository from before 4.4.0 still holds it in older commits: if that
+  repository was shared, rotate those passwords.
 - The Versioning page needs WRITE permission: give it to gateway administrators
   only.
 
@@ -179,7 +182,8 @@ for signatures made before then). When GitHub publishes a new key, a module rele
 ## Audit log
 
 The module writes one row to an audit profile for each essential action: a push (page or
-Designer), a delivery installed (sync or runner), a branch switch, a layout switch, a restore or
+Designer), a delivery installed (sync or runner), a Pull that brought commits in, Join remote
+history, a project added from its repository, a branch switch, a layout switch, a restore or
 update from the remote, a policy change, a credential added or removed, and a mode override created
 or removed. Each row carries the user, the project (or `gateway`), the branch and the commit.
 Nothing is written per file, per poll, per fetch or per auto-commit, and refusals are not audited;

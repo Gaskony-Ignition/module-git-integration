@@ -40,7 +40,12 @@ everything excluded, and Expand/Collapse.
 
 The **Projects** tab lists every project on the gateway, unversioned ones
 included, and how changes reach each one. **Edit** opens a drawer with the
-project's repository and delivery; **Branches** opens its commit graph.
+project's repository and delivery; **Branches** opens its commit graph. **Add
+from repository** brings in a project this gateway does not have yet: it reads
+the repository's branches and the project's title, clones the branch into a new
+project and loads it (Separate layout).
+
+![Add project from repository: URL, credential, branch and name](docs/images/versioning-add-project.png)
 
 ![The Projects tab: each project's repository, delivery and state](docs/images/versioning-projects.png)
 

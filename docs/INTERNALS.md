@@ -20,6 +20,7 @@ are the two runner routes — see Delivery below.
 | Delivery & logs | `GET /events`, `/runner` |
 | Delivery & logs | `POST /delivery`, `/sync-now`, `/events-clear`, `/runner`, `/runner-sync`, `/runner-release` |
 | Modes & policy (4.1.0) | `POST /policy`, `/mode-override` (Create Override: `mode`, `from`), `/mode-reset` (Remove Override: `mode`, blank = active); each takes `type` policy, remote, runner, sync + `project`, credential + `id`/`credType`. `GET /definition` (same keys + `collection`) answers one collection's definition in the shape of the record's own GET, plus `defined`. `GET /status` carries `policy` and `modes` |
+| 4.4.0 | `POST /project-add-peek` (branches, default, suggested name), `/project-add` (`name`, `url`, `branch`, credential, `delivery`), `/config-fetch`, `/config-pull`, `/config-join`; `/deinit` takes `removeRemote`, `/layout` `archiveLeftovers`; `GET /remote` carries `behind` and `unrelated` |
 | Audit (4.4.0) | `GET /audit` (on/off, profile, `gatewayHasProfile`, the profiles), `POST /audit` (`enabled`, `profile`; blank follows the gateway's) |
 | Branch names (4.2.0) | `POST /branch-rename-master` (`project` or `repo:"config"`); `GET /remote` and `/projects` carry `renameMaster` when it applies |
 
