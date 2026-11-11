@@ -10,8 +10,8 @@ import {
 import { errorToast } from "./errors";
 import ConfigDrawer from "./ConfigDrawer";
 
-// The Versioning page header. A primary "Configure Versioning" button (trailing cog) opens the
-// lateral configuration drawer; "Remote Sync" pushes to the remote, with bold text showing how
+// The Versioning page header. A primary "Configure versioning" button (trailing cog) opens the
+// lateral configuration drawer; "Remote sync" pushes to the remote, with bold text showing how
 // many local commits are not yet on the remote. The Sync button is primary only when diverged,
 // secondary when up to date. Syncing is strictly manual. The remote query polls so the unsynced
 // count stays current as config auto-commits happen.
@@ -82,14 +82,14 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
                 .then((r) =>
                   toasts.notifySuccess(`Pushed ${r.from} to ${r.to}`)
                 )
-                .catch(errorToast(toasts, "Remote Sync failed"))
+                .catch(errorToast(toasts, "Remote sync failed"))
             }
           >
             {pushing
               ? "Syncing…"
               : remote?.pushFrom && remote.pushTo
-              ? `Remote Sync (${remote.pushFrom} → ${remote.pushTo})`
-              : "Remote Sync"}
+              ? `Remote sync (${remote.pushFrom} → ${remote.pushTo})`
+              : "Remote sync"}
           </Button>
         </>
       ) : null}
@@ -98,7 +98,7 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
         endIcon={<SettingsGw width={18} height={18} />}
         onClick={() => setDrawerOpen(true)}
       >
-        Configure Versioning
+        Configure versioning
       </Button>
     </div>
   ) : null;

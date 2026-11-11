@@ -858,12 +858,18 @@ ul.gitcfg-hint {
     min-width: 0;
   }
 
-  .gitcfg-graph-pane {
+  // ScrollBox wraps each pane, so the flex rules sit on the wrappers.
+  .gitcfg-graph-wrap {
     flex: 3 1 0;
+    min-width: 0;
+  }
+
+  .gitcfg-branch-wrap {
+    flex: 2 1 0;
+    min-width: 0;
   }
 
   .gitcfg-branch-list {
-    flex: 2 1 0;
     padding: 0 var(--gitcfg-space-3);
   }
 
@@ -871,10 +877,14 @@ ul.gitcfg-hint {
   &.is-compact {
     flex-direction: column;
 
-    .gitcfg-graph-pane,
-    .gitcfg-branch-list {
+    .gitcfg-graph-wrap,
+    .gitcfg-branch-wrap {
       width: 100%;
       flex: none;
+    }
+
+    .gitcfg-graph-pane,
+    .gitcfg-branch-list {
       max-height: calc((100vh - 17rem) / 2);
     }
   }
@@ -983,4 +993,26 @@ button.gitcfg-ref {
   font-family: var(--gitcfg-font-mono);
   font-size: var(--gitcfg-text-sm);
   color: var(--neutral-70);
+}
+
+// --- Scrolling tables: how many rows, and that more are below ------------------------------
+.gitcfg-row-count {
+  margin-left: var(--gitcfg-space-2);
+  font-size: var(--gitcfg-text-md);
+  font-weight: normal;
+  color: var(--neutral-60);
+}
+
+.gitcfg-scroll-wrap {
+  position: relative;
+}
+
+// Fades the last visible rows while more sit below the fold; ScrollBox removes it at the bottom.
+.gitcfg-scroll-fade {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2.5rem;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--white));
 }

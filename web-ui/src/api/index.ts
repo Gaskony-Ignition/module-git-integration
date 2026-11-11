@@ -45,6 +45,7 @@ const baseApi = createApi({
   baseQuery,
   tagTypes: [
     "definition",
+    "audit",
     "status",
     "history",
     "remote",

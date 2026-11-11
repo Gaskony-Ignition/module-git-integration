@@ -2,6 +2,7 @@ import React from "react";
 import { Button, useToastNotifications } from "../../webui";
 import { useClearEventsMutation, useGetEventsQuery } from "./GitConfig.service";
 import { errorToast } from "./errors";
+import ScrollBox, { RowCount } from "./ScrollBox";
 
 // Every delivery, sync, commit and push since the gateway started. An unattended sync or runner
 // delivery that failed is reported here and nowhere else.
@@ -16,7 +17,10 @@ const Logs = () => {
     <div>
       <div className="gitcfg-page-head">
         <div>
-          <h3>Logs</h3>
+          <h3>
+            Logs
+            <RowCount n={log.length} noun="event" />
+          </h3>
           <p>
             The last 50 git events since the gateway started
             {stats
@@ -45,7 +49,7 @@ const Logs = () => {
       {log.length === 0 ? (
         <p className="gitcfg-empty">Nothing yet.</p>
       ) : (
-        <div className="gitcfg-table-scroll">
+        <ScrollBox className="gitcfg-table-scroll">
           <table className="gitcfg-table">
             <thead>
               <tr>
@@ -99,7 +103,7 @@ const Logs = () => {
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollBox>
       )}
     </div>
   );

@@ -27,6 +27,8 @@ export interface PolicyFields {
   forcePushAllowed: boolean;
   // Local folders, file://, git://, http:// and local-network hosts (4.3.0, off by default).
   allowInsecureRemotes: boolean;
+  // Deliveries install only tips signed by GitHub's web-flow key (4.4.0, off by default).
+  githubMergedOnly: boolean;
   deliveryModes: DeliveryKind[];
   allowedRemoteHosts: string[];
 }
@@ -40,6 +42,13 @@ export interface Policy extends PolicyFields {
   refused: Record<string, string>;
   // The collections defining it, core first: ["core", "Prod"].
   defined?: string[];
+}
+// Which audit profile essential actions are written to (4.4.0). profile "" follows the gateway's.
+export interface AuditSettings {
+  enabled: boolean;
+  profile: string;
+  gatewayHasProfile: boolean;
+  profiles: string[];
 }
 // Where a save lands: "core" or the active mode. Left out, a record is saved where it is defined.
 export interface SaveTo {
@@ -142,7 +151,7 @@ export interface RemoteResp {
   secretName?: string;
   // Local commits not yet on the remote (0 = up to date).
   ahead?: number;
-  // Remote Sync pushes the checked-out branch (pushFrom) to pushTo on the remote.
+  // Remote sync pushes the checked-out branch (pushFrom) to pushTo on the remote.
   pushFrom?: string;
   pushTo?: string;
   lastPush?: { time: number; ok: boolean; error?: string };
@@ -663,6 +672,16 @@ export const gitConfigApi = baseApi.injectEndpoints({
       // "projects" too: a runner delivery shows as inactive while the runner is off.
       invalidatesTags: ["definition", "runner", "projects"],
     }),
+    getAudit: builder.query<AuditSettings, void>({
+      query: () => `${BASE}/audit`,
+      providesTags: ["audit"],
+    }),
+    saveAudit: builder.mutation<unknown, { enabled: boolean; profile: string }>(
+      {
+        query: (body) => ({ url: `${BASE}/audit`, method: "POST", body }),
+        invalidatesTags: ["audit"],
+      }
+    ),
     savePolicy: builder.mutation<unknown, PolicyFields & SaveTo>({
       query: ({ saveTo, ...body }) => ({
         url: withSaveTo(`${BASE}/policy`, saveTo),
@@ -784,4 +803,6 @@ export const {
   useModeOverrideMutation,
   useRenameMasterMutation,
   useGetDefinitionQuery,
+  useGetAuditQuery,
+  useSaveAuditMutation,
 } = gitConfigApi;

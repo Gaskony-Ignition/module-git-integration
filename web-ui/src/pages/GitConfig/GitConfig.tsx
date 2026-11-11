@@ -34,9 +34,9 @@ type Tab =
 // Credentials sit on the far right because they are set up once; Projects answers the question
 // people arrive with, which is whether a given project is in git at all.
 const TABS: [Tab, string][] = [
-  ["history", "Gateway History"],
+  ["history", "Gateway history"],
   ["branches", "Branches"],
-  ["excluded", "Git Ignore"],
+  ["excluded", "Git ignore"],
   ["projects", "Projects"],
   ["credentials", "Credentials"],
   ["policy", "Policy"],

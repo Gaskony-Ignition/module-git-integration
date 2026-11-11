@@ -10,6 +10,7 @@ import {
 } from "./GitConfig.service";
 import { errorToast } from "./errors";
 import { selectValue } from "./selectValue";
+import ScrollBox, { RowCount } from "./ScrollBox";
 
 // A tick means "versioned". Pending edits are held here and sent as ONE request on Save, so a
 // session of ticking produces a single .gitignore write and a single auto-commit rather than one
@@ -468,6 +469,8 @@ const ExcludedFiles = () => {
 
   const folders = (root ? root.entries : []).filter((e) => e.directory);
   const searching = query.length >= MIN_QUERY;
+  // Rows on screen in the tree: open folders add theirs.
+  const [shown, setShown] = React.useState(0);
 
   const state: TreeState = {
     pending,
@@ -483,7 +486,10 @@ const ExcludedFiles = () => {
     <div>
       <div className="gitcfg-page-head">
         <div>
-          <h3>Git Ignore</h3>
+          <h3>
+            Git ignore
+            {!source ? <RowCount n={shown} noun="row" /> : null}
+          </h3>
           {/* A div, not a <p>: the help popover contains paragraphs and a list, and a browser
               hoists those out of a <p>, which tears the layout apart. */}
           <div className="gitcfg-page-desc">
@@ -576,13 +582,17 @@ const ExcludedFiles = () => {
               </Button>
             </div>
           </div>
-          <div className="gitcfg-tree">
+          <ScrollBox
+            className="gitcfg-tree"
+            rowSelector=".gitcfg-tree-row"
+            onCount={setShown}
+          >
             {searching ? (
               <SearchResults query={query} />
             ) : (
               <Children path={TREE_ROOT} depth={0} />
             )}
-          </div>
+          </ScrollBox>
           <Legend />
         </Ctx.Provider>
       )}

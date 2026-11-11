@@ -534,7 +534,7 @@ public class GitActionManager {
             // Read-only: the remote and its credential belong to the gateway repository.
             StringBuilder text = new StringBuilder("This gateway keeps every project and its config in one"
                     + " repository, with one remote.\nIt is set on the gateway's Versioning page"
-                    + " (Platform > System > Versioning > Configure Versioning).\n");
+                    + " (Platform > System > Versioning > Configure versioning).\n");
             try {
                 Dataset remotes = rpc.listRemotes(projectName);
                 for (int i = 0; i < remotes.getRowCount(); i++) {

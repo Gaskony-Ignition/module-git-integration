@@ -24,6 +24,7 @@ import Definitions, {
   useEditing,
   useModes,
 } from "./ModeScope";
+import ScrollBox, { RowCount } from "./ScrollBox";
 
 // Credentials are per Ignition user and are what a project repository authenticates with. They
 // could only be created from the Designer's setup wizard, which puts them behind the thing they
@@ -240,7 +241,10 @@ const Credentials = () => {
     <div>
       <div className="gitcfg-page-head">
         <div>
-          <h3>Credentials</h3>
+          <h3>
+            Credentials
+            <RowCount n={rows.length} noun="credential" />
+          </h3>
           <p>
             Credentials this gateway uses for repositories. Expiry and scope are
             checked on save, daily and on Check.
@@ -396,7 +400,7 @@ const Credentials = () => {
           None yet. Needed only when a project pulls from a remote.
         </p>
       ) : (
-        <div className="gitcfg-table-scroll gitcfg-cred-scroll">
+        <ScrollBox className="gitcfg-table-scroll gitcfg-cred-scroll">
           <table className="gitcfg-table">
             <thead>
               <tr>
@@ -458,7 +462,7 @@ const Credentials = () => {
                       Edit
                     </Button>
                     <Button
-                      colorClass="secondary"
+                      colorClass="destructive"
                       // Removed from its mode with Edit › ⋮ › Remove Override.
                       disabled={elsewhere(c)}
                       onClick={() => del(c.type, c.id, c.label)}
@@ -470,7 +474,7 @@ const Credentials = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollBox>
       )}
 
       <div className="gitcfg-section-head">
@@ -528,7 +532,7 @@ const Credentials = () => {
         </label>
         <p className="gitcfg-hint">
           {combined
-            ? "Repo updates are the gateway's: set Configure Versioning › Delivery to Runner — repo updates. A release still needs the project set to Runner — release on the Projects tab."
+            ? "Repo updates are the gateway's: set Configure versioning › Delivery to Runner — repo updates. A release still needs the project set to Runner — release on the Projects tab."
             : "Each project still needs a runner delivery on the Projects tab."}
         </p>
       </SettingsDrawer>

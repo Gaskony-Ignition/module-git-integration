@@ -18,6 +18,7 @@ import {
 } from "./GitConfig.service";
 import { errorToast } from "./errors";
 import ConfigDrawer from "./ConfigDrawer";
+import ScrollBox from "./ScrollBox";
 
 const ROW = 26;
 const LANE = 16;
@@ -262,7 +263,10 @@ const BranchesView = ({
       ) : null}
 
       <div className={`gitcfg-branches-body${compact ? " is-compact" : ""}`}>
-        <div className="gitcfg-graph-pane">
+        <ScrollBox
+          className="gitcfg-graph-pane"
+          wrapClassName="gitcfg-graph-wrap"
+        >
           <div className="gitcfg-graph" style={{ height }}>
             <svg width={width} height={height} aria-hidden="true">
               {g.edges.map((e, i) => (
@@ -313,9 +317,12 @@ const BranchesView = ({
               Showing the latest {g.commits.length} commits.
             </p>
           ) : null}
-        </div>
+        </ScrollBox>
 
-        <div className="gitcfg-branch-list">
+        <ScrollBox
+          className="gitcfg-branch-list"
+          wrapClassName="gitcfg-branch-wrap"
+        >
           <table className="gitcfg-table">
             <thead>
               <tr>
@@ -361,7 +368,7 @@ const BranchesView = ({
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollBox>
       </div>
 
       <Modal

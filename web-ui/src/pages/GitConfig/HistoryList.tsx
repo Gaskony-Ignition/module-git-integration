@@ -3,6 +3,7 @@ import { DataGrid, Modal, Chip, useToastNotifications } from "../../webui";
 import { useGetHistoryQuery, useRestoreMutation } from "./GitConfig.service";
 import { errorToast } from "./errors";
 import CommitResources from "./CommitResources";
+import ScrollBox, { RowCount } from "./ScrollBox";
 
 // DataGrid custom cell: short hash (monospace) plus local/remote pointer chips — shown only on
 // the two tip commits the branch pointers reference (like git's `main` / `origin/main`), not on
@@ -117,7 +118,10 @@ const HistoryList = () => {
     <section>
       <div className="gitcfg-page-head">
         <div>
-          <h3>History</h3>
+          <h3>
+            History
+            <RowCount n={commits.length} noun="commit" />
+          </h3>
           <p>
             Config commits, newest first. Restore applies a commit without a
             restart.
@@ -125,7 +129,7 @@ const HistoryList = () => {
         </div>
       </div>
       {/* Show more grows the list without limit, which pushed the whole page into a scroll. */}
-      <div className="gitcfg-grid-scroll">
+      <ScrollBox className="gitcfg-grid-scroll">
         <DataGrid
           id="git-config-history"
           itemName="Commit"
@@ -144,7 +148,7 @@ const HistoryList = () => {
           showMore={showMore}
           noResultsText="No commits yet."
         />
-      </div>
+      </ScrollBox>
       <Modal
         open={!!confirm}
         type="confirm"

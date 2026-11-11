@@ -2,8 +2,8 @@ import React from "react";
 import { Button, Loading, useToastNotifications } from "../../webui";
 import { TextInput } from "./fields";
 import SettingsDrawer from "./SettingsDrawer";
+import AuditSetting from "./AuditSetting";
 import Definitions, {
-  FromTag,
   OverrideTag,
   saveToParam,
   useEditing,
@@ -27,7 +27,13 @@ const FLAGS: [keyof PolicyFields, string][] = [
     "allowInsecureRemotes",
     "Insecure remotes (file://, http://, git://, this machine)",
   ],
+  ["githubMergedOnly", "Only deliver commits merged on GitHub"],
 ];
+
+// The value that allows more than the default is the one worth a second look; the rest are plain.
+const RISKY: Partial<Record<keyof PolicyFields, boolean>> = {
+  allowInsecureRemotes: true,
+};
 
 const DELIVERIES: [DeliveryKind, string][] = [
   ["pull", "Sync — pull"],
@@ -35,12 +41,11 @@ const DELIVERIES: [DeliveryKind, string][] = [
   ["runner", "Runner"],
 ];
 
-const yesNo = (v: boolean) =>
-  v ? (
-    <span className="gitcfg-ok">Allowed</span>
-  ) : (
-    <span className="gitcfg-err">Off</span>
-  );
+const onOff = (key: keyof PolicyFields, v: boolean) => (
+  <span className={RISKY[key] === v ? "gitcfg-err" : ""}>
+    {v ? "On" : "Off"}
+  </span>
+);
 
 // The Git policy: what this module may do on this gateway, and in which deployment mode. It is
 // the one record of this module that is versioned with the config, so an override written for a
@@ -70,6 +75,7 @@ const Policy = () => {
       branchSwitch: p.branchSwitch,
       layoutSwitch: p.layoutSwitch,
       allowInsecureRemotes: !!p.allowInsecureRemotes,
+      githubMergedOnly: !!p.githubMergedOnly,
       deliveryModes: p.deliveryModes,
       allowedRemoteHosts: p.allowedRemoteHosts,
     });
@@ -116,7 +122,6 @@ const Policy = () => {
     editing,
     onEditing: setEditing,
   };
-  const from = <FromTag from={policy.from || "core"} />;
 
   return (
     <div>
@@ -125,7 +130,8 @@ const Policy = () => {
           <h3>Policy</h3>
           <p>
             What Git Integration may do here
-            {mode ? ` in ${mode}` : ""}. Versioned with the config.{" "}
+            {mode ? ` in ${mode}` : ""}. Versioned with the config. Settings
+            from <strong>{policy.from || "core"}</strong>.{" "}
             <OverrideTag defined={policy.defined} from={policy.from} />
           </p>
         </div>
@@ -142,15 +148,13 @@ const Policy = () => {
             <tr>
               <th>Setting</th>
               <th>Value</th>
-              <th>Comes from</th>
             </tr>
           </thead>
           <tbody>
             {FLAGS.map(([key, label]) => (
               <tr key={key}>
                 <td>{label}</td>
-                <td>{yesNo(policy[key] as boolean)}</td>
-                <td>{from}</td>
+                <td>{onOff(key, !!policy[key])}</td>
               </tr>
             ))}
             <tr>
@@ -160,7 +164,6 @@ const Policy = () => {
                   .map(([, l]) => l)
                   .join(", ") || "Off only"}
               </td>
-              <td>{from}</td>
             </tr>
             <tr>
               <td>Allowed remote hosts</td>
@@ -169,8 +172,8 @@ const Policy = () => {
                   ? policy.allowedRemoteHosts.join(", ")
                   : "Any"}
               </td>
-              <td>{from}</td>
             </tr>
+            <AuditSetting />
           </tbody>
         </table>
       </div>
@@ -229,6 +232,11 @@ const Policy = () => {
             <p className="gitcfg-hint">
               Blank allows any host. Checked against a remote&apos;s URL before
               the gateway contacts it, and when a remote is saved.
+            </p>
+            <p className="gitcfg-hint">
+              Only deliver commits merged on GitHub: a delivery installs a
+              branch tip only when GitHub signed it (a pull request merged on
+              GitHub). Others are refused and logged.
             </p>
           </>
         ) : null}

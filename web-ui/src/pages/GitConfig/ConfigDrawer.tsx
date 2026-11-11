@@ -75,7 +75,7 @@ interface FormShape {
   secretName: string; // referenced secret name
 }
 
-// The "Configure Versioning" lateral panel. The remote's secret is entered/referenced inline in
+// The "Configure versioning" lateral panel. The remote's secret is entered/referenced inline in
 // the drawer (no credential dropdown, no popup): choose Embedded or Referenced with a radio, then
 // either type the secret or point at a gateway Secret Provider secret. The gateway owns a single
 // dedicated credential record for the config remote (auto-named), so no name is asked for.
@@ -371,7 +371,7 @@ const ConfigDrawer = ({
                   options={providerNames}
                   value={provider}
                   disabled={noProviders}
-                  placeholder="Select Secret Provider"
+                  placeholder="Select secret provider"
                   onChange={(value: string) => {
                     setValue("provider", value || "");
                     setValue("secretName", "");
@@ -415,7 +415,7 @@ const ConfigDrawer = ({
           </Button>
           {configured ? (
             <Button
-              colorClass="secondary"
+              colorClass="destructive"
               onClick={() => setConfirmRemoveRemote(true)}
             >
               Remove remote…
@@ -574,8 +574,8 @@ const ConfigDrawer = ({
         size={DrawerTemplateSize.SMALL}
       >
         <DrawerTemplate
-          title="Configure Versioning"
-          path={["Configure Versioning"]}
+          title="Configure versioning"
+          path={["Configure versioning"]}
           theme={DrawerTemplateColorTheme.GREY}
           primaryActionText={saving ? "Saving…" : "Save"}
           secondaryActionText="Cancel"

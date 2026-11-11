@@ -28,6 +28,7 @@ import Definitions, {
   useEditing,
   useModes,
 } from "./ModeScope";
+import ScrollBox, { RowCount } from "./ScrollBox";
 
 const DELIVERY_LABEL: Record<Delivery, string> = {
   off: "Off",
@@ -231,7 +232,10 @@ const Projects = () => {
     <div>
       <div className="gitcfg-page-head">
         <div>
-          <h3>Projects</h3>
+          <h3>
+            Projects
+            <RowCount n={projects.length} noun="project" />
+          </h3>
           {combined ? (
             <p>
               Every project is in the gateway repository (Combined layout). The
@@ -253,7 +257,7 @@ const Projects = () => {
       ) : projects.length === 0 ? (
         <p className="gitcfg-empty">No projects on this gateway.</p>
       ) : (
-        <div className="gitcfg-table-scroll">
+        <ScrollBox className="gitcfg-table-scroll">
           <table className="gitcfg-table">
             <thead>
               <tr>
@@ -368,7 +372,7 @@ const Projects = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollBox>
       )}
 
       <SettingsDrawer
@@ -385,7 +389,7 @@ const Projects = () => {
             {combined ? (
               <p className="gitcfg-hint">
                 Versioned in the gateway repository. Its remote and credential
-                are the gateway&apos;s, set in Configure Versioning.
+                are the gateway&apos;s, set in Configure versioning.
               </p>
             ) : null}
             {!target.versioned && !combined ? (
@@ -499,7 +503,7 @@ const Projects = () => {
             {combined ? (
               <p className="gitcfg-hint">
                 Repo updates and sync are set once for the whole gateway in
-                Configure Versioning › Delivery.
+                Configure versioning › Delivery.
               </p>
             ) : !hasRemote ? (
               <p className="gitcfg-hint">

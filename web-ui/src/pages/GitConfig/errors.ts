@@ -27,7 +27,7 @@ export const errorMessage = (e: any): string => {
 
 /**
  * Build a `.catch(...)` handler that shows the error as a sticky toast titled `title`.
- * Usage: `mutation().unwrap().catch(errorToast(toasts, "Remote Sync failed"))`.
+ * Usage: `mutation().unwrap().catch(errorToast(toasts, "Remote sync failed"))`.
  */
 export const errorToast =
   (toasts: ToastApi, title: string) =>
