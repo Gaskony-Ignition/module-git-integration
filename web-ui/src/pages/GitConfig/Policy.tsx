@@ -23,6 +23,10 @@ const FLAGS: [keyof PolicyFields, string][] = [
   ["designerCommit", "Commit from the Designer"],
   ["branchSwitch", "Create, switch and delete branches"],
   ["layoutSwitch", "Switch the repository layout"],
+  [
+    "allowInsecureRemotes",
+    "Insecure remotes (local folders, file://, git://, http://, this machine)",
+  ],
 ];
 
 const DELIVERIES: [DeliveryKind, string][] = [
@@ -65,6 +69,7 @@ const Policy = () => {
       designerCommit: p.designerCommit,
       branchSwitch: p.branchSwitch,
       layoutSwitch: p.layoutSwitch,
+      allowInsecureRemotes: !!p.allowInsecureRemotes,
       deliveryModes: p.deliveryModes,
       allowedRemoteHosts: p.allowedRemoteHosts,
     });

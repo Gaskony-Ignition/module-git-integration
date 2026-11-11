@@ -25,6 +25,8 @@ export interface PolicyFields {
   branchSwitch: boolean;
   layoutSwitch: boolean;
   forcePushAllowed: boolean;
+  // Local folders, file://, git://, http:// and local-network hosts (4.3.0, off by default).
+  allowInsecureRemotes: boolean;
   deliveryModes: DeliveryKind[];
   allowedRemoteHosts: string[];
 }
