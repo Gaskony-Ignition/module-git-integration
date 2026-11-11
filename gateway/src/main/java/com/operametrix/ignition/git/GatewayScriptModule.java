@@ -199,6 +199,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                     .project(projectName).user(userName).remote(remoteName)
                     .branch(branchQuietly(projectName)).commit(headQuietly(projectName))
                     .message("Pulled from " + remoteName).success());
+            GitAudit.record(GitAudit.PULL, userName, projectName, branchQuietly(projectName), headQuietly(projectName),
+                    "remote=" + remoteUrlQuietly(projectName, remoteName) + "; from the Designer");
             return ok;
         } catch (Exception e) {
             GitEvents.fire(GitEvent.of(GitEvent.PULL)
@@ -1149,11 +1151,18 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                 result = GitManager.checkoutCommit(repo.root(), commitHash);
             }
             afterGatewayWide(projectName, before);
+            auditRestore(projectName, commitHash);
             return result;
         }
         boolean result = GitManager.checkoutCommit(getProjectFolderPath(projectName), commitHash);
         GitProjectManager.importProject(projectName);
+        auditRestore(projectName, commitHash);
         return result;
+    }
+
+    private static void auditRestore(String projectName, String commitHash) {
+        GitAudit.record(GitAudit.RESTORE, caller(null), projectName, null, commitHash,
+                "checked out this commit from the Designer");
     }
 
     @Override
@@ -1168,6 +1177,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         }
         if (result) {
             GitProjectManager.importProject(projectName);
+            GitAudit.record(GitAudit.REVERT, userName, projectName, branchQuietly(projectName),
+                    headQuietly(projectName), "reverted " + commitHash + "; from the Designer");
         }
         return result;
     }
@@ -1177,7 +1188,12 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                                              long sshKeyId, long httpsCredentialId) throws Exception {
         projectName = project(projectName);
         ignitionUser = caller(ignitionUser);
-        return initializeProject(projectName, repoUri, ignitionUser, sshKeyId, httpsCredentialId, null);
+        boolean ok = initializeProject(projectName, repoUri, ignitionUser, sshKeyId, httpsCredentialId, null);
+        if (repoUri != null && !repoUri.isBlank()) {
+            GitAudit.record(GitAudit.REMOTE, ignitionUser, projectName, branchQuietly(projectName),
+                    headQuietly(projectName), "linked to remote=" + repoUri + "; from the Designer");
+        }
+        return ok;
     }
 
     /** As {@link #initializeProjectImpl}, cloning {@code branch} instead of the remote's default. */
@@ -1333,6 +1349,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         refuseInCombined("Adding a remote");
         Path projectPath = getProjectFolderPath(projectName);
         GitManager.addRemote(projectPath, remoteName, remoteUrl);
+        GitAudit.record(GitAudit.REMOTE, ignitionUser, projectName, null, null,
+                "added " + remoteName + "=" + remoteUrl + "; from the Designer");
 
         // Create empty credential record — FK refs are attached separately via setRemoteCredentialRef
         GitProjectsConfigRecord projectRecord = getGitProjectConfigRecord(projectName);
@@ -1352,7 +1370,10 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         ignitionUser = caller(ignitionUser);
         refuseInCombined("Removing a remote");
         Path projectPath = getProjectFolderPath(projectName);
+        String removedUrl = remoteUrlQuietly(projectName, remoteName);
         GitManager.removeRemote(projectPath, remoteName);
+        GitAudit.record(GitAudit.REMOTE, ignitionUser, projectName, null, null,
+                "removed " + remoteName + "=" + removedUrl + "; from the Designer");
 
         // Delete credential record
         GitProjectsConfigRecord projectRecord = getGitProjectConfigRecord(projectName);
@@ -1375,6 +1396,8 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         Path projectPath = getProjectFolderPath(projectName);
         String oldHost = PolicyGate.hostOf(GitManager.getRemoteUrl(projectPath, remoteName));
         GitManager.setRemoteUrl(projectPath, remoteName, newUrl);
+        GitAudit.record(GitAudit.REMOTE, ignitionUser, projectName, null, null,
+                "changed " + remoteName + " to " + newUrl + "; from the Designer");
 
         // Ensure a credential record exists for this remote (FK refs are set via setRemoteCredentialRef)
         GitProjectsConfigRecord projectRecord = getGitProjectConfigRecord(projectName);

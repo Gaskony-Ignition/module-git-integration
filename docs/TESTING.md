@@ -36,5 +36,5 @@ The rig slot and the servers are always released. `--keep` leaves both up, and
 `~/.cache/rig/gitreg-<name>/` (0700) until the run ends.
 
 Not scripted: the Designer (commit, push, pull, branch popup, revert author, and the audit rows
-its push, checkout and credential changes write) — smoke it by hand with the
+its push, pull, checkout, revert, remote and credential changes write) — smoke it by hand with the
 `ignition:designer-drive` skill in both layouts.

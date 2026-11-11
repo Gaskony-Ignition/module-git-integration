@@ -106,8 +106,9 @@ credentials and deliveries can be saved for one mode only. Only the policy is
 versioned, so a Prod override written on Dev travels with the branch. For a
 stricter site, **Only deliver commits merged on GitHub** makes every delivery
 refuse a branch tip that GitHub did not sign (a pull request merged on GitHub).
-Pushes, deliveries, branch and layout switches, restores, policy, credential and
-override changes each write one row to the gateway's audit profile.
+Pushes, pulls, deliveries, branch and layout switches, restores, reverts, remote, policy,
+credential and override changes each write one row to the gateway's audit profile, from the
+gateway page or a Designer (with the Designer's host).
 [docs/MODES.md](docs/MODES.md) has the setup.
 
 ![The Policy tab in deployment mode Prod](docs/images/versioning-policy.png)

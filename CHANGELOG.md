@@ -3,6 +3,15 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [4.4.1] - 2026-11-12
+
+### Added
+- Designer actions now write the same audit rows as the gateway page: a pull, a checkout of a
+  commit, a revert, and a remote linked, added, changed or removed (push, branch switch and
+  credential changes already did).
+- A row from a Designer names the Designer's host as the actor host and Designer as the
+  originating context, instead of `gateway`.
+
 ## [4.4.0] - 2026-11-11
 
 ### Security

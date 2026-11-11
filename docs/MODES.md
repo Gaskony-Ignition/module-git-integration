@@ -196,11 +196,13 @@ key, a module release carries it
 
 ## Audit log
 
-The module writes one row to an audit profile for each essential action: a push (page or
-Designer), a delivery installed (sync or runner), a Pull that brought commits in, Join remote
-history, a project added from its repository, a branch switch, a layout switch, a restore or
-update from the remote, a policy change, a credential added or removed, and a mode override created
-or removed. Each row carries the user, the project (or `gateway`), the branch and the commit.
+The module writes one row to an audit profile for each essential action: a push, a delivery
+installed (sync or runner), a pull (from the page when it brought commits in, or from a Designer),
+Join remote history, a project added from or linked to its repository, a remote added, changed or
+removed in a Designer, a branch switch, a layout switch, a restore, a Designer's checkout of a
+commit or revert, a policy change, a credential added or removed, and a mode override created or
+removed. Each row carries the user, the project (or `gateway`), the branch and the commit; a row
+from a Designer has the Designer's host as the actor host and Designer as its context.
 Nothing is written per file, per poll, per fetch or per auto-commit, and refusals are not audited;
 those stay on the Logs tab. **Policy › Audit log** picks the profile: by default the gateway's own
 audit profile (Gateway Audit Profile under Security › General Settings), so nothing is written when the gateway has none; or Off. An audit

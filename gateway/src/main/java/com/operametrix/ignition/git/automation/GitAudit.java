@@ -4,7 +4,10 @@ import com.inductiveautomation.ignition.common.model.ApplicationScope;
 import com.inductiveautomation.ignition.gateway.audit.AuditManager;
 import com.inductiveautomation.ignition.gateway.audit.AuditProfile;
 import com.inductiveautomation.ignition.gateway.audit.AuditRecordBuilder;
+import com.inductiveautomation.ignition.gateway.clientcomm.ClientReqSession;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
+import com.inductiveautomation.ignition.gateway.rpc.RpcContext;
+import com.inductiveautomation.ignition.gateway.rpc.RpcDelegate;
 import com.operametrix.ignition.git.records.GitAuditRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,9 +20,10 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * One audit-profile row per essential action (4.4.0): push, delivery installed, branch and layout
- * switch, restore, policy change, credential and mode override added or removed. Polls, fetches,
- * auto-commits, per-file detail and refusals stay on the Logs tab only.
+ * One audit-profile row per essential action (4.4.0): push, pull, delivery installed, branch and
+ * layout switch, restore, revert, remote change, policy change, credential and mode override added
+ * or removed, from the gateway page or a Designer. Polls, fetches, commits, per-file detail and
+ * refusals stay on the Logs tab only. A Designer's row carries its host and the Designer context.
  *
  * <p>Writes happen on one background thread, so a slow or broken profile never holds up the git
  * action; a failure is logged once until a write succeeds again.
@@ -42,6 +46,8 @@ public final class GitAudit {
     public static final String PROJECT_ADDED = "git project added from repository";
     public static final String PULL = "git pull";
     public static final String JOIN = "git join remote history";
+    public static final String REVERT = "git revert";
+    public static final String REMOTE = "git remote change";
 
     /** The gateway repository, where an action has no project. */
     public static final String GATEWAY = "gateway";
@@ -82,7 +88,9 @@ public final class GitAudit {
                 return;
             }
             Date when = new Date();
-            WRITER.execute(() -> write(ctx, action, user, project, branch, commit, detail, when));
+            // Read on the calling thread: the RPC context is gone once the row reaches the writer.
+            String designerHost = designerHost();
+            WRITER.execute(() -> write(ctx, action, user, project, branch, commit, detail, when, designerHost));
         } catch (Throwable t) {
             failOnce("an audit row could not be queued", t);
         }
@@ -104,7 +112,7 @@ public final class GitAudit {
     }
 
     private static void write(GatewayContext ctx, String action, String user, String project, String branch,
-                              String commit, String detail, Date when) {
+                              String commit, String detail, Date when, String designerHost) {
         try {
             AuditProfile profile = profile(ctx);
             if (profile == null) {
@@ -116,8 +124,8 @@ public final class GitAudit {
                     .setActionTarget(gateway ? GATEWAY : project.trim())
                     .setActionValue(value(branch, commit, detail))
                     .setActor(user == null || user.isBlank() ? "gateway" : user)
-                    .setActorHost("gateway")
-                    .setOriginatingContext(ApplicationScope.GATEWAY)
+                    .setActorHost(designerHost == null ? "gateway" : designerHost)
+                    .setOriginatingContext(designerHost == null ? ApplicationScope.GATEWAY : ApplicationScope.DESIGNER)
                     .setOriginatingSystem(system(ctx))
                     .setStatusCode(STATUS_GOOD)
                     .setTimestamp(when)
@@ -128,6 +136,26 @@ public final class GitAudit {
             }
         } catch (Throwable t) {
             failOnce("an audit row could not be written", t);
+        }
+    }
+
+    /** The host of the Designer making this call, or null when the call did not come from one. */
+    static String designerHost() {
+        try {
+            RpcContext rpc = RpcDelegate.CURRENT_CONTEXT.get();
+            ClientReqSession session = rpc == null ? null : rpc.session();
+            if (session == null || !session.isDesigner()) {
+                return null;
+            }
+            for (String key : new String[] {ClientReqSession.SESSION_REMOTE_HOST, ClientReqSession.SESSION_REMOTE_ADDR}) {
+                Object v = session.getAttribute(key);
+                if (v != null && !v.toString().isBlank()) {
+                    return v.toString();
+                }
+            }
+            return "designer";
+        } catch (Throwable t) {
+            return null;
         }
     }
 
