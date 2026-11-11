@@ -423,6 +423,13 @@ export const gitConfigApi = baseApi.injectEndpoints({
       // History too: a push flips commits from local to remote.
       invalidatesTags: ["remote", "history"],
     }),
+    // The provider secret the config remote's credential names (WRITE only, so a mutation).
+    getSecretRef: builder.mutation<
+      { providerName?: string; secretName?: string },
+      { collection?: string }
+    >({
+      query: (body) => ({ url: `${BASE}/secret-ref`, method: "POST", body }),
+    }),
     getSecretProviders: builder.query<SecretProvidersResp, void>({
       // POST: the route needs WRITE, and the gateway only grants WRITE to unsafe methods.
       query: () => ({
@@ -739,6 +746,7 @@ export const {
   useGetRemoteQuery,
   useGetCredentialsQuery,
   useGetSecretProvidersQuery,
+  useGetSecretRefMutation,
   useSaveRemoteMutation,
   useRemoveRemoteMutation,
   useTestRemoteMutation,

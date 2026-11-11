@@ -32,6 +32,7 @@ import {
   useGetDefinitionQuery,
   useGetRemoteQuery,
   useGetSecretProvidersQuery,
+  useGetSecretRefMutation,
   useSaveRemoteMutation,
   useRemoveRemoteMutation,
   useTestRemoteMutation,
@@ -89,6 +90,7 @@ const ConfigDrawer = ({
   const { data: providersResp } = useGetSecretProvidersQuery();
   const [saveRemote, { isLoading: saving }] = useSaveRemoteMutation();
   const [removeRemote] = useRemoveRemoteMutation();
+  const [getSecretRef] = useGetSecretRefMutation();
   const [testRemote, { isLoading: testing }] = useTestRemoteMutation();
   const [deinit] = useDeinitMutation();
   const [saveDelivery] = useSaveConfigDeliveryMutation();
@@ -182,6 +184,24 @@ const ConfigDrawer = ({
     setDeliveryEvery(String(remote.delivery?.intervalSeconds || 300));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // The referenced provider and secret come from a WRITE-only call, after the prefill above.
+  const shownMode =
+    (def as unknown as RemoteResp | undefined)?.secretMode ??
+    remote?.secretMode;
+  useEffect(() => {
+    if (!open || shownMode !== "reference") {
+      return;
+    }
+    getSecretRef({ collection: editing })
+      .unwrap()
+      .then((r) => {
+        setValue("provider", r.providerName || "");
+        setValue("secretName", r.secretName || "");
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing, shownMode]);
 
   const configured = !!(remote && remote.configured);
   const sshUri = !!uri && !uri.trim().toLowerCase().startsWith("http");

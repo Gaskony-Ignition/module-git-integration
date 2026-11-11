@@ -29,6 +29,7 @@ import com.operametrix.ignition.git.managers.CredentialCheck;
 import com.operametrix.ignition.git.managers.ProjectRecords;
 import com.operametrix.ignition.git.managers.DataDirGitManager;
 import com.operametrix.ignition.git.managers.GitManager;
+import com.operametrix.ignition.git.managers.PolicyWatch;
 import com.operametrix.ignition.git.managers.RepoHardening;
 import com.operametrix.ignition.git.managers.SafePaths;
 import com.operametrix.ignition.git.managers.LayoutSwitch;
@@ -211,6 +212,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         // 4.3.0: TLS checks back on, no symlinks in checkouts, no passwords in remote URLs, every
         // stored key encrypted and every HTTPS credential bound to a host, before anything syncs.
         RepoHardening.atStartup();
+        PolicyWatch.check("start-up: a mode switch or a change made while the gateway was down");
 
         // Scheduled sync. Inert until a project has a sync record configured, so starting it
         // unconditionally costs one idle thread and keeps the wiring in one place.
@@ -332,6 +334,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         routes.newRoute("/credentials").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.READ).nocache()
                 .handler(this::handleGetCredentials).mount();
+
+        routes.newRoute("/secret-ref").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE).nocache()
+                .handler(this::handleSecretRef).mount();
 
         // WRITE, unlike the other reads: it names every secret in every provider. POST, because
         // the gateway only mounts a WRITE route on an unsafe method (and wants its CSRF token).
@@ -1015,10 +1021,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 }
                 boolean referenced = secret != null && secret.isReferenced();
                 o.addProperty("secretMode", referenced ? "reference" : "inline");
-                if (referenced) {
-                    o.addProperty("providerName", secret.getAsReferenced().getProviderName());
-                    o.addProperty("secretName", secret.getAsReferenced().getSecretName());
-                }
+                // Which provider secret it names is for WRITE users only: POST /secret-ref.
                 ConfigSync.Settings sync = ConfigSync.get();
                 JsonObject delivery = new JsonObject();
                 delivery.addProperty("mode", sync.mode());
@@ -1212,6 +1215,37 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             // auto-commit for the same change then finds nothing to do.
             DataDirGitManager.commitAllIfDirty("Configure config repository remote");
             return ok();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    /**
+     * The Secret Provider and secret the config remote's credential points at, in the definition
+     * {@code collection} names, for the drawer to prefill. WRITE: a READ user sees only that it
+     * is a reference.
+     */
+    private Object handleSecretRef(RequestContext req, HttpServletResponse resp) {
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            String collection = ModeStore.target(optString(body, "collection"));
+            return ModeStore.readingFrom(collection, () -> {
+                JsonObject o = new JsonObject();
+                GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+                SecretConfig secret = null;
+                if (remote != null && remote.getSshKeyId() > 0) {
+                    GitUserSshKeyRecord key = GitUserSshKeyRecord.findById(remote.getSshKeyId());
+                    secret = key == null ? null : key.getSecret();
+                } else if (remote != null && remote.getHttpsCredentialId() > 0) {
+                    GitUserHttpsCredentialRecord cred = GitUserHttpsCredentialRecord.findById(remote.getHttpsCredentialId());
+                    secret = cred == null ? null : cred.getSecret();
+                }
+                if (secret != null && secret.isReferenced()) {
+                    o.addProperty("providerName", secret.getAsReferenced().getProviderName());
+                    o.addProperty("secretName", secret.getAsReferenced().getSecretName());
+                }
+                return o.toString();
+            });
         } catch (Exception e) {
             return error(resp, e);
         }
@@ -1606,10 +1640,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                                 SecretConfig sc = c.getSecret();
                                 boolean ref = sc != null && sc.isReferenced();
                                 o.addProperty("secretMode", ref ? "reference" : "inline");
-                                if (ref) {
-                                    o.addProperty("providerName", sc.getAsReferenced().getProviderName());
-                                    o.addProperty("secretName", sc.getAsReferenced().getSecretName());
-                                }
                             }
                         }
                     }
