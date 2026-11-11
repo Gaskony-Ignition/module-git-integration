@@ -812,6 +812,17 @@ public class DataDirGitManager {
         }
     }
 
+    /**
+     * A throwaway repository for an ls-remote with no local one. Without a repository JGit reads
+     * http.followRedirects from nowhere and follows the first redirect, credential and all.
+     */
+    private static Repository noRedirects() {
+        Repository mem = new org.eclipse.jgit.internal.storage.dfs.InMemoryRepository(
+                new org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription("remote-test"));
+        mem.getConfig().setString("http", null, "followRedirects", "false");
+        return mem;
+    }
+
     /** Validate URI + credential with an ls-remote — touches no local or remote state. */
     public static void testRemote(String uri, long sshKeyId, long httpsCredentialId) {
         GitConfigRemoteRecord saved = GitConfigRemoteRecord.get();
@@ -822,9 +833,11 @@ public class DataDirGitManager {
                     + "; enter the secret again to test " + PolicyGate.hostOf(uri) + ".");
         }
         try {
-            LsRemoteCommand lsRemote = Git.lsRemoteRepository().setRemote(uri).setHeads(true);
-            GitManager.setAuthenticationFromIds(lsRemote, uri, sshKeyId, httpsCredentialId);
-            lsRemote.call();
+            try (Repository mem = noRedirects()) {
+                LsRemoteCommand lsRemote = Git.wrap(mem).lsRemote().setRemote(uri).setHeads(true);
+                GitManager.setAuthenticationFromIds(lsRemote, uri, sshKeyId, httpsCredentialId);
+                lsRemote.call();
+            }
         } catch (PolicyGate.Refused e) {
             throw e;
         } catch (Exception e) {
@@ -836,9 +849,11 @@ public class DataDirGitManager {
     public static void testRemoteRaw(String uri, String sshKeyPlaintext, String httpsUser,
                                      String httpsPassword) {
         try {
-            LsRemoteCommand lsRemote = Git.lsRemoteRepository().setRemote(uri).setHeads(true);
-            GitManager.setAuthenticationRaw(lsRemote, uri, sshKeyPlaintext, httpsUser, httpsPassword);
-            lsRemote.call();
+            try (Repository mem = noRedirects()) {
+                LsRemoteCommand lsRemote = Git.wrap(mem).lsRemote().setRemote(uri).setHeads(true);
+                GitManager.setAuthenticationRaw(lsRemote, uri, sshKeyPlaintext, httpsUser, httpsPassword);
+                lsRemote.call();
+            }
         } catch (PolicyGate.Refused e) {
             throw e;
         } catch (Exception e) {
