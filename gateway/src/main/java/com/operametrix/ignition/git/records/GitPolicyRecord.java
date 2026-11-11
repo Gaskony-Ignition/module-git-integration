@@ -78,10 +78,13 @@ public class GitPolicyRecord {
         }
     }
 
-    /** Writes the default to core when the gateway has no policy yet, so a mode has one to copy. */
+    /**
+     * Writes the default to core when the gateway has no policy yet, so a mode has one to copy.
+     * Never over one that exists but cannot be read: that stays locked until someone fixes it.
+     */
     public static void ensureCore() {
         Handler h = handler;
-        if (h != null && ModeStore.find(h, META, NAME).isEmpty()) {
+        if (h != null && ModeStore.definedIn(TYPE, NAME) == null && ModeStore.find(h, META, NAME).isEmpty()) {
             ModeStore.writingTo(ModeStore.CORE, () -> {
                 save(GitPolicy.DEFAULT);
                 return null;
