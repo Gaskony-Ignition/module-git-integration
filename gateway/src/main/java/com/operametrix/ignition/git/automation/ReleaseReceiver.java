@@ -50,6 +50,13 @@ public final class ReleaseReceiver {
     /** A Perspective project export is a few MB; this only stops a runaway upload filling the disk. */
     private static final long MAX_BYTES = 256L * 1024 * 1024;
 
+    /** What a release may unpack to: a zip bomb must not fill the disk from a small upload. */
+    static final long MAX_UNZIPPED_BYTES = 1024L * 1024 * 1024;
+    static final int MAX_ENTRIES = 50_000;
+
+    /** The {@code version} label goes into logs, events and a commit message; nothing else. */
+    private static final Pattern VERSION = Pattern.compile("[\\w.+-]{0,64}");
+
     /** Project names are directory names; nothing that could climb out of {@code projects/}. */
     private static final Pattern PROJECT_NAME = Pattern.compile("[A-Za-z0-9_-]+");
 
@@ -84,6 +91,10 @@ public final class ReleaseReceiver {
             resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             return error("name the project with ?project=, letters, digits, _ and - only");
         }
+        if (!VERSION.matcher(version).matches()) {
+            resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return error("version: up to 64 letters, digits and . _ + - only");
+        }
         // Opt-in: only a project someone set to Runner release, and that exists here, may be
         // replaced. A token alone once let a workflow create or overwrite any project it named.
         String refused = RunnerTrigger.refuse(project, GitRunnerRecord.MODE_RELEASE);
@@ -110,7 +121,7 @@ public final class ReleaseReceiver {
             }
 
             Path staged = work.resolve("project");
-            int files = unzip(zip, staged);
+            int files = unzip(zip, staged, MAX_UNZIPPED_BYTES, MAX_ENTRIES);
             if (!Files.isRegularFile(staged.resolve("project.json"))) {
                 throw new Refused(HttpServletResponse.SC_BAD_REQUEST,
                         "the zip has no project.json at its root, so it is not a project export");
@@ -228,16 +239,25 @@ public final class ReleaseReceiver {
     /**
      * Extracts every entry under {@code dest}, refusing any whose path would land outside it.
      * Backslash separators are normalised: Windows PowerShell 5.1's Compress-Archive writes them.
+     * Stops at {@code maxBytes} unpacked or {@code maxEntries} entries, counted as written rather
+     * than trusted from the entry headers.
      */
-    private static int unzip(Path zip, Path dest) throws IOException, Refused {
+    static int unzip(Path zip, Path dest, long maxBytes, int maxEntries) throws IOException, Refused {
         Files.createDirectories(dest);
         Path root = dest.toAbsolutePath().normalize();
         int files = 0;
+        int entries = 0;
+        long written = 0;
+        byte[] buf = new byte[65536];
         try (ZipInputStream zin = new ZipInputStream(Files.newInputStream(zip))) {
             ZipEntry entry;
             boolean any = false;
             while ((entry = zin.getNextEntry()) != null) {
                 any = true;
+                if (++entries > maxEntries) {
+                    throw new Refused(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE,
+                            "the zip has more than " + maxEntries + " entries");
+                }
                 String name = entry.getName().replace('\\', '/');
                 Path p = root.resolve(name).normalize();
                 if (!p.startsWith(root) || p.equals(root) && !entry.isDirectory()) {
@@ -248,7 +268,17 @@ public final class ReleaseReceiver {
                     Files.createDirectories(p);
                 } else {
                     Files.createDirectories(p.getParent());
-                    Files.copy(zin, p, StandardCopyOption.REPLACE_EXISTING);
+                    try (java.io.OutputStream out = Files.newOutputStream(p)) {
+                        int n;
+                        while ((n = zin.read(buf)) > 0) {
+                            written += n;
+                            if (written > maxBytes) {
+                                throw new Refused(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE,
+                                        "the zip unpacks to more than " + (maxBytes / (1024 * 1024)) + " MB");
+                            }
+                            out.write(buf, 0, n);
+                        }
+                    }
                     files++;
                 }
             }

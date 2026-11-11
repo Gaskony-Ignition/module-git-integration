@@ -23,6 +23,9 @@ public final class RunnerAuth {
 
     private static final Logger logger = LoggerFactory.getLogger(RunnerAuth.class);
 
+    /** When each remote address last had a rejected token logged. */
+    private static final java.util.Map<String, Long> lastWarned = new java.util.concurrent.ConcurrentHashMap<>();
+
     private RunnerAuth() {
     }
 
@@ -39,8 +42,18 @@ public final class RunnerAuth {
         byte[] expected = cfg.tokenBytes();
         try {
             if (!tokenValid(req, expected)) {
-                // Deliberately not logged with the offered token.
-                logger.warn("Rejected a runner request with a bad or missing token.");
+                // Deliberately not logged with the offered token, and once a minute per address so
+                // a caller guessing tokens cannot fill the gateway log.
+                String from = req.getRequest().getRemoteAddr();
+                long now = System.currentTimeMillis();
+                Long last = lastWarned.get(from);
+                if (last == null || now - last >= 60_000L) {
+                    if (lastWarned.size() > 1000) {
+                        lastWarned.clear();
+                    }
+                    lastWarned.put(from, now);
+                    logger.warn("Rejected a runner request with a bad or missing token from {}.", from);
+                }
                 resp.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                 return "{\"error\":\"bad token\"}";
             }
