@@ -25,7 +25,7 @@ const FLAGS: [keyof PolicyFields, string][] = [
   ["layoutSwitch", "Switch the repository layout"],
   [
     "allowInsecureRemotes",
-    "Insecure remotes (local folders, file://, git://, http://, this machine)",
+    "Insecure remotes (file://, http://, git://, this machine)",
   ],
 ];
 
@@ -124,9 +124,9 @@ const Policy = () => {
         <div>
           <h3>Policy</h3>
           <p>
-            What Git Integration may do on this gateway
-            {mode ? ` in deployment mode ${mode}` : ""}. Versioned with the
-            config. <OverrideTag defined={policy.defined} from={policy.from} />
+            What Git Integration may do here
+            {mode ? ` in ${mode}` : ""}. Versioned with the config.{" "}
+            <OverrideTag defined={policy.defined} from={policy.from} />
           </p>
         </div>
         <div className="gitcfg-actions">
@@ -198,7 +198,9 @@ const Policy = () => {
                 <span>{label}</span>
               </label>
             ))}
-            <p className="gitcfg-hint">Deliveries allowed (Off always is):</p>
+            <p className="gitcfg-hint">
+              Deliveries allowed (Off always is allowed):
+            </p>
             {DELIVERIES.map(([d, label]) => (
               <label className="gitcfg-check" key={d}>
                 <input

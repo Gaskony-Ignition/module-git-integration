@@ -51,7 +51,7 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
             <span className="gitcfg-sync-status gitcfg-sync-off">
               Push off{" "}
               {status?.policy?.mode
-                ? `in deployment mode ${status.policy.mode}`
+                ? `in ${status.policy.mode}`
                 : "on this gateway"}
             </span>
           ) : null}

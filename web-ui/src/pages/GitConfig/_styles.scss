@@ -882,7 +882,6 @@ ul.gitcfg-hint {
 
 .gitcfg-graph {
   position: relative;
-  min-width: max-content;
 
   svg {
     position: absolute;
@@ -912,9 +911,14 @@ ul.gitcfg-hint {
 .gitcfg-graph-subject {
   display: inline-block;
   max-width: 22rem;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: bottom;
+}
+
+.gitcfg-graph-rows li > .gitcfg-meta {
+  flex: none;
 }
 
 .gitcfg-ref {

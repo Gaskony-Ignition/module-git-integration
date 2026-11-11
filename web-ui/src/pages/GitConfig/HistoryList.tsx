@@ -119,9 +119,8 @@ const HistoryList = () => {
         <div>
           <h3>History</h3>
           <p>
-            Every commit to this gateway&apos;s configuration repository, newest
-            first. Restore puts the configuration back as it was at that commit
-            and applies it without a restart.
+            Config commits, newest first. Restore applies a commit without a
+            restart.
           </p>
         </div>
       </div>

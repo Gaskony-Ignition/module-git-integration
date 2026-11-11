@@ -242,9 +242,8 @@ const Credentials = () => {
         <div>
           <h3>Credentials</h3>
           <p>
-            What this gateway authenticates with to repositories. Expiry and
-            scope are asked of the host when a credential is saved, daily, and
-            on Check.
+            Credentials this gateway uses for repositories. Expiry and scope are
+            checked on save, daily and on Check.
           </p>
         </div>
         <div className="gitcfg-actions">
@@ -267,9 +266,8 @@ const Credentials = () => {
           <Definitions {...credDefs} />
           {modes.length ? (
             <p className="gitcfg-hint">
-              A credential typed in here is encrypted with this gateway&apos;s
-              key. For a different secret per mode, a Secret Provider reference
-              is the safer choice.
+              Encrypted with this gateway&apos;s key. For a per-mode secret,
+              prefer a Secret Provider reference.
             </p>
           ) : null}
           {/*

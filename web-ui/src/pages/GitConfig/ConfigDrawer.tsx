@@ -276,14 +276,13 @@ const ConfigDrawer = ({
   const keepHint = configured ? " (leave blank to keep current)" : "";
 
   const drawerBody = (
-    <Form context={form} className="gitcfg-form">
+    <Form context={form} className="gitcfg gitcfg-form">
       <Card title="Remote">
         <Definitions {...defs} />
         {modes.length ? (
           <p className="gitcfg-hint">
-            Save writes the remote and its credential to the definition
-            selected. A Secret Provider reference is the safer choice for a
-            per-mode secret.
+            Saved to the selected definition. For a per-mode secret, prefer a
+            Secret Provider reference.
           </p>
         ) : null}
         <FormControlInput
@@ -523,6 +522,7 @@ const ConfigDrawer = ({
           <div className="gitcfg-layout-opt">
             <Checkbox
               defaultValue={restoreHistory}
+              disabled={!!refused.LAYOUT_SWITCH}
               onChange={(_e: unknown, checked: boolean) =>
                 setRestoreHistory(checked)
               }

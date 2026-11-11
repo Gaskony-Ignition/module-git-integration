@@ -83,8 +83,7 @@ const headline = (g: BranchGraphResp, project?: string): React.ReactNode => {
   }
   return (
     <>
-      Everyone editing {project ? "this project" : "it"} on this gateway is on{" "}
-      {b}.
+      {project ? "This project" : "It"} is on {b} for everyone editing it.
     </>
   );
 };
@@ -350,7 +349,9 @@ const BranchesView = ({
                         disabled={current || switching || !!switchRefused}
                         onClick={() => setTarget(b.name)}
                       >
-                        {switchRefused && !current
+                        {current
+                          ? "Checked out"
+                          : switchRefused
                           ? "Switch (not allowed by policy)"
                           : "Switch to this branch"}
                       </Button>
