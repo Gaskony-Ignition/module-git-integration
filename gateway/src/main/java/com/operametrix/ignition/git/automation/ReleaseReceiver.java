@@ -21,8 +21,6 @@ import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /**
  * The route a runner calls to install a release: the body is a project export zip, and the
@@ -121,7 +119,12 @@ public final class ReleaseReceiver {
             }
 
             Path staged = work.resolve("project");
-            int files = unzip(zip, staged, MAX_UNZIPPED_BYTES, MAX_ENTRIES);
+            int files;
+            try {
+                files = ReleaseZip.unzip(zip, staged, MAX_UNZIPPED_BYTES, MAX_ENTRIES);
+            } catch (ReleaseZip.Refused r) {
+                throw new Refused(r.status, r.getMessage());
+            }
             if (!Files.isRegularFile(staged.resolve("project.json"))) {
                 throw new Refused(HttpServletResponse.SC_BAD_REQUEST,
                         "the zip has no project.json at its root, so it is not a project export");
@@ -234,59 +237,6 @@ public final class ReleaseReceiver {
             }
         }
         return total;
-    }
-
-    /**
-     * Extracts every entry under {@code dest}, refusing any whose path would land outside it.
-     * Backslash separators are normalised: Windows PowerShell 5.1's Compress-Archive writes them.
-     * Stops at {@code maxBytes} unpacked or {@code maxEntries} entries, counted as written rather
-     * than trusted from the entry headers.
-     */
-    static int unzip(Path zip, Path dest, long maxBytes, int maxEntries) throws IOException, Refused {
-        Files.createDirectories(dest);
-        Path root = dest.toAbsolutePath().normalize();
-        int files = 0;
-        int entries = 0;
-        long written = 0;
-        byte[] buf = new byte[65536];
-        try (ZipInputStream zin = new ZipInputStream(Files.newInputStream(zip))) {
-            ZipEntry entry;
-            boolean any = false;
-            while ((entry = zin.getNextEntry()) != null) {
-                any = true;
-                if (++entries > maxEntries) {
-                    throw new Refused(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE,
-                            "the zip has more than " + maxEntries + " entries");
-                }
-                String name = entry.getName().replace('\\', '/');
-                Path p = root.resolve(name).normalize();
-                if (!p.startsWith(root) || p.equals(root) && !entry.isDirectory()) {
-                    throw new Refused(HttpServletResponse.SC_BAD_REQUEST,
-                            "the zip has an entry outside the project folder: " + name);
-                }
-                if (entry.isDirectory() || name.endsWith("/")) {
-                    Files.createDirectories(p);
-                } else {
-                    Files.createDirectories(p.getParent());
-                    try (java.io.OutputStream out = Files.newOutputStream(p)) {
-                        int n;
-                        while ((n = zin.read(buf)) > 0) {
-                            written += n;
-                            if (written > maxBytes) {
-                                throw new Refused(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE,
-                                        "the zip unpacks to more than " + (maxBytes / (1024 * 1024)) + " MB");
-                            }
-                            out.write(buf, 0, n);
-                        }
-                    }
-                    files++;
-                }
-            }
-            if (!any) {
-                throw new Refused(HttpServletResponse.SC_BAD_REQUEST, "the body is not a zip");
-            }
-        }
-        return files;
     }
 
     private static void deleteRecursively(Path root) throws IOException {
