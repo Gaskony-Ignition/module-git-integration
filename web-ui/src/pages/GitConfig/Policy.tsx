@@ -3,6 +3,7 @@ import { Button, Loading, useToastNotifications } from "../../webui";
 import { TextInput } from "./fields";
 import SettingsDrawer from "./SettingsDrawer";
 import AuditSetting from "./AuditSetting";
+import ScrollBox from "./ScrollBox";
 import Definitions, {
   OverrideTag,
   saveToParam,
@@ -142,7 +143,7 @@ const Policy = () => {
         </div>
       </div>
 
-      <div className="gitcfg-table-scroll">
+      <ScrollBox className="gitcfg-table-scroll gitcfg-policy-scroll">
         <table className="gitcfg-table">
           <thead>
             <tr>
@@ -176,7 +177,7 @@ const Policy = () => {
             <AuditSetting />
           </tbody>
         </table>
-      </div>
+      </ScrollBox>
 
       <SettingsDrawer
         open={open}

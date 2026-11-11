@@ -713,6 +713,11 @@ ul.gitcfg-hint {
   max-height: calc(100vh - 22rem);
 }
 
+// The Policy tab has nothing under its table, so the table takes the room down to the fold.
+.gitcfg-policy-scroll {
+  max-height: calc(100vh - 19rem);
+}
+
 // Runner access sits under the credentials table, so the table leaves room for it.
 .gitcfg-cred-scroll {
   max-height: calc(100vh - 27rem);
