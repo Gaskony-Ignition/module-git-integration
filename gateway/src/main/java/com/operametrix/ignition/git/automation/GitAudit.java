@@ -39,6 +39,9 @@ public final class GitAudit {
     public static final String CREDENTIAL_REMOVED = "git credential removed";
     public static final String OVERRIDE_CREATED = "git mode override created";
     public static final String OVERRIDE_REMOVED = "git mode override removed";
+    public static final String PROJECT_ADDED = "git project added from repository";
+    public static final String PULL = "git pull";
+    public static final String JOIN = "git join remote history";
 
     /** The gateway repository, where an action has no project. */
     public static final String GATEWAY = "gateway";

@@ -35,9 +35,8 @@ class ProjectScopeTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        List<String> ignore = new ArrayList<>(List.of("**/db/*", "**/logs", "*.log", "**/var", "/*",
+        List<String> ignore = LayoutSwitch.withCombinedRules(List.of("**/db/*", "**/logs", "*.log", "**/var", "/*",
                 "!/config/", "!/.gitignore"));
-        ignore.addAll(LayoutSwitch.BLOCK);
         write(data, ".gitignore", String.join("\n", ignore) + "\n");
         write(data, "config/a.json", "{\"a\":1}");
         write(data, "modules.json", "{}");

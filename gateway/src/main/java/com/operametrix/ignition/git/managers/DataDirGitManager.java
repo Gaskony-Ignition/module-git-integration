@@ -290,6 +290,43 @@ public class DataDirGitManager {
 
     private static final String POLICY_VERSIONED_MARKER = ".git-module-policy-versioned";
 
+    private static final String COMBINED_RULES_MARKER = ".git-module-combined-rules-v2";
+
+    /**
+     * 4.4.0, once, Combined only: the config globs scoped to /config/, the catch-all
+     * {@code !/projects/**} dropped and data.bin made an ordinary line
+     * ({@link LayoutSwitch#migrateCombinedRules}). Nothing else in the file changes.
+     */
+    public static boolean combinedRulesOnce() {
+        synchronized (DATA_DIR_LOCK) {
+            if (!isInitialized() || !GitManager.combined()
+                    || Files.exists(dataDir().resolve(COMBINED_RULES_MARKER))) {
+                return false;
+            }
+            boolean changed = false;
+            try {
+                Path gitignore = dataDir().resolve(".gitignore");
+                List<String> lines = Files.exists(gitignore) ? Files.readAllLines(gitignore) : List.of();
+                List<String> next = LayoutSwitch.migrateCombinedRules(lines);
+                if (next != null) {
+                    writeIgnoreFile(String.join("\n", next));
+                    try (Git git = GitManager.getGit(dataDir())) {
+                        git.add().addFilepattern(".gitignore").call();
+                        git.commit().setOnly(".gitignore")
+                                .setMessage(PolicyGate.trailer("Scope the config ignore rules to config/"))
+                                .setAuthor(gatewayAuthor(), "").call();
+                    }
+                    changed = true;
+                }
+                Files.writeString(dataDir().resolve(COMBINED_RULES_MARKER),
+                        "Combined ignore rules scoped to config/ by Git Integration 4.4.0.\n");
+            } catch (Exception e) {
+                logger.error("Could not update the Combined ignore rules; check the Git ignore tab.", e);
+            }
+            return changed;
+        }
+    }
+
     /**
      * 4.1.0, once: the records rule in an existing {@code .gitignore} is rewritten so the Git policy
      * is versioned and every other record of this module stays out. The marker stops it running
@@ -555,7 +592,11 @@ public class DataDirGitManager {
      * page reverts to the Initialize screen. Opens no JGit handle (so the working tree isn't
      * locked during the recursive delete).
      */
-    public static void deleteRepo() {
+    /**
+     * Deletes the gateway repository and its {@code .gitignore}. The saved remote and its credential
+     * link stay unless {@code removeRemote}, so initialising again (or Update from remote) reconnects.
+     */
+    public static void deleteRepo(boolean removeRemote) {
         synchronized (DATA_DIR_LOCK) {
             if (!isInitialized()) {
                 throw new RuntimeException("Config versioning is not initialized.");
@@ -565,7 +606,7 @@ public class DataDirGitManager {
                         + " Switch the layout back to Separate first, then delete versioning.");
             }
             try {
-                GitConfigRemoteRecord record = GitConfigRemoteRecord.get();
+                GitConfigRemoteRecord record = removeRemote ? GitConfigRemoteRecord.get() : null;
                 if (record != null) {
                     record.delete();
                 }
@@ -781,6 +822,154 @@ public class DataDirGitManager {
             }
         }
         return new String[]{local, remote};
+    }
+
+    /**
+     * Fetches the branch Remote sync pushes to, so ahead/behind and {@link #relation} are current.
+     * Changes nothing in the working tree.
+     */
+    public static void fetchConfig() {
+        GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+        if (remote == null) {
+            throw new RuntimeException("No remote configured.");
+        }
+        synchronized (DATA_DIR_LOCK) {
+            try (Git git = GitManager.getGit(dataDir())) {
+                String branch = pushBranch(git.getRepository(), remote);
+                FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
+                        .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
+                authOrigin(git, fetch, remote);
+                fetchBranch(fetch, branch);
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+            }
+        }
+    }
+
+    /** Commits on the fetched remote branch that are not here, and whether it shares no history. */
+    public record Relation(int behind, boolean unrelated) {}
+
+    public static Relation relation() {
+        GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+        if (remote == null || !isInitialized()) {
+            return new Relation(0, false);
+        }
+        synchronized (DATA_DIR_LOCK) {
+            try (Git git = GitManager.getGit(dataDir())) {
+                Repository repo = git.getRepository();
+                ObjectId head = repo.resolve("HEAD");
+                ObjectId tip = repo.resolve(trackingRef(pushBranch(repo, remote)));
+                if (head == null || tip == null) {
+                    return new Relation(0, false);
+                }
+                try (RevWalk walk = new RevWalk(repo)) {
+                    walk.setRevFilter(org.eclipse.jgit.revwalk.filter.RevFilter.MERGE_BASE);
+                    walk.markStart(walk.parseCommit(head));
+                    walk.markStart(walk.parseCommit(tip));
+                    if (walk.next() == null) {
+                        return new Relation(0, true);
+                    }
+                    walk.reset();
+                    walk.setRevFilter(org.eclipse.jgit.revwalk.filter.RevFilter.ALL);
+                    walk.markStart(walk.parseCommit(tip));
+                    walk.markUninteresting(walk.parseCommit(head));
+                    int n = 0;
+                    for (RevCommit ignored : walk) {
+                        n++;
+                    }
+                    return new Relation(n, false);
+                }
+            } catch (Exception e) {
+                return new Relation(0, false);
+            }
+        }
+    }
+
+    /**
+     * Pull on the Versioning page: the push branch merged in (fast-forward or merge), as
+     * {@link #pullFromBranch} does for a delivery but without the GitHub-merged check, which is for
+     * unattended deliveries. Refuses with the files when anything is uncommitted.
+     */
+    public static PullResult pullConfig() {
+        GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+        if (remote == null) {
+            throw new RuntimeException("No remote configured.");
+        }
+        PolicyGate.checkDelivery("pull");
+        String branch;
+        synchronized (DATA_DIR_LOCK) {
+            try (Git git = GitManager.getGit(dataDir())) {
+                branch = pushBranch(git.getRepository(), remote);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return pullFromBranch(branch, false);
+    }
+
+    /**
+     * Join remote history: for a remote branch with no commit in common with this gateway's
+     * repository (each gateway's repository starts with its own first commit), move this branch to
+     * the remote tip keeping the working tree as it is (soft reset), and commit what differs as one
+     * commit. Nothing on the gateway changes; push and pull work from then on.
+     *
+     * @return the new commit
+     */
+    public static String joinRemoteHistory(String user) {
+        PolicyGate.check(PolicyGate.Action.BRANCH_SWITCH);
+        GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+        if (remote == null) {
+            throw new RuntimeException("No remote configured.");
+        }
+        synchronized (DATA_DIR_LOCK) {
+            if (!isInitialized()) {
+                throw new RuntimeException("Config versioning is not initialised.");
+            }
+            ConfigAutoCommitter.hold(30_000);
+            try (Git git = GitManager.getGit(dataDir())) {
+                commitAllIfDirty("Config changes before joining the remote history");
+                Repository repo = git.getRepository();
+                String branch = pushBranch(repo, remote);
+                FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
+                        .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
+                authOrigin(git, fetch, remote);
+                fetchBranch(fetch, branch);
+                ObjectId tip = repo.resolve(trackingRef(branch));
+                if (tip == null) {
+                    throw new RuntimeException(PullGuard.missingBranch(branch, ORIGIN));
+                }
+                String layout = LayoutCheck.problem(repo, tip, null, ORIGIN + "/" + branch, GitManager.combined());
+                if (layout != null) {
+                    throw new RuntimeException(layout);
+                }
+                if (!relation().unrelated()) {
+                    throw new RuntimeException(ORIGIN + "/" + branch + " already shares history with this gateway's"
+                            + " repository; use Pull instead. Nothing was changed.");
+                }
+                git.reset().setMode(ResetCommand.ResetType.SOFT).setRef(tip.name()).call();
+                git.add().addFilepattern(".").call();
+                git.add().setUpdate(true).addFilepattern(".").call();
+                String who = user != null ? user : gatewayAuthor();
+                String commit = git.commit()
+                        .setMessage(PolicyGate.trailer("This gateway's config on top of " + ORIGIN + "/" + branch))
+                        .setAuthor(who, "").setCommitter(gatewayAuthor(), "").call().getName();
+                org.eclipse.jgit.lib.StoredConfig cfg = repo.getConfig();
+                cfg.setString("branch", repo.getBranch(), "remote", ORIGIN);
+                cfg.setString("branch", repo.getBranch(), "merge", "refs/heads/" + branch);
+                cfg.save();
+                GitEvents.fire(GitEvent.of(GitEvent.PULL).config().user(who).branch(branch).commit(commit)
+                        .message("Joined " + ORIGIN + "/" + branch + ": this gateway's config committed on top").success());
+                return commit;
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+            } finally {
+                ConfigAutoCommitter.hold(6_000);
+            }
+        }
     }
 
     /**
@@ -1158,6 +1347,12 @@ public class DataDirGitManager {
      * — a project's Designer work — refuses the switch and changes nothing.
      */
     public static LayoutSwitch.Result switchLayout(RepoLocator.Layout target, boolean restoreHistory, String user) {
+        return switchLayout(target, restoreHistory, false, user);
+    }
+
+    /** {@code archiveLeftovers}: to Separate, move a leftover {@code projects/<name>/.git} to the archive first. */
+    public static LayoutSwitch.Result switchLayout(RepoLocator.Layout target, boolean restoreHistory,
+                                                   boolean archiveLeftovers, String user) {
         PolicyGate.check(PolicyGate.Action.LAYOUT_SWITCH);
         if (!isInitialized()) {
             throw new RuntimeException("Config versioning is not initialised; initialise it first.");
@@ -1170,7 +1365,7 @@ public class DataDirGitManager {
                 String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss").format(new java.util.Date());
                 LayoutSwitch.Result r = target == RepoLocator.Layout.COMBINED
                         ? LayoutSwitch.toCombined(dataDir(), author, stamp, IgnitionReformat::realChanges)
-                        : LayoutSwitch.toSeparate(dataDir(), author, stamp, restoreHistory,
+                        : LayoutSwitch.toSeparate(dataDir(), author, stamp, restoreHistory, archiveLeftovers,
                                 IgnitionReformat::realChanges);
                 if (target == RepoLocator.Layout.SEPARATE) {
                     // The Designer only offers git to a registered project; a repository made here
@@ -1215,6 +1410,11 @@ public class DataDirGitManager {
      * as a project's Pull does in the Separate layout.
      */
     public static PullResult pullFromBranch(String branch) {
+        return pullFromBranch(branch, true);
+    }
+
+    /** {@code delivery}: an unattended delivery, which "Only deliver commits merged on GitHub" applies to. */
+    public static PullResult pullFromBranch(String branch, boolean delivery) {
         GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
         if (remote == null) {
             throw new RuntimeException("No remote is configured to pull from.");
@@ -1228,8 +1428,9 @@ public class DataDirGitManager {
                 Status status = git.status().call();
                 Set<String> edits = IgnitionReformat.realChanges(repo, status);
                 if (!edits.isEmpty()) {
-                    return new PullResult(false, "", List.of(), "local changes present ("
-                            + edits.size() + " uncommitted); not pulling");
+                    return new PullResult(false, "", new ArrayList<>(edits), "local changes present ("
+                            + edits.size() + " uncommitted: " + String.join(", ", edits.stream().sorted().limit(10).toList())
+                            + (edits.size() > 10 ? ", …" : "") + "); not pulling");
                 }
                 Set<String> reformatted = IgnitionReformat.reformatted(repo, status);
                 if (!reformatted.isEmpty()) {
@@ -1250,7 +1451,7 @@ public class DataDirGitManager {
                     throw new RuntimeException(layout);
                 }
                 ObjectId before = repo.resolve(Constants.HEAD);
-                if (!tip.equals(before)) {
+                if (delivery && !tip.equals(before)) {
                     String notMerged = GitHubMerged.refusal(repo, tip);
                     if (notMerged != null) {
                         return new PullResult(false, "", List.of(), notMerged,

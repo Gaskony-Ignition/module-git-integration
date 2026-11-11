@@ -46,21 +46,61 @@ public final class LayoutSwitch {
     public static final String BLOCK_END = "# --- end of Combined layout ---";
 
     /**
-     * Appended after the root rules ({@code /*}), since the last matching rule wins. The
-     * {@code **} negation is there because the template's globs ({@code **}{@code /db/*},
-     * {@code **}{@code /logs}, {@code *.log} ...) were written for config and would otherwise drop a
-     * project's script package called {@code db} or {@code logs}; a project's own repository in the
-     * Separate layout has no ignore file at all. Then the few per-gateway files go back out.
+     * Appended after the root rules ({@code /*}), since the last matching rule wins. The config
+     * globs are scoped to {@code /config/} when this block goes in ({@link IgnoreRules#scopeToConfig}),
+     * so re-including {@code projects/} is enough and rules written under it work. Then the few
+     * per-gateway runtime files go back out.
      */
     public static final List<String> BLOCK = List.of(
             BLOCK_START,
             "!/projects/",
-            "!/projects/**",
-            "/projects/*/ignition/global-props/data.bin",
             "/projects/**/*-wal",
             "/projects/**/*-shm",
             "/projects/**/.resources/",
             BLOCK_END);
+
+    /**
+     * A project's per-gateway properties: excluded by default, but an ordinary line after the block,
+     * so the Git ignore tab can tick it in to share it.
+     */
+    public static final String DATA_BIN = "/projects/*/ignition/global-props/data.bin";
+
+    /** The 4.0.0–4.3.x block's catch-all re-include, which overrode every rule under projects/. */
+    static final String OLD_REINCLUDE = "!/projects/**";
+
+    /** The Combined rules for {@code lines} (no block yet): globs scoped, block and data.bin added. */
+    static List<String> withCombinedRules(List<String> lines) {
+        List<String> out = new ArrayList<>(IgnoreRules.scopeToConfig(lines));
+        if (!out.isEmpty() && !out.get(out.size() - 1).isBlank()) {
+            out.add("");
+        }
+        out.addAll(BLOCK);
+        out.add(DATA_BIN);
+        return out;
+    }
+
+    /**
+     * Rewrites a 4.0.0–4.3.x Combined {@code .gitignore} once: scopes the managed config globs, drops
+     * the catch-all re-include and moves data.bin out of the block. Only those managed lines change.
+     *
+     * @return the new lines, or null when there is nothing to change
+     */
+    public static List<String> migrateCombinedRules(List<String> lines) {
+        int start = lines.indexOf(BLOCK_START);
+        int end = lines.indexOf(BLOCK_END);
+        if (start < 0 || end < start || !lines.subList(start, end).contains(OLD_REINCLUDE)) {
+            return null;
+        }
+        List<String> out = new ArrayList<>(IgnoreRules.scopeToConfig(lines));
+        List<String> block = out.subList(start, end + 1);
+        boolean hadDataBin = block.remove(DATA_BIN);
+        block.remove(OLD_REINCLUDE);
+        int newEnd = out.indexOf(BLOCK_END);
+        if (hadDataBin) {
+            out.add(newEnd + 1, DATA_BIN);
+        }
+        return out;
+    }
 
     public static final String ARCHIVE_DIR = "var/git-archive";
 
@@ -169,11 +209,9 @@ public final class LayoutSwitch {
             }
             List<String> lines = ignoreBefore == null ? new ArrayList<>() : new ArrayList<>(ignoreBefore.lines().toList());
             if (!lines.contains(BLOCK_START)) {
-                if (!lines.isEmpty() && !lines.get(lines.size() - 1).isBlank()) {
-                    lines.add("");
-                }
-                lines.addAll(BLOCK);
-                Files.writeString(gitignore, String.join("\n", lines) + "\n", StandardCharsets.UTF_8);
+                lines = withCombinedRules(lines);
+                // The deny block stays last: git's last match wins.
+                Files.writeString(gitignore, IgnoreRules.withDenyBlock(String.join("\n", lines)), StandardCharsets.UTF_8);
             }
             String commit;
             try (Git gw = open(dataDir)) {
@@ -206,6 +244,41 @@ public final class LayoutSwitch {
     /** Combined to Separate. */
     public static Result toSeparate(Path dataDir, PersonIdent author, String stamp, boolean restoreHistory,
                                     DirtyCheck dirty) throws Exception {
+        return toSeparate(dataDir, author, stamp, restoreHistory, false, dirty);
+    }
+
+    /**
+     * Why a project folder must not get a repository of its own here, or null: it leads outside the
+     * data directory (a symbolic link), sits on another file system (a mount), or is inside another
+     * git work tree below the data directory. A {@code .git} planted there would land in someone
+     * else's checkout.
+     */
+    static String foreignFolder(Path dataDir, String project) throws IOException {
+        Path dir = dataDir.resolve("projects").resolve(project);
+        Path realData = dataDir.toRealPath();
+        Path real = dir.toRealPath();
+        String name = "projects/" + project;
+        if (Files.isSymbolicLink(dir) || !real.startsWith(realData)) {
+            return name + " is a link to " + real + ", outside the data directory";
+        }
+        if (!Files.getFileStore(real).equals(Files.getFileStore(realData))) {
+            return name + " is a separate mount (" + Files.getFileStore(real).name() + ")";
+        }
+        for (Path p = real.getParent(); p != null && !p.equals(realData); p = p.getParent()) {
+            if (Files.exists(p.resolve(".git"))) {
+                return name + " is inside another git work tree (" + realData.relativize(p) + ")";
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Combined to Separate. A {@code projects/<name>/.git} left over from before blocks the switch
+     * unless {@code archiveLeftovers}, which moves it to {@code var/git-archive} as the switch to
+     * Combined does. A folder that leads outside the data directory is always refused.
+     */
+    public static Result toSeparate(Path dataDir, PersonIdent author, String stamp, boolean restoreHistory,
+                                    boolean archiveLeftovers, DirtyCheck dirty) throws Exception {
         if (RepoLocator.readLayout(dataDir) != RepoLocator.Layout.COMBINED) {
             throw new IllegalStateException("The layout is already Separate.");
         }
@@ -214,10 +287,35 @@ public final class LayoutSwitch {
         try (Git gw = open(dataDir)) {
             requireClean(gw, "The gateway repository", dirty, problems);
         }
-        for (String p : nestedRepos(dataDir)) {
-            problems.add("projects/" + p + " already has its own .git folder");
+        List<String> foreign = new ArrayList<>();
+        for (String p : projects) {
+            String why = foreignFolder(dataDir, p);
+            if (why != null) {
+                foreign.add(why);
+            }
+        }
+        if (!foreign.isEmpty()) {
+            throw new IllegalStateException("Nothing was changed: " + String.join("; ", foreign)
+                    + ". A project's own repository would be created there; move the project into the data"
+                    + " directory, or remove the link or mount, first.");
+        }
+        List<String> leftovers = nestedRepos(dataDir);
+        if (!archiveLeftovers) {
+            for (String p : leftovers) {
+                problems.add("projects/" + p + " already has its own .git folder (tick Archive leftover .git"
+                        + " folders to move it to " + ARCHIVE_DIR + ")");
+            }
         }
         refuseIf(problems);
+        for (String p : archiveLeftovers ? leftovers : List.<String>of()) {
+            Path archive = dataDir.resolve(ARCHIVE_DIR);
+            Files.createDirectories(archive);
+            Path to = archive.resolve(p + "-leftover-" + stamp + ".git");
+            for (int i = 2; Files.exists(to); i++) {
+                to = archive.resolve(p + "-leftover-" + stamp + "-" + i + ".git");
+            }
+            Files.move(dataDir.resolve("projects").resolve(p).resolve(".git"), to);
+        }
 
         Path gitignore = dataDir.resolve(".gitignore");
         String ignoreBefore = Files.exists(gitignore) ? Files.readString(gitignore, StandardCharsets.UTF_8) : null;
@@ -260,6 +358,14 @@ public final class LayoutSwitch {
                     int end = lines.indexOf(BLOCK_END);
                     if (start >= 0 && end >= start) {
                         lines.subList(start, end + 1).clear();
+                        lines.remove(DATA_BIN);
+                        lines = new ArrayList<>(IgnoreRules.unscope(lines));
+                        // The blank lines that set the block apart no longer separate anything.
+                        for (int i = lines.size() - 1; i > 0; i--) {
+                            if (lines.get(i).isBlank() && lines.get(i - 1).isBlank()) {
+                                lines.remove(i);
+                            }
+                        }
                         while (!lines.isEmpty() && lines.get(lines.size() - 1).isBlank()) {
                             lines.remove(lines.size() - 1);
                         }
@@ -293,7 +399,7 @@ public final class LayoutSwitch {
         }
     }
 
-    /** The newest {@code var/git-archive/<project>-<stamp>.git}, or null. */
+    /** The newest {@code var/git-archive/<project>-<stamp>.git}, or null (never a leftover). */
     public static Path latestArchive(Path dataDir, String project) throws IOException {
         Path archive = dataDir.resolve(ARCHIVE_DIR);
         if (!Files.isDirectory(archive)) {

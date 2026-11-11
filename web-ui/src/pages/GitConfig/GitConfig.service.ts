@@ -138,6 +138,9 @@ export interface CredentialCheck {
 }
 export interface RemoteResp {
   configured: boolean;
+  // Commits on the fetched remote branch not here; whether it shares no history (4.4.0).
+  behind?: number;
+  unrelated?: boolean;
   // Set when the repository's lone local branch is master and the remote's is this name.
   renameMaster?: string | null;
   from?: string | null;
@@ -427,6 +430,21 @@ export const gitConfigApi = baseApi.injectEndpoints({
     testRemote: builder.mutation<unknown, RemoteSecretReq>({
       query: (body) => ({ url: `${BASE}/remote-test`, method: "POST", body }),
     }),
+    fetchConfig: builder.mutation<unknown, void>({
+      query: () => ({ url: `${BASE}/config-fetch`, method: "POST", body: {} }),
+      invalidatesTags: ["remote", "history"],
+    }),
+    pullConfig: builder.mutation<
+      { ok: boolean; changed: boolean; message: string; files: string[] },
+      void
+    >({
+      query: () => ({ url: `${BASE}/config-pull`, method: "POST", body: {} }),
+      invalidatesTags: ["remote", "history", "status", "events"],
+    }),
+    joinConfig: builder.mutation<{ commit: string }, void>({
+      query: () => ({ url: `${BASE}/config-join`, method: "POST", body: {} }),
+      invalidatesTags: ["remote", "history", "status", "events"],
+    }),
     push: builder.mutation<{ from: string; to: string }, void>({
       query: () => ({ url: `${BASE}/push`, method: "POST", body: {} }),
       // History too: a push flips commits from local to remote.
@@ -592,7 +610,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
     // Switch the repository layout; refused (nothing changed) while anything is uncommitted.
     saveLayout: builder.mutation<
       { layout: Layout; projects: number; restored: number; archived: number },
-      { layout: Layout; restoreHistory: boolean }
+      { layout: Layout; restoreHistory: boolean; archiveLeftovers?: boolean }
     >({
       query: (body) => ({ url: `${BASE}/layout`, method: "POST", body }),
       invalidatesTags: [
@@ -630,8 +648,8 @@ export const gitConfigApi = baseApi.injectEndpoints({
       // the gateway auto-commits the edit, so the history does too.
       invalidatesTags: ["tree", "ignore", "status", "history"],
     }),
-    deinit: builder.mutation<unknown, void>({
-      query: () => ({ url: `${BASE}/deinit`, method: "POST", body: {} }),
+    deinit: builder.mutation<unknown, { removeRemote: boolean }>({
+      query: (body) => ({ url: `${BASE}/deinit`, method: "POST", body }),
       invalidatesTags: ["status", "history", "remote"],
     }),
     getEvents: builder.query<EventsResp, void>({
@@ -671,6 +689,36 @@ export const gitConfigApi = baseApi.injectEndpoints({
       }),
       // "projects" too: a runner delivery shows as inactive while the runner is off.
       invalidatesTags: ["definition", "runner", "projects"],
+    }),
+    peekProject: builder.mutation<
+      { branches: string[]; defaultBranch: string; suggestedName: string },
+      {
+        url: string;
+        branch?: string;
+        sshKeyId?: number;
+        httpsCredentialId?: number;
+      }
+    >({
+      query: (body) => ({
+        url: `${BASE}/project-add-peek`,
+        method: "POST",
+        body,
+      }),
+    }),
+    addProject: builder.mutation<
+      { ok: boolean; project: string; branch: string },
+      {
+        name: string;
+        url: string;
+        branch?: string;
+        sshKeyId?: number;
+        httpsCredentialId?: number;
+        delivery?: string;
+        intervalSeconds?: number;
+      }
+    >({
+      query: (body) => ({ url: `${BASE}/project-add`, method: "POST", body }),
+      invalidatesTags: ["projects", "events"],
     }),
     getAudit: builder.query<AuditSettings, void>({
       query: () => `${BASE}/audit`,
@@ -805,4 +853,9 @@ export const {
   useGetDefinitionQuery,
   useGetAuditQuery,
   useSaveAuditMutation,
+  usePeekProjectMutation,
+  useAddProjectMutation,
+  useFetchConfigMutation,
+  usePullConfigMutation,
+  useJoinConfigMutation,
 } = gitConfigApi;

@@ -104,6 +104,7 @@ const ConfigDrawer = ({
   const combined = layout === "combined";
   const [confirmLayout, setConfirmLayout] = useState(false);
   const [restoreHistory, setRestoreHistory] = useState(true);
+  const [archiveLeftovers, setArchiveLeftovers] = useState(false);
   const [deliveryBranch, setDeliveryBranch] = useState("");
   const [deliveryEvery, setDeliveryEvery] = useState("300");
   const modes = useModes();
@@ -140,6 +141,7 @@ const ConfigDrawer = ({
   } | null>(null);
   const [confirmRemoveRemote, setConfirmRemoveRemote] = useState(false);
   const [confirmDeinit, setConfirmDeinit] = useState(false);
+  const [dropRemote, setDropRemote] = useState(false);
 
   // Prefill from the saved remote each time the drawer opens (embedded secrets stay blank), and
   // from the selected definition when another one is chosen.
@@ -528,6 +530,14 @@ const ConfigDrawer = ({
               }
               label="Restore each project's earlier history, where one was kept"
             />
+            <Checkbox
+              defaultValue={archiveLeftovers}
+              disabled={!!refused.LAYOUT_SWITCH}
+              onChange={(_e: unknown, checked: boolean) =>
+                setArchiveLeftovers(checked)
+              }
+              label="Archive leftover .git folders in project folders (to var/git-archive)"
+            />
           </div>
         ) : null}
         {refused.LAYOUT_SWITCH ? (
@@ -548,12 +558,23 @@ const ConfigDrawer = ({
         </div>
       </Card>
 
-      <Card title="Danger Zone" className="gitcfg-danger-card">
+      <Card title="Danger zone" className="gitcfg-danger-card">
         <p className="gitcfg-off">
           {combined
             ? "Switch the layout to Separate before deleting versioning: this repository holds every project too."
             : "This action will permanently delete the gateway's versioning"}
         </p>
+        <label className="gitcfg-check">
+          <input
+            type="checkbox"
+            checked={dropRemote}
+            onChange={(e) => setDropRemote(e.target.checked)}
+          />
+          <span>
+            Also remove the saved remote (kept otherwise, so initialising again
+            reconnects)
+          </span>
+        </label>
         <Button
           colorClass="destructive"
           startIcon={<DeleteGw width={16} height={16} />}
@@ -625,6 +646,7 @@ const ConfigDrawer = ({
           saveLayout({
             layout: combined ? "separate" : "combined",
             restoreHistory,
+            archiveLeftovers,
           })
             .unwrap()
             .then((r) =>
@@ -644,8 +666,9 @@ const ConfigDrawer = ({
         type="confirm"
         title="Delete versioning"
         modalConfig={{
-          confirmationText:
-            "Removing versioning deletes all version history in the gateway data directory. Saved credentials are kept.",
+          confirmationText: dropRemote
+            ? "Removing versioning deletes all version history in the gateway data directory, and the saved remote. Saved credentials are kept."
+            : "Removing versioning deletes all version history in the gateway data directory. The saved remote and credentials are kept.",
           primaryText: "Delete versioning",
           secondaryText: "Cancel",
           warningGeneral: true,
@@ -653,7 +676,7 @@ const ConfigDrawer = ({
         onClose={() => setConfirmDeinit(false)}
         onConfirm={() => {
           setConfirmDeinit(false);
-          deinit();
+          deinit({ removeRemote: dropRemote });
           onClose();
         }}
       />

@@ -54,8 +54,8 @@ public final class LayoutCheck {
                 walk.markStart(walk.parseCommit(localHead));
                 if (walk.next() == null) {
                     return where + " has a history unrelated to this gateway's repository, so it was not"
-                            + " pushed over or merged. Bring this gateway's commits into that repository"
-                            + " (restructured to this layout), or push to a new branch. See " + DOC + ".";
+                            + " pushed over or merged. Use Join remote history on the Versioning page to put"
+                            + " this gateway's config on top of it, or push to a new branch. See " + DOC + ".";
                 }
             }
         }

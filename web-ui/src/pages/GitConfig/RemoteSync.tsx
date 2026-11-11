@@ -1,7 +1,10 @@
 import React, { useState } from "react";
 import { SettingsGw, Refresh } from "@inductiveautomation/ignition-icons";
-import { Button, PageHeader, useToastNotifications } from "../../webui";
+import { Button, Modal, PageHeader, useToastNotifications } from "../../webui";
 import {
+  useFetchConfigMutation,
+  useJoinConfigMutation,
+  usePullConfigMutation,
   useGetRemoteQuery,
   useGetStatusQuery,
   usePushMutation,
@@ -28,6 +31,11 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
   const [rename, { isLoading: renaming }] = useRenameMasterMutation();
   const switchRefused = status?.policy?.refused?.BRANCH_SWITCH;
   const toasts = useToastNotifications();
+  const [fetchConfig, { isLoading: fetching }] = useFetchConfigMutation();
+  const [pull, { isLoading: pulling }] = usePullConfigMutation();
+  const [join, { isLoading: joining }] = useJoinConfigMutation();
+  const [confirmJoin, setConfirmJoin] = useState(false);
+  const pullRefused = status?.policy?.refused?.["delivery:pull"];
 
   const configured = !!(remote && remote.configured);
   const ahead = remote?.ahead ?? 0;
@@ -73,6 +81,47 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
             </Button>
           ) : null}
           <Button
+            colorClass="secondary"
+            disabled={fetching}
+            onClick={() =>
+              fetchConfig().unwrap().catch(errorToast(toasts, "Fetch failed"))
+            }
+          >
+            {fetching ? "Fetching…" : "Fetch"}
+          </Button>
+          {remote?.unrelated ? (
+            <Button
+              colorClass="primary"
+              disabled={joining || !!switchRefused}
+              title={switchRefused || undefined}
+              onClick={() => setConfirmJoin(true)}
+            >
+              Join remote history…
+            </Button>
+          ) : (
+            <Button
+              colorClass={(remote?.behind ?? 0) > 0 ? "primary" : "secondary"}
+              disabled={pulling || !!pullRefused}
+              title={pullRefused || undefined}
+              onClick={() =>
+                pull()
+                  .unwrap()
+                  .then((r) =>
+                    toasts.notifySuccess(
+                      r.changed ? `Pulled: ${r.message}` : "Already up to date"
+                    )
+                  )
+                  .catch(errorToast(toasts, "Pull failed"))
+              }
+            >
+              {pulling
+                ? "Pulling…"
+                : (remote?.behind ?? 0) > 0
+                ? `Pull (${remote?.behind})`
+                : "Pull"}
+            </Button>
+          )}
+          <Button
             colorClass={unsynced && !pushRefused ? "primary" : "secondary"}
             startIcon={<Refresh width={18} height={18} />}
             disabled={pushing || !!pushRefused}
@@ -109,6 +158,29 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
       {initialized ? (
         <ConfigDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
       ) : null}
+      <Modal
+        open={confirmJoin}
+        type="confirm"
+        title="Join remote history"
+        modalConfig={{
+          confirmationText: `The remote branch ${
+            remote?.pushTo ?? ""
+          } started from another gateway, so it shares no history with this one and push and pull refuse it. Joining moves this gateway's branch onto the remote's latest commit and records this gateway's config, exactly as it is now, as one commit on top. Nothing on this gateway changes; the next push sends that commit. Refused if the remote's layout does not match.`,
+          primaryText: joining ? "Joining…" : "Join",
+          secondaryText: "Cancel",
+          warningGeneral: true,
+        }}
+        onClose={() => setConfirmJoin(false)}
+        onConfirm={() => {
+          setConfirmJoin(false);
+          join()
+            .unwrap()
+            .then((r) =>
+              toasts.notifySuccess(`Joined: ${r.commit.slice(0, 7)} on top`)
+            )
+            .catch(errorToast(toasts, "Could not join the remote history"));
+        }}
+      />
     </>
   );
 };

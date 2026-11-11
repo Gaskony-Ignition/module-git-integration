@@ -25,11 +25,9 @@ class IgnoreRulesTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        List<String> lines = new ArrayList<>(IgnoreRules.TEMPLATE);
-        lines.add("");
-        lines.addAll(LayoutSwitch.BLOCK);
+        List<String> lines = LayoutSwitch.withCombinedRules(IgnoreRules.TEMPLATE);
         Path gitignore = data.resolve(".gitignore");
-        Files.writeString(gitignore, String.join("\n", lines) + "\n");
+        Files.writeString(gitignore, IgnoreRules.withDenyBlock(String.join("\n", lines)));
         rules = IgnoreRules.parse(gitignore);
     }
 
@@ -123,5 +121,46 @@ class IgnoreRulesTest {
         assertThat(excluded("config/resources/core/com.operametrix.ignition.git/git-sync/1/config.json", false))
                 .isTrue();
         assertThat(excluded("config/resources/core/ignition/security-levels/config.json", false)).isFalse();
+    }
+
+    @Test
+    void dataBinIsAnOrdinaryLineAndRulesUnderProjectsWork() throws Exception {
+        List<String> lines = new ArrayList<>(LayoutSwitch.withCombinedRules(IgnoreRules.TEMPLATE));
+        assertThat(lines.indexOf(LayoutSwitch.DATA_BIN)).isGreaterThan(lines.indexOf(LayoutSwitch.BLOCK_END));
+        // An admin's own rule under projects/ now applies; the old catch-all re-include overrode it.
+        lines.add("/projects/A/tmp/");
+        Path gitignore = data.resolve(".gitignore");
+        Files.writeString(gitignore, IgnoreRules.withDenyBlock(String.join("\n", lines)));
+        rules = IgnoreRules.parse(gitignore);
+        assertThat(excluded("projects/A/tmp/x.json", false)).isTrue();
+        assertThat(excluded("projects/A/ignition/script-python/db/code.py", false)).isFalse();
+        assertThat(IgnoreRules.isOwnLine(IgnoreRules.decide(rules, "projects/A/ignition/global-props/data.bin", false)
+                .rule(), "projects/A/ignition/global-props/data.bin", false)).isFalse();
+    }
+
+    @Test
+    void theOldCombinedBlockIsMigratedOnceToTheSameDecisions() throws Exception {
+        List<String> old = new ArrayList<>(IgnoreRules.TEMPLATE);
+        old.add("");
+        old.addAll(List.of(LayoutSwitch.BLOCK_START, "!/projects/", "!/projects/**", LayoutSwitch.DATA_BIN,
+                "/projects/**/*-wal", "/projects/**/*-shm", "/projects/**/.resources/", LayoutSwitch.BLOCK_END,
+                "/mine.txt"));
+        List<String> once = LayoutSwitch.migrateCombinedRules(old);
+        assertThat(once).doesNotContain("!/projects/**", "**/db/*").contains("/config/**/db/*", "/mine.txt");
+        assertThat(once.indexOf(LayoutSwitch.DATA_BIN)).isEqualTo(once.indexOf(LayoutSwitch.BLOCK_END) + 1);
+        assertThat(LayoutSwitch.migrateCombinedRules(once)).isNull();
+        assertThat(LayoutSwitch.migrateCombinedRules(IgnoreRules.TEMPLATE)).isNull();
+        Path gitignore = data.resolve(".gitignore");
+        Files.writeString(gitignore, IgnoreRules.withDenyBlock(String.join("\n", once)));
+        rules = IgnoreRules.parse(gitignore);
+        assertThat(excluded("projects/A/ignition/script-python/db/code.py", false)).isFalse();
+        assertThat(excluded("projects/A/ignition/global-props/data.bin", false)).isTrue();
+        assertThat(excluded("config/resources/core/x/db/a.json", false)).isTrue();
+        assertThat(excluded("config/x/app.log", false)).isTrue();
+    }
+
+    @Test
+    void theSwitchBackUnscopesTheGlobs() {
+        assertThat(IgnoreRules.unscope(IgnoreRules.scopeToConfig(IgnoreRules.TEMPLATE))).isEqualTo(IgnoreRules.TEMPLATE);
     }
 }

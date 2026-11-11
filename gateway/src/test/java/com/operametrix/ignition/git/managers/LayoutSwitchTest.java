@@ -39,8 +39,9 @@ class LayoutSwitchTest {
 
     @BeforeEach
     void separateGateway() throws Exception {
-        write(data, ".gitignore", String.join("\n", "**/db/*", "**/var", "**/*-wal", "/*", "!/config/",
-                "!/.gitignore") + "\n");
+        // As a gateway writes it: the deny block last.
+        write(data, ".gitignore", IgnoreRules.withDenyBlock(String.join("\n", "**/db/*", "**/var", "**/*-wal", "/*",
+                "!/config/", "!/.gitignore")));
         write(data, "config/resources/core/a.json", "{\"a\":1}");
         write(data, "logs/wrapper.log", "noise");
         try (Git g = Git.init().setDirectory(data.toFile()).call()) {

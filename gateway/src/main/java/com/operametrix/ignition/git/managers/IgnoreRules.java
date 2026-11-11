@@ -106,6 +106,39 @@ public final class IgnoreRules {
             "!/.gitignore"
     );
 
+    /**
+     * Template lines written for config that would otherwise also hit {@code projects/} in the
+     * Combined layout (a script package called {@code db} or {@code logs}, a view called
+     * {@code request}), with the {@code /config/}-scoped line each becomes there. The key and
+     * certificate globs and the SQLite sidecars stay global on purpose.
+     */
+    public static final java.util.Map<String, String> CONFIG_SCOPED = scoped(
+            "**/db/*", "**/metricsdb/*", "**/autobackup/*", "**/db_backup_sqlite.idb", "**/valueStore.idb",
+            "**/jar-cache/*", "**/request*", "**/response*", "*.tmp", "*.bak", "**/var", "*.log", "**/logs",
+            "**/.container-init.conf", "**/conversion-report.txt", "**.digest.json", "**/migration-log-*.md",
+            "**/.resources/", "**/.alarms_*");
+
+    private static java.util.Map<String, String> scoped(String... globs) {
+        java.util.Map<String, String> m = new java.util.LinkedHashMap<>();
+        for (String g : globs) {
+            String rest = g.startsWith("**/") ? g.substring(3) : g.startsWith("**") ? "*" + g.substring(2) : g;
+            m.put(g, "/config/**/" + rest);
+        }
+        return java.util.Collections.unmodifiableMap(m);
+    }
+
+    /** {@code lines} with each managed template glob replaced by its {@code /config/} form; others as they are. */
+    public static List<String> scopeToConfig(List<String> lines) {
+        return lines.stream().map(l -> CONFIG_SCOPED.getOrDefault(l.trim(), l)).toList();
+    }
+
+    /** The reverse of {@link #scopeToConfig}, for the switch back to Separate. */
+    public static List<String> unscope(List<String> lines) {
+        java.util.Map<String, String> back = new java.util.HashMap<>();
+        CONFIG_SCOPED.forEach((k, v) -> back.put(v, k));
+        return lines.stream().map(l -> back.getOrDefault(l.trim(), l)).toList();
+    }
+
     /** Heads the block {@link #withDenyBlock} keeps at the end of {@code .gitignore}. */
     public static final String DENY_MARKER =
             "# Never versioned: keys, certificates and per-gateway secrets (kept last by the Git module)";
@@ -121,6 +154,9 @@ public final class IgnoreRules {
             "**/keystore/",
             "**/certificates/",
             "/ignition.conf",
+            // Internal user sources keep each user's password hash (and hash history) here, in every
+            // collection; config.json and resource.json beside it hold settings only (8.3.10).
+            "**/ignition/user-source/*/users.json",
             "*.jks",
             "*.p12",
             "*.pfx",

@@ -744,6 +744,179 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         }
     }
 
+    // ── Add project from repository (4.4.0) ──────────────────────────────────────────────────
+
+    /** What the add drawer offers for a repository: its branches, the default one, a project name. */
+    public record RepoPeek(List<String> branches, String defaultBranch, String suggestedName) {}
+
+    /** Where a clone is built before it becomes a project; on the same disk, so the move is a rename. */
+    private static Path addWorkDir() throws java.io.IOException {
+        Path base = GitManager.getDataFolderPath().resolve("var").resolve("git-module-add");
+        Files.createDirectories(base);
+        return Files.createTempDirectory(base, "add-");
+    }
+
+    /** A temporary repository with {@code url} as origin and the given credential. */
+    private static Git tempRepo(Path dir, String url) throws Exception {
+        Git git = Git.init().setDirectory(dir.toFile()).call();
+        RepoHardening.harden(git.getRepository());
+        git.remoteAdd().setName("origin").setUri(new URIish(url)).call();
+        return git;
+    }
+
+    /** The remote's branches, and its default (HEAD's target, else a well-known name). */
+    private String[] branchesOf(Git git, String url, long sshKeyId, long httpsId, List<String> out) throws Exception {
+        LsRemoteCommand ls = git.lsRemote().setRemote("origin");
+        GitManager.setAuthenticationFromIds(ls, url, sshKeyId, httpsId);
+        java.util.Map<String, Ref> refs = ls.callAsMap();
+        refs.keySet().stream().filter(n -> n.startsWith("refs/heads/"))
+                .map(n -> n.substring("refs/heads/".length())).sorted().forEach(out::add);
+        if (out.isEmpty()) {
+            throw new RuntimeException("The repository has no branches yet, so there is no project to add.");
+        }
+        Ref head = refs.get("HEAD");
+        String def = head != null && head.isSymbolic() ? head.getTarget().getName() : null;
+        return new String[] {def != null && def.startsWith("refs/heads/") ? def.substring(11)
+                : detectDefaultBranchFromRefs(refs.values())};
+    }
+
+    private static String checkAddInputs(String url, String user, long sshKeyId, long httpsId) {
+        refuseInCombined("Adding a project from its repository");
+        if (url == null || url.isBlank()) {
+            throw new IllegalArgumentException("A repository URL is required.");
+        }
+        PolicyGate.checkHost(url.trim());
+        requireOwnCredentials(user, sshKeyId, httpsId);
+        return url.trim();
+    }
+
+    /**
+     * Reads a repository without keeping anything: its branches and a project name from the root
+     * {@code project.json}'s title (letters, digits, _ and - only), else the repository's name.
+     */
+    public RepoPeek peekRepository(String url, String branch, String user, long sshKeyId, long httpsId)
+            throws Exception {
+        url = checkAddInputs(url, user, sshKeyId, httpsId);
+        Path work = addWorkDir();
+        try (Git git = tempRepo(work, url)) {
+            List<String> branches = new java.util.ArrayList<>();
+            String def = branchesOf(git, url, sshKeyId, httpsId, branches)[0];
+            String b = branch == null || branch.isBlank() ? def : branch.trim();
+            String title = null;
+            if (branches.contains(b)) {
+                FetchCommand fetch = git.fetch().setRemote("origin").setDepth(1)
+                        .setRefSpecs(new RefSpec("+refs/heads/" + b + ":refs/remotes/origin/" + b));
+                GitManager.setAuthenticationFromIds(fetch, url, sshKeyId, httpsId);
+                fetch.call();
+                title = projectTitle(git.getRepository(), "refs/remotes/origin/" + b);
+            }
+            String base = url.replaceAll("[/\\\\]+$", "");
+            base = base.substring(Math.max(base.lastIndexOf('/'), base.lastIndexOf(':')) + 1).replaceAll("\\.git$", "");
+            return new RepoPeek(branches, def, safeName(title != null && !title.isBlank() ? title : base));
+        } finally {
+            deleteRecursively(work);
+        }
+    }
+
+    /** A project name made of what Ignition allows: other characters become _, ends trimmed. */
+    static String safeName(String s) {
+        String n = s == null ? "" : s.trim().replaceAll("[^A-Za-z0-9_-]+", "_").replaceAll("^[_-]+|[_-]+$", "");
+        return n.isEmpty() ? "Project" : n;
+    }
+
+    /** The {@code title} in the root project.json at {@code ref}, or null. */
+    private static String projectTitle(org.eclipse.jgit.lib.Repository repo, String ref) {
+        try (org.eclipse.jgit.revwalk.RevWalk walk = new org.eclipse.jgit.revwalk.RevWalk(repo);
+             org.eclipse.jgit.treewalk.TreeWalk tw = org.eclipse.jgit.treewalk.TreeWalk.forPath(
+                     repo, "project.json", walk.parseCommit(repo.resolve(ref)).getTree())) {
+            if (tw == null) {
+                return null;
+            }
+            byte[] json = repo.open(tw.getObjectId(0)).getCachedBytes(1 << 20);
+            com.inductiveautomation.ignition.common.gson.JsonObject o = new com.inductiveautomation.ignition.common.gson.Gson().fromJson(
+                    new String(json, java.nio.charset.StandardCharsets.UTF_8),
+                    com.inductiveautomation.ignition.common.gson.JsonObject.class);
+            return o != null && o.has("title") && !o.get("title").isJsonNull() ? o.get("title").getAsString() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Brings in a project the gateway does not have: clones {@code branch} (the remote's default
+     * when blank) into a temporary folder, refuses a branch with no root project.json, then moves
+     * it to {@code projects/<name>}, registers it like a linked project and asks Ignition to scan.
+     * Separate layout only. On any failure the temporary folder is removed and nothing is left.
+     *
+     * @return {@code [branch, head commit]}
+     */
+    public String[] addProjectFromRepository(String name, String url, String branch, String user,
+                                             long sshKeyId, long httpsId) throws Exception {
+        url = checkAddInputs(url, user, sshKeyId, httpsId);
+        SafePaths.projectName(name);
+        Path target = getProjectFolderPath(name);
+        if (context.getProjectManager().getNames().contains(name) || Files.exists(target)) {
+            throw new IllegalArgumentException("There is already a project '" + name + "' on this gateway;"
+                    + " choose another name.");
+        }
+        Path work = addWorkDir();
+        String b;
+        String head;
+        try {
+            try (Git git = tempRepo(work, url)) {
+                List<String> branches = new java.util.ArrayList<>();
+                String def = branchesOf(git, url, sshKeyId, httpsId, branches)[0];
+                b = branch == null || branch.isBlank() ? def : branch.trim();
+                if (!branches.contains(b)) {
+                    throw new RuntimeException("Branch '" + b + "' is not on the remote. Branches there: "
+                            + String.join(", ", branches));
+                }
+                FetchCommand fetch = git.fetch().setRemote("origin")
+                        .setRefSpecs(new RefSpec("+refs/heads/" + b + ":refs/remotes/origin/" + b));
+                GitManager.setAuthenticationFromIds(fetch, url, sshKeyId, httpsId);
+                fetch.call();
+                requireRootProjectJson(git, "origin", b);
+                // Checked out only now, with symbolic links off (harden), never by the clone itself.
+                git.checkout().setName(b).setCreateBranch(true)
+                        .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
+                        .setStartPoint("origin/" + b).call();
+                org.eclipse.jgit.lib.ObjectId h = git.getRepository().resolve("HEAD");
+                head = h == null ? "" : h.getName();
+            }
+            Files.move(work, target);
+        } finally {
+            if (Files.exists(work)) {
+                deleteRecursively(work);
+            }
+        }
+        try {
+            GitProjectsConfigRecord projectRecord = new GitProjectsConfigRecord();
+            projectRecord.setProjectName(name);
+            projectRecord.save();
+            GitReposUsersRecord userRecord = new GitReposUsersRecord();
+            userRecord.setProjectId(projectRecord.getId());
+            userRecord.setIgnitionUser(user);
+            userRecord.save();
+            GitRemoteCredentialsRecord creds = new GitRemoteCredentialsRecord();
+            creds.setProjectId(projectRecord.getId());
+            creds.setIgnitionUser(user);
+            creds.setRemoteName("origin");
+            creds.setSshKeyId(Math.max(sshKeyId, 0));
+            creds.setHttpsCredentialId(Math.max(httpsId, 0));
+            creds.save();
+        } catch (Exception e) {
+            // The folder is in place but unregistered: take it back out rather than leave half a project.
+            deleteRecursively(target);
+            ProjectRecords.reconcile();
+            throw e;
+        }
+        context.getProjectManager().requestScan();
+        GitEvents.fire(GitEvent.of(GitEvent.PULL).project(name).user(user).branch(b).commit(head)
+                .remote(url).message("Added from its repository").success());
+        GitAudit.record(GitAudit.PROJECT_ADDED, user, name, b, head, "remote=" + url);
+        return new String[] {b, head};
+    }
+
     private void deleteRecursively(Path root) {
         try (java.util.stream.Stream<Path> walk = Files.walk(root)) {
             walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {

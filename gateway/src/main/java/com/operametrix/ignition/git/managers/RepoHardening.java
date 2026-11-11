@@ -276,6 +276,13 @@ public final class RepoHardening {
             if (!after.equals(before) || !untracked.isEmpty()) {
                 DataDirGitManager.commitAllIfDirty("Never version keys, certificates or local config");
             }
+            if (untracked.stream().anyMatch(p -> p.endsWith("/users.json") && p.contains("/user-source/"))) {
+                String msg = "Stopped versioning internal users' password hashes; older commits still contain"
+                        + " them — rotate those passwords if the repository was shared.";
+                logger.warn(msg);
+                com.operametrix.ignition.git.automation.GitEvents.fire(
+                        com.operametrix.ignition.git.automation.GitEvent.of("ignore").config().warning(msg));
+            }
         }
     }
 

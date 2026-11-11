@@ -29,6 +29,7 @@ import Definitions, {
   useModes,
 } from "./ModeScope";
 import ScrollBox, { RowCount } from "./ScrollBox";
+import AddProject from "./AddProject";
 
 const DELIVERY_LABEL: Record<Delivery, string> = {
   off: "Off",
@@ -240,8 +241,8 @@ const Projects = () => {
             <p>
               Every project is in the gateway repository (Combined layout). The
               branch, remote and pulls are the gateway&apos;s, set in Configure
-              Versioning; a project&apos;s own delivery is Off or a runner
-              release.
+              versioning; a project&apos;s own delivery is Off or a runner
+              release. New projects come in with the gateway repository (pull).
             </p>
           ) : (
             <p>
@@ -249,6 +250,9 @@ const Projects = () => {
               is Off until you choose one.
             </p>
           )}
+        </div>
+        <div className="gitcfg-actions">
+          <AddProject combined={combined} />
         </div>
       </div>
 

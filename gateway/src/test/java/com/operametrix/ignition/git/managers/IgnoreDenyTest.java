@@ -46,4 +46,13 @@ class IgnoreDenyTest {
         assertThat(IgnoreRules.denied("projects/A/keys/id.key")).isTrue();
         assertThat(IgnoreRules.denied("config/resources/core/ignition/tag-provider/default/config.json")).isFalse();
     }
+
+    @Test
+    void internalUsersPasswordHashesAreNeverVersionedInAnyCollection() throws Exception {
+        assertThat(IgnoreRules.denied("config/resources/core/ignition/user-source/default/users.json")).isTrue();
+        assertThat(IgnoreRules.denied("config/resources/Prod/ignition/user-source/plant/users.json")).isTrue();
+        assertThat(IgnoreRules.denied("config/resources/core/ignition/user-source/default/config.json")).isFalse();
+        String reinclude = "!**/ignition/user-source/*/users.json\n!/config/resources/core/ignition/user-source/default/users.json";
+        assertThat(excluded(reinclude, "config/resources/core/ignition/user-source/default/users.json", false)).isTrue();
+    }
 }

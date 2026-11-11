@@ -207,6 +207,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             if (DataDirGitManager.versionPolicyOnce()) {
                 logger.info("Config repository now versions the Git policy.");
             }
+            if (DataDirGitManager.combinedRulesOnce()) {
+                logger.info("Combined layout: config ignore rules now apply under config/ only.");
+            }
         } catch (Exception e) {
             logger.error("Could not version the Git policy; check the Git ignore tab.", e);
         }
@@ -510,12 +513,143 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         routes.newRoute("/definition").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.READ).nocache()
                 .handler(this::handleGetDefinition).mount();
+        routes.newRoute("/config-fetch").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleConfigFetch).mount();
+        routes.newRoute("/config-pull").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleConfigPull).mount();
+        routes.newRoute("/config-join").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleConfigJoin).mount();
+        routes.newRoute("/project-add-peek").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleProjectAddPeek).mount();
+        routes.newRoute("/project-add").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(scoped(this::handleProjectAdd)).mount();
         routes.newRoute("/audit").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.READ).nocache()
                 .handler(this::handleGetAudit).mount();
         routes.newRoute("/audit").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleSaveAudit).mount();
+    }
+
+    private Object handleConfigFetch(RequestContext req, HttpServletResponse resp) {
+        try {
+            DataDirGitManager.fetchConfig();
+            DataDirGitManager.Relation r = DataDirGitManager.relation();
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", true);
+            o.addProperty("ahead", DataDirGitManager.aheadCount());
+            o.addProperty("behind", r.behind());
+            o.addProperty("unrelated", r.unrelated());
+            return o.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    /** Pull for the gateway repository; an audit row only when commits came in. */
+    private Object handleConfigPull(RequestContext req, HttpServletResponse resp) {
+        String who = webUser(req).orElse(req.getActor());
+        try {
+            DataDirGitManager.PullResult r = DataDirGitManager.pullConfig();
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", r.changed() || "up to date".equals(r.note()));
+            o.addProperty("changed", r.changed());
+            o.addProperty("message", r.changed() ? r.files().size() + " changed file(s)" : r.note());
+            JsonArray files = new JsonArray();
+            r.files().forEach(files::add);
+            o.add("files", files);
+            if (r.changed()) {
+                String[] hb = DataDirGitManager.headAndBranch();
+                GitEvents.fire(GitEvent.of(GitEvent.PULL).config().user(who).branch(hb[1]).commit(r.commit())
+                        .message("Pulled " + r.files().size() + " changed file(s)").files(r.files()).success());
+                GitAudit.record(GitAudit.PULL, who, null, hb[1], r.commit(), r.files().size() + " file(s)");
+            } else if (!"up to date".equals(r.note())) {
+                resp.setStatus(HttpServletResponse.SC_CONFLICT);
+                o.addProperty("error", r.note());
+            }
+            return o.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    private Object handleConfigJoin(RequestContext req, HttpServletResponse resp) {
+        String who = webUser(req).orElse(req.getActor());
+        try {
+            String commit = DataDirGitManager.joinRemoteHistory(who);
+            GitAudit.record(GitAudit.JOIN, who, null, DataDirGitManager.headAndBranch()[1], commit,
+                    "this gateway's config committed on top of the remote branch");
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", true);
+            o.addProperty("commit", commit);
+            return o.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    private static long optId(JsonObject body, String key) {
+        return body.has(key) && !body.get(key).isJsonNull() ? body.get(key).getAsLong() : 0L;
+    }
+
+    /** Add from repository, step one: the repository's branches and a suggested project name. */
+    private Object handleProjectAddPeek(RequestContext req, HttpServletResponse resp) {
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            GatewayScriptModule.RepoPeek p = scriptModule.peekRepository(optString(body, "url"),
+                    optString(body, "branch"), req.getActor(), optId(body, "sshKeyId"), optId(body, "httpsCredentialId"));
+            JsonObject o = new JsonObject();
+            JsonArray branches = new JsonArray();
+            p.branches().forEach(branches::add);
+            o.add("branches", branches);
+            o.addProperty("defaultBranch", p.defaultBranch());
+            o.addProperty("suggestedName", p.suggestedName());
+            return o.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    /**
+     * Add a project the gateway does not have from its repository: {@code url}, {@code branch}
+     * (blank: the remote's default), {@code name}, a credential, and optionally a delivery.
+     */
+    private Object handleProjectAdd(RequestContext req, HttpServletResponse resp) {
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            String name = optString(body, "name");
+            if (name == null || name.isBlank()) {
+                throw new IllegalArgumentException("A project name is required.");
+            }
+            name = name.trim();
+            String delivery = body.has("delivery") ? checkDelivery(body) : null;
+            long ssh = optId(body, "sshKeyId");
+            long https = optId(body, "httpsCredentialId");
+            String[] r = scriptModule.addProjectFromRepository(name, optString(body, "url"),
+                    optString(body, "branch"), req.getActor(), ssh, https);
+            if (ssh > 0 || https > 0) {
+                CredentialCheck.checkSoon(ssh > 0 ? "SSH" : "HTTPS", ssh > 0 ? ssh : https);
+            }
+            if (delivery != null && !delivery.equals("off")) {
+                if (!body.has("branch") || optString(body, "branch") == null || optString(body, "branch").isBlank()) {
+                    body.addProperty("branch", r[0]);
+                }
+                applyDelivery(body, name, delivery, req.getActor());
+            }
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", true);
+            o.addProperty("project", name);
+            o.addProperty("branch", r[0]);
+            o.addProperty("commit", r[1]);
+            return o.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
     }
 
     /** The audit setting: on/off, the chosen profile (blank: the gateway's), and the choices. */
@@ -654,7 +788,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
             LayoutSwitch.Result r = DataDirGitManager.switchLayout("combined".equals(layout)
                     ? RepoLocator.Layout.COMBINED : RepoLocator.Layout.SEPARATE, optBool(body, "restoreHistory"),
-                    webUser(req).orElse(null));
+                    optBool(body, "archiveLeftovers"), webUser(req).orElse(null));
             JsonObject o = new JsonObject();
             GitAudit.record(GitAudit.LAYOUT, webUser(req).orElse(req.getActor()), null,
                     DataDirGitManager.headAndBranch()[1], DataDirGitManager.headAndBranch()[0],
@@ -1101,6 +1235,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.add("delivery", delivery);
                 // Unsynced-commit count for the header sync indicator.
                 o.addProperty("ahead", DataDirGitManager.aheadCount());
+                DataDirGitManager.Relation rel = DataDirGitManager.relation();
+                o.addProperty("behind", rel.behind());
+                o.addProperty("unrelated", rel.unrelated());
                 o.addProperty("renameMaster", renameTarget(GitManager.getDataFolderPath(), remote.getBranch()));
                 // What Remote sync pushes: the checked-out branch, and where it goes.
                 String[] target = DataDirGitManager.pushTargetNow(remote);
@@ -1558,7 +1695,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
     private Object handleDeinit(RequestContext req, HttpServletResponse resp) {
         try {
-            DataDirGitManager.deleteRepo();
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            DataDirGitManager.deleteRepo(body != null && optBool(body, "removeRemote"));
             return ok();
         } catch (Exception e) {
             return error(resp, e);
