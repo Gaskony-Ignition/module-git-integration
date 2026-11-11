@@ -1,0 +1,25 @@
+tree 66aed88dc989f4c41be76a90ed12a415d9e25255
+parent 0932c821a579c10eccefdd94df2bcf207f91e63e
+author Nigel Gaskin <nigel.gaskin.work@gmail.com> 1794367847 +1100
+committer GitHub <noreply@github.com> 1794367847 +1100
+gpgsig -----BEGIN PGP SIGNATURE-----
+ 
+ wsFcBAABCAAQBQJq8+FnCRC1aQ7uu5UhlAAAsDcQAEK7bFv8qz0CfR9xuFdZOsKa
+ e8r2zHmLHgGxeqhYfiSnCBNNcuwsLydJPL5VWQ0cG9ZqFTDSWFmbAJhUBjaY7doy
+ SKrNKXfQg5wMzO3rc8gPs/s6IINM5D7SzLvUR8MpBEr/QnOIZoIIo2xMuAQTaRae
+ Fkv+x3EyFhC/R/HgtokFN9ViuXlGMXJZkI/cGmMMrfgnkXRGeNAVQb4ZIsWLj+om
+ UvgXRTR91c783PjcTWRCoe97l9688AnoY4NisEm21ItTkKNY00r918JktTJFIxhm
+ mLVjjL6v9aWAAGGDX0SVjNZMZGrC1hI/FkuQ8AsGmt6SPAIBYooiEIT61QpqNhC5
+ S18KSEG/cOi1eL04CLDBwCKGMnfs9a7kDpIWazAh6Oz/+/HmOozaMIPrR/k3FYut
+ Iums0FKa6DWxyvlRm+FM/pB/NZa8lI+RBQU905DRhr+pXE18bZT6y2ef2EwOHmcm
+ /5/Y2rnPrd9s2co5dbpbWuOmgjBXONCch+a6IEZ4VjPgcYMQkr6pYYs2UqCJkSzY
+ Nogm4UNcOGajjoWp3zsJON4qIE5shW5GzVxeKMuSNFJUwPtDc9BPT80U0h9ez4Yt
+ 4pboGOB5gpbefuva9jRVqrt0pXFulCa1KC2lSQP644N3W2Dn/4DRwzFQ10gU7V1g
+ /YKMkwNFNurj/6McMgQu
+ =r3CN
+ -----END PGP SIGNATURE-----
+ 
+
+ci: run the shared lint gate on pushes and pull requests (#1)
+
+Co-authored-by: Claude Fable 5.2 <noreply@anthropic.com>

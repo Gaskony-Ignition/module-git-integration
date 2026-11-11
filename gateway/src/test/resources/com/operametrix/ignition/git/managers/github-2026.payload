@@ -1,9 +1,0 @@
-tree d3265a68601309ce96927eb05e943e0d0778581d
-parent 679ca5fe610203a982caea4b50f3a396f5a825d6
-parent ebec795004b5c21bff38ab524e971f4022bd618c
-author Kynan Ware <47394200+BagToad@users.noreply.github.com> 1794331308 -0600
-committer GitHub <noreply@github.com> 1794331308 -0600
-
-Merge pull request #15001 from cli/bagtoad/direct-triage-labels
-
-Apply issue triage labels directly

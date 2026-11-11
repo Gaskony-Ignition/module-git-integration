@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class WebFlowSignatureTest {
 
-    private static final Instant NOW = Instant.parse("2026-11-11T00:00:00Z");
+    private static final Instant NOW = Instant.parse("2026-11-12T00:00:00Z");
     private static final long KEY_CREATED = Instant.parse("2025-01-01T00:00:00Z").getEpochSecond();
     private static final long SIGNED = Instant.parse("2026-11-10T00:00:00Z").getEpochSecond();
     private static final byte[] PAYLOAD = ("tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n"
@@ -80,43 +80,40 @@ class WebFlowSignatureTest {
         assertThat(k).noneMatch(WebFlowSignature.TrustedKey::revoked);
     }
 
-    @Test
-    void realGitHubMergeCommitsVerifyWithBothKeys() throws Exception {
-        assertThat(WebFlowSignature.problem(resource("github-2026.payload"), resource("github-2026.asc"), bundled(), NOW))
-                .isNull();
-        // Signed by the old key before it expired: still valid.
-        assertThat(WebFlowSignature.problem(resource("github-2023.payload"), resource("github-2023.asc"), bundled(), NOW))
-                .isNull();
+    /** A pull request merged in GitHub's UI (Gaskony-Ignition/demo-launchpad-au a1b8063), raw commit object. */
+    private static byte[] mergeCommit() throws Exception {
+        return resource("github-merge.commit");
     }
 
     @Test
-    void aRealSignatureOverAnotherPayloadFails() throws Exception {
-        byte[] p = resource("github-2026.payload");
-        p[p.length - 2] ^= 1;
-        assertThat(WebFlowSignature.problem(p, resource("github-2026.asc"), bundled(), NOW)).contains("bad signature");
+    void aRealGitHubMergeCommitVerifiesWithTheBundledKeys() throws Exception {
+        assertThat(WebFlowSignature.commitProblem(mergeCommit(), bundled(), NOW)).isNull();
+    }
+
+    @Test
+    void theRealSignatureOverAnyOtherPayloadFails() throws Exception {
+        byte[] raw = mergeCommit();
+        raw[raw.length - 2] ^= 1; // one character of the commit message
+        assertThat(WebFlowSignature.commitProblem(raw, bundled(), NOW)).contains("bad signature");
     }
 
     @Test
     void theSignedPayloadIsTheRawCommitWithoutItsGpgsigHeader(@TempDir Path dir) throws Exception {
-        byte[] payload = resource("github-2026.payload");
-        byte[] sig = resource("github-2026.asc");
+        byte[] raw = mergeCommit();
+        // git's own rule, written out separately: drop the gpgsig header and its indented lines.
+        String text = new String(raw, StandardCharsets.UTF_8);
+        String expected = text.replaceFirst("(?m)^gpgsig [^\\n]*\\n(?: [^\\n]*\\n)*", "");
         try (Git git = Git.init().setDirectory(dir.toFile()).call()) {
-            // Rebuild GitHub's commit object from its payload and signature: git puts the gpgsig
-            // header after committer, continuation lines indented by one space.
-            String text = new String(payload, StandardCharsets.UTF_8);
-            int blank = text.indexOf("\n\n");
-            String sigText = new String(sig, StandardCharsets.US_ASCII).trim();
-            String raw = text.substring(0, blank + 1) + "gpgsig " + sigText.replace("\n", "\n ") + "\n"
-                    + text.substring(blank + 1);
             ObjectId id;
             try (ObjectInserter ins = git.getRepository().newObjectInserter()) {
-                id = ins.insert(org.eclipse.jgit.lib.Constants.OBJ_COMMIT, raw.getBytes(StandardCharsets.UTF_8));
+                id = ins.insert(org.eclipse.jgit.lib.Constants.OBJ_COMMIT, raw);
                 ins.flush();
             }
+            assertThat(id.getName()).isEqualTo("a1b806322ecb5994bfe6966dc35379f99343ab9b");
             try (RevWalk w = new RevWalk(git.getRepository())) {
                 RevCommit c = w.parseCommit(id);
                 WebFlowSignature.Split s = WebFlowSignature.split(c.getRawBuffer());
-                assertThat(s.payload()).isEqualTo(payload);
+                assertThat(new String(s.payload(), StandardCharsets.UTF_8)).isEqualTo(expected);
                 assertThat(new String(s.signature(), StandardCharsets.US_ASCII).trim())
                         .isEqualTo(new String(c.getRawGpgSignature(), StandardCharsets.US_ASCII).trim());
                 assertThat(WebFlowSignature.commitProblem(c.getRawBuffer(), bundled(), NOW)).isNull();
