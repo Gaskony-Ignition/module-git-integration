@@ -36,6 +36,18 @@ public class GitPolicyRecord {
     private GitPolicyRecord() {
     }
 
+    private static volatile long lastLogged;
+
+    /** Every read asks for the policy, so the error is logged once a minute, not per request. */
+    private static boolean dueToLog() {
+        long now = System.currentTimeMillis();
+        if (now - lastLogged < 60_000L) {
+            return false;
+        }
+        lastLogged = now;
+        return true;
+    }
+
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(GitPolicyRecord.class);
 
     /**
@@ -56,11 +68,15 @@ public class GitPolicyRecord {
             if (ModeStore.definedIn(TYPE, NAME) == null) {
                 return GitPolicy.DEFAULT;
             }
-            logger.error("The Git policy is saved but cannot be read; pushing, branch and layout switches,"
-                    + " deliveries and every remote are refused until it is fixed (Versioning > Policy).");
+            if (dueToLog()) {
+                logger.error("The Git policy is saved but cannot be read; pushing, branch and layout switches,"
+                        + " deliveries and every remote are refused until it is fixed (Versioning > Policy).");
+            }
         } catch (Exception e) {
-            logger.error("The Git policy cannot be read; pushing, branch and layout switches, deliveries and"
-                    + " every remote are refused until it is fixed (Versioning > Policy).", e);
+            if (dueToLog()) {
+                logger.error("The Git policy cannot be read; pushing, branch and layout switches, deliveries and"
+                        + " every remote are refused until it is fixed (Versioning > Policy).", e);
+            }
         }
         return GitPolicy.LOCKED;
     }
