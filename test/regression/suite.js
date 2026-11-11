@@ -721,7 +721,8 @@ async function audit() {
       ok(await api('POST', '/project-add', { name: 'Example_D', url: `${SRV.dev}/example-b.git`, httpsCredentialId: credId.writer })),
     /^Example_D branch=main; commit=[0-9a-f]{40}/);
     await plat('DELETE', '/projects/Example_D');
-    await sleep(3000);
+    // The module drops a deleted project's records 5 s later; let that land before the next check.
+    await sleep(9000);
     return r;
   });
   await check('a busy sync loop with nothing to install writes no rows', async () => {
@@ -937,6 +938,13 @@ async function modes() {
 (async () => {
   await login();
   const want = (E.ONLY || 'sep1,comb,sep2,sep3,audit,merged,modes').split(',');
+  if (!want.includes('sep1')) {
+    // A re-run against a kept gateway: the credentials sep1 saved are still there.
+    for (const c of (await api('GET', '/credentials')).json.credentials || []) {
+      if (c.type === 'HTTPS' && /writer$/.test(c.label) && !credId.writer) credId.writer = c.id;
+      if (c.type === 'HTTPS' && /reader$/.test(c.label) && !credId.reader) credId.reader = c.id;
+    }
+  }
   if (!E.RUNNER_TOKEN && !want.includes('sep1')) {
     const t = await api('POST', '/runner', { enabled: true, generateToken: true });
     E.RUNNER_TOKEN = t.json.token;
