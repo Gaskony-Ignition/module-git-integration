@@ -1,0 +1,13 @@
+name: lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    uses: Gaskony-Ignition/tool-standards/.github/workflows/lint.yml@v1
