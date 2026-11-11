@@ -2335,10 +2335,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     private Object handleSaveDelivery(RequestContext req, HttpServletResponse resp) {
         try {
             JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
-            String project = optString(body, "project");
-            if (project == null || project.isBlank()) {
-                throw new RuntimeException("A project name is required.");
-            }
+            String project = SafePaths.projectName(optString(body, "project"));
             String delivery = checkDelivery(body);
             applyDelivery(body, project, delivery, req.getActor());
             JsonObject o = new JsonObject();
