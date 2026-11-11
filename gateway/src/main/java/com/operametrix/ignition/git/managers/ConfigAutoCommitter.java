@@ -89,6 +89,8 @@ public class ConfigAutoCommitter implements ResourceCollectionListener {
     }
 
     private void poke(ResourceCollectionChangeEvent event) {
+        // Any config change may be the policy arriving from a delivered or restored branch.
+        executor.execute(() -> PolicyWatch.check("config change in " + event.getName()));
         if (LOCAL_COLLECTION.equals(event.getName()) || !DataDirGitManager.isInitialized()) {
             return;
         }

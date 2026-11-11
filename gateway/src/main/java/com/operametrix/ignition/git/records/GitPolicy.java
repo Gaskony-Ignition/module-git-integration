@@ -43,6 +43,13 @@ public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean bra
         return forcePushAllowed == null || forcePushAllowed;
     }
 
+    /**
+     * What applies when the saved policy cannot be read: no push, branch or layout switch, no
+     * delivery but off, no remote host at all ("-" is no host name), no insecure remotes.
+     */
+    public static final GitPolicy LOCKED =
+            new GitPolicy(false, true, false, false, List.of("off"), List.of("-"), false, false);
+
     /** Local folders, file://, git://, http:// and local-network targets. Off unless set. */
     public boolean insecureRemotes() {
         return allowInsecureRemotes != null && allowInsecureRemotes;
@@ -50,6 +57,49 @@ public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean bra
 
     public List<String> deliveries() {
         return deliveryModes == null ? DELIVERY_MODES : deliveryModes;
+    }
+
+    /**
+     * The settings that allow more here than in {@code before}: an action turned on, a delivery
+     * kind or remote host added (or the host list emptied, which allows any), insecure remotes on.
+     */
+    public List<String> weakerThan(GitPolicy before) {
+        List<String> out = new java.util.ArrayList<>();
+        if (push() && !before.push()) {
+            out.add("push to remotes");
+        }
+        if (forcePush() && push() && !(before.forcePush() && before.push())) {
+            out.add("force push");
+        }
+        if (commit() && !before.commit()) {
+            out.add("commit from the Designer");
+        }
+        if (branches() && !before.branches()) {
+            out.add("branches");
+        }
+        if (layout() && !before.layout()) {
+            out.add("layout switch");
+        }
+        for (String d : deliveries()) {
+            if (!before.deliveries().contains(d)) {
+                out.add("delivery " + d);
+            }
+        }
+        if (!before.hosts().isEmpty()) {
+            if (hosts().isEmpty()) {
+                out.add("allowed remote hosts (now any host)");
+            } else {
+                for (String h : hosts()) {
+                    if (!before.hosts().contains(h)) {
+                        out.add("allowed remote host " + h);
+                    }
+                }
+            }
+        }
+        if (insecureRemotes() && !before.insecureRemotes()) {
+            out.add("insecure remotes");
+        }
+        return out;
     }
 
     public List<String> hosts() {

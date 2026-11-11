@@ -36,17 +36,33 @@ public class GitPolicyRecord {
     private GitPolicyRecord() {
     }
 
-    /** The effective policy (the active mode's override, else core), or the default when none. */
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(GitPolicyRecord.class);
+
+    /**
+     * The effective policy (the active mode's override, else core), or the default when none is
+     * saved. A policy that exists but cannot be read is {@link GitPolicy#LOCKED}, never the
+     * permissive default: a broken Prod override must not open Prod up.
+     */
     public static GitPolicy get() {
         Handler h = handler;
         if (h == null) {
             return GitPolicy.DEFAULT;
         }
         try {
-            return ModeStore.find(h, META, NAME).map(DecodedResource::config).orElse(GitPolicy.DEFAULT);
+            java.util.Optional<GitPolicy> p = ModeStore.find(h, META, NAME).map(DecodedResource::config);
+            if (p.isPresent()) {
+                return p.get();
+            }
+            if (ModeStore.definedIn(TYPE, NAME) == null) {
+                return GitPolicy.DEFAULT;
+            }
+            logger.error("The Git policy is saved but cannot be read; pushing, branch and layout switches,"
+                    + " deliveries and every remote are refused until it is fixed (Versioning > Policy).");
         } catch (Exception e) {
-            return GitPolicy.DEFAULT;
+            logger.error("The Git policy cannot be read; pushing, branch and layout switches, deliveries and"
+                    + " every remote are refused until it is fixed (Versioning > Policy).", e);
         }
+        return GitPolicy.LOCKED;
     }
 
     /** Where the effective policy comes from: core, a mode, or null when none is saved. */

@@ -112,4 +112,30 @@ class PolicyGateTest {
         // No context in a unit test, so the live variant leaves the message alone.
         assertThat(PolicyGate.trailer("x")).isEqualTo("x");
     }
+
+    @Test
+    void anUnreadablePolicyIsLockedNotOpen() {
+        GitPolicy l = GitPolicy.LOCKED;
+        assertThat(PolicyGate.decide(l, null, PolicyGate.Action.PUSH)).isNotNull();
+        assertThat(PolicyGate.decide(l, null, PolicyGate.Action.BRANCH_SWITCH)).isNotNull();
+        assertThat(PolicyGate.decide(l, null, PolicyGate.Action.LAYOUT_SWITCH)).isNotNull();
+        assertThat(PolicyGate.decideDelivery(l, null, "sync-pull")).isNotNull();
+        assertThat(PolicyGate.decideDelivery(l, null, "off")).isNull();
+        assertThat(PolicyGate.decideUrl(l, null, "https://github.com/o/r.git")).isNotNull();
+        assertThat(PolicyGate.decideUrl(l, null, "file:///srv/r.git")).isNotNull();
+    }
+
+    @Test
+    void aLooserPolicyNamesWhatItNowAllows() {
+        GitPolicy prod = new GitPolicy(false, false, false, false, List.of("off", "replace"),
+                List.of("github.com"), false, false);
+        assertThat(prod.weakerThan(prod)).isEmpty();
+        GitPolicy open = new GitPolicy(true, false, false, false, List.of("off", "replace", "runner"),
+                List.of(), false, true);
+        assertThat(open.weakerThan(prod)).containsExactly("push to remotes", "delivery runner",
+                "allowed remote hosts (now any host)", "insecure remotes");
+        assertThat(prod.weakerThan(open)).isEmpty();
+        assertThat(PolicyWatch.decode(PolicyWatch.encode(prod)).weakerThan(prod)).isEmpty();
+        assertThat(prod.weakerThan(PolicyWatch.decode(PolicyWatch.encode(prod)))).isEmpty();
+    }
 }
