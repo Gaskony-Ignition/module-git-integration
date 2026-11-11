@@ -29,6 +29,8 @@ import com.operametrix.ignition.git.managers.CredentialCheck;
 import com.operametrix.ignition.git.managers.ProjectRecords;
 import com.operametrix.ignition.git.managers.DataDirGitManager;
 import com.operametrix.ignition.git.managers.GitManager;
+import com.operametrix.ignition.git.managers.RepoHardening;
+import com.operametrix.ignition.git.managers.SafePaths;
 import com.operametrix.ignition.git.managers.LayoutSwitch;
 import com.operametrix.ignition.git.managers.MasterRename;
 import com.operametrix.ignition.git.managers.PullGuard;
@@ -206,6 +208,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             logger.error("Could not write the default Git policy.", e);
         }
 
+        // 4.3.0: TLS checks back on, no symlinks in checkouts, no passwords in remote URLs, every
+        // stored key encrypted and every HTTPS credential bound to a host, before anything syncs.
+        RepoHardening.atStartup();
+
         // Scheduled sync. Inert until a project has a sync record configured, so starting it
         // unconditionally costs one idle thread and keeps the wiring in one place.
         SyncScheduler.start();
@@ -275,7 +281,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
     @Override
     public Optional<GatewayRpcImplementation> getRpcImplementation() {
-        return Optional.of(GatewayRpcImplementation.of(GitScriptInterface.SERIALIZER, scriptModule));
+        return Optional.of(GatewayRpcImplementation.of(GitScriptInterface.SERIALIZER, RpcErrors.wrap(scriptModule)));
     }
 
     // ── Gateway web page: mounted React bundle + REST routes ───────────────────────────────────
@@ -327,8 +333,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 .requirePermission(PermissionType.READ).nocache()
                 .handler(this::handleGetCredentials).mount();
 
+        // WRITE, unlike the other reads: it names every secret in every provider.
         routes.newRoute("/secret-providers").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
-                .requirePermission(PermissionType.READ).nocache()
+                .requirePermission(PermissionType.WRITE).nocache()
                 .handler(this::handleGetSecretProviders).mount();
 
         routes.newRoute("/remote").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
@@ -609,7 +616,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         try {
             String project = req.getParameter("project");
             boolean config = "config".equals(req.getParameter("repo"));
-            int limit = parseInt(req.getParameter("limit"), BranchGraph.DEFAULT_LIMIT);
+            int limit = Math.max(1, Math.min(GitManager.MAX_LOG,
+                    parseInt(req.getParameter("limit"), BranchGraph.DEFAULT_LIMIT)));
             boolean combined = GitManager.combined();
             Path root;
             String prefix = null;
@@ -917,7 +925,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     private Object handleHistory(RequestContext req, HttpServletResponse resp) {
         try {
             int skip = parseInt(req.getParameter("skip"), 0);
-            int limit = parseInt(req.getParameter("limit"), 25);
+            int limit = Math.max(1, Math.min(GitManager.MAX_LOG, parseInt(req.getParameter("limit"), 25)));
             List<String[]> commits = DataDirGitManager.history(skip, limit);
             boolean remoteConfigured = GitConfigRemoteRecord.get() != null;
             String[] pointers = DataDirGitManager.pointerHashes();
@@ -1218,6 +1226,23 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         return SecretConfig.referenced(providerName.trim(), secretName.trim());
     }
 
+    /**
+     * Whether a saved credential holds this Secret Provider reference and, for HTTPS, belongs to the
+     * URL's host. An SSH key has no host: its secret never leaves the gateway, only a signature.
+     */
+    private static boolean referenceInUse(SecretConfig cfg, String uri, boolean ssh) {
+        String provider = cfg.getAsReferenced().getProviderName();
+        String name = cfg.getAsReferenced().getSecretName();
+        java.util.function.Predicate<SecretConfig> same = c -> c != null && c.isReferenced()
+                && provider.equals(c.getAsReferenced().getProviderName())
+                && name.equals(c.getAsReferenced().getSecretName());
+        if (ssh) {
+            return GitUserSshKeyRecord.listEverywhere().stream().anyMatch(k -> same.test(k.getSecret()));
+        }
+        return GitUserHttpsCredentialRecord.listEverywhere().stream().anyMatch(c -> same.test(c.getSecret())
+                && PolicyGate.credentialMismatch(c.getHostPattern() == null ? "" : c.getHostPattern(), uri) == null);
+    }
+
     /** Best-effort host extracted from a git URI, for auto-naming the credential. */
     private static String hostOf(String uri) {
         if (uri == null) {
@@ -1249,8 +1274,14 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             String username = optString(body, "username");
             SshTransportConfigCallback.lastFingerprint = null;
             if (reference) {
-                // Resolve the referenced secret to plaintext for the test.
+                // Resolve the referenced secret to plaintext for the test — only one a stored
+                // credential already uses for this host, never any provider secret at any URL.
                 SecretConfig cfg = referencedSecret(body);
+                if (!referenceInUse(cfg, uri, ssh)) {
+                    throw new PolicyGate.Refused("Only a secret reference a saved credential already uses for"
+                            + " this host can be tested. Save the remote first, or test with the secret typed in.",
+                            "reference not in use");
+                }
                 Secret<?> secret = Secret.create(context, cfg);
                 Plaintext pt = secret.getPlaintext();
                 try {
@@ -1348,8 +1379,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             } else if ("HTTPS".equalsIgnoreCase(type)) {
                 String host = optString(body, "host");
                 String username = optString(body, "username");
-                if (host == null || host.isBlank()) {
-                    throw new RuntimeException("A host label is required.");
+                if (!PolicyGate.isHostPattern(host)) {
+                    throw new IllegalArgumentException("Set the host this credential belongs to, such as"
+                            + " github.com: it is only ever sent there.");
                 }
                 GitUserHttpsCredentialRecord record = editId > 0
                         ? GitUserHttpsCredentialRecord.findByIdAndUser(editId, actor)
@@ -1643,6 +1675,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         o.addProperty("branchSwitch", p.branches());
         o.addProperty("layoutSwitch", p.layout());
         o.addProperty("forcePushAllowed", p.forcePush());
+        o.addProperty("allowInsecureRemotes", p.insecureRemotes());
         JsonArray deliveries = new JsonArray();
         p.deliveries().forEach(deliveries::add);
         o.add("deliveryModes", deliveries);
@@ -1685,7 +1718,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             GitPolicyRecord.save(new GitPolicy(flag.apply("pushAllowed"),
                     flag.apply("designerCommit"), flag.apply("branchSwitch"),
                     flag.apply("layoutSwitch"), deliveries, trimmed(stringList(body, "allowedRemoteHosts")),
-                    flag.apply("forcePushAllowed")));
+                    flag.apply("forcePushAllowed"), flag.apply("allowInsecureRemotes")));
             DataDirGitManager.commitAllIfDirty("Git policy changed");
             return ok();
         } catch (Exception e) {
@@ -1816,7 +1849,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
         }
         JsonObject o = new JsonObject();
-        String m = e.getMessage() == null ? e.toString() : e.getMessage();
+        // The page names repository paths, never where the gateway is installed; the log has both.
+        String m = SafePaths.redact(e.getMessage() == null ? e.toString() : e.getMessage(),
+                GitManager.getDataFolderPath());
         // A raw JGit failure in plain words, the original kept for the page's console.
         String plain = m.contains(PullGuard.DETAILS) ? null : PullGuard.plainOrNull(e);
         o.addProperty("error", plain == null ? m : plain + PullGuard.DETAILS + m);
@@ -2161,10 +2196,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             if (remoteName == null || remoteName.isBlank()) {
                 remoteName = "origin";
             }
-            String owner = optString(body, "ignitionUser");
-            if (owner == null || owner.isBlank()) {
-                owner = req.getActor();
-            }
+            // Always the signed-in user's own record, and only one of their own credentials.
+            String owner = req.getActor();
             long sshKeyId = optLong(body, "sshKeyId");
             long httpsCredentialId = optLong(body, "httpsCredentialId");
             boolean ok = scriptModule.setRemoteCredentialRefImpl(

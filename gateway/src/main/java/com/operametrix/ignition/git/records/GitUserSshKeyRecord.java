@@ -22,8 +22,8 @@ import java.util.List;
  * <p>The private key is stored as an 8.3 {@link SecretConfig} ({@code sshKeySecret}) — either
  * embedded (encrypted via the gateway's {@code SystemEncryptionService}) or a reference to a named
  * secret in a gateway Secret Provider. The legacy plaintext {@code sshKey} component is kept
- * (nullable) so pre-migration resources still deserialize; {@link #getSSHKey()} prefers the secret
- * and falls back to the legacy value, and any {@link #save()} upgrades the row in place.
+ * (nullable) only so pre-migration resources still deserialize: since 4.3.0 startup re-saves every
+ * such row encrypted ({@link #migrateLegacyKey}) and the plaintext is never read as a key.
  */
 public class GitUserSshKeyRecord {
 
@@ -86,9 +86,8 @@ public class GitUserSshKeyRecord {
     }
 
     /**
-     * The private key as plaintext. Prefers the {@link SecretConfig} (embedded or referenced,
-     * resolved via {@link Secret}); falls back to the legacy plaintext field for un-migrated rows.
-     * Returns "" if unset/undecryptable. Signature unchanged so Designer callers
+     * The private key as plaintext, from the {@link SecretConfig} (embedded or referenced, resolved
+     * via {@link Secret}). Returns "" if unset/undecryptable. Signature unchanged so Designer callers
      * ({@code GitManager.setAuthentication*}) are unaffected.
      */
     public String getSSHKey() {
@@ -105,7 +104,20 @@ public class GitUserSshKeyRecord {
                 return "";
             }
         }
-        return sshKey == null ? "" : sshKey;
+        return "";
+    }
+
+    /**
+     * A row from before keys were encrypted: re-saves its plaintext key as an embedded secret and
+     * clears the plaintext. False when there was nothing to migrate.
+     */
+    public boolean migrateLegacyKey() {
+        if (sshKeySecret != null || sshKey == null || sshKey.isEmpty()) {
+            return false;
+        }
+        setSSHKey(sshKey);
+        save();
+        return true;
     }
 
     /** Inline path: encrypts the key at rest and drops the legacy plaintext field. */
@@ -125,9 +137,9 @@ public class GitUserSshKeyRecord {
         return sshKeySecret;
     }
 
-    /** Whether any secret is set (SecretConfig or legacy plaintext). */
+    /** Whether a secret is set. */
     public boolean hasSecret() {
-        return sshKeySecret != null || (sshKey != null && !sshKey.isEmpty());
+        return sshKeySecret != null;
     }
 
     /** Encrypts a plaintext key into an embedded {@link SecretConfig} (same as the HTTPS record). */

@@ -34,9 +34,12 @@ class RepoLocatorTest {
         assertThat(r.pathspec()).isEqualTo("projects/Demo");
         assertThat(r.toRepoPath("ignition/x")).isEqualTo("projects/Demo/ignition/x");
         assertThat(r.toProjectPath("projects/Demo/ignition/x")).isEqualTo("ignition/x");
-        // Outside the project: marked, and mapped straight back.
+        // Outside the project: marked, and mapped back only while that file is in conflict.
         assertThat(r.toProjectPath("config/a.json")).isEqualTo("/config/a.json");
-        assertThat(r.toRepoPath("/config/a.json")).isEqualTo("config/a.json");
+        assertThatThrownBy(() -> r.toRepoPath("/config/a.json")).isInstanceOf(IllegalArgumentException.class);
+        assertThat(r.toRepoPath("/config/a.json", java.util.Set.of("config/a.json"))).isEqualTo("config/a.json");
+        assertThatThrownBy(() -> r.toRepoPath("/config/b.json", java.util.Set.of("config/a.json")))
+                .isInstanceOf(IllegalArgumentException.class);
         assertThat(r.contains("projects/Demo2/x")).isFalse();
         assertThat(r.inProject(new LinkedHashSet<>(List.of("projects/Demo/a", "projects/Other/b", "config/c"))))
                 .containsExactly("a");

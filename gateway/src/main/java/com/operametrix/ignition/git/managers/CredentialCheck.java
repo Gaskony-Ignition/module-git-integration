@@ -181,10 +181,9 @@ public final class CredentialCheck {
                     : probe(t, sshKey, user, password));
         }
 
-        // The host field is a label the user typed, so a remote this credential actually reaches is
-        // the better evidence of who the host is.
-        boolean github = !ssh && (isGitHub(host)
-                || targets.stream().anyMatch(t -> isGitHub(t.url())))
+        // Only a credential bound to GitHub is shown to GitHub's API (4.3.0: the host field is the
+        // binding, not a label, so a remote elsewhere is no evidence).
+        boolean github = !ssh && isGitHub(host)
                 && notToBeContacted("https://github.com", null) == null;
         Result result = github
                 ? askGitHub(password, reach)

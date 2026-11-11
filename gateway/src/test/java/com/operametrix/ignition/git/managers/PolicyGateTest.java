@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PolicyGateTest {
 
     private static final GitPolicy READ_ONLY =
-            new GitPolicy(false, false, false, false, List.of("off", "pull"), List.of("github.com"), false);
+            new GitPolicy(false, false, false, false, List.of("off", "pull"), List.of("github.com"), false, null);
 
     @Test
     void theDefaultAllowsEverythingItAllowedBefore() {
@@ -26,7 +26,7 @@ class PolicyGateTest {
 
     @Test
     void aMissingFieldReadsAsTheDefaultNotOff() {
-        GitPolicy sparse = new GitPolicy(false, null, null, null, null, null, null);
+        GitPolicy sparse = new GitPolicy(false, null, null, null, null, null, null, null);
         assertThat(PolicyGate.decide(sparse, null, PolicyGate.Action.DESIGNER_COMMIT)).isNull();
         assertThat(PolicyGate.decideDelivery(sparse, null, "runner-repo")).isNull();
         assertThat(PolicyGate.decide(sparse, null, PolicyGate.Action.PUSH)).isNotNull();
@@ -44,10 +44,10 @@ class PolicyGateTest {
 
     @Test
     void forcePushNeedsPushToo() {
-        GitPolicy pushOnly = new GitPolicy(true, true, true, true, null, null, false);
+        GitPolicy pushOnly = new GitPolicy(true, true, true, true, null, null, false, null);
         assertThat(PolicyGate.decide(pushOnly, "Dev", PolicyGate.Action.PUSH)).isNull();
         assertThat(PolicyGate.decide(pushOnly, "Dev", PolicyGate.Action.FORCE_PUSH)).isNotNull();
-        GitPolicy noPush = new GitPolicy(false, true, true, true, null, null, true);
+        GitPolicy noPush = new GitPolicy(false, true, true, true, null, null, true, null);
         assertThat(PolicyGate.decide(noPush, "Dev", PolicyGate.Action.FORCE_PUSH)).isNotNull();
     }
 
@@ -58,7 +58,7 @@ class PolicyGateTest {
         assertThat(PolicyGate.decideDelivery(READ_ONLY, "Prod", "sync-replace")).isNotNull();
         assertThat(PolicyGate.decideDelivery(READ_ONLY, "Prod", "runner-release").getMessage())
                 .contains("delivery 'runner'");
-        GitPolicy none = new GitPolicy(true, true, true, true, List.of(), null, true);
+        GitPolicy none = new GitPolicy(true, true, true, true, List.of(), null, true, null);
         assertThat(PolicyGate.decideDelivery(none, null, "off")).isNull();
         assertThat(PolicyGate.decideDelivery(none, null, "pull")).isNotNull();
     }
@@ -76,7 +76,7 @@ class PolicyGateTest {
 
     @Test
     void allowedHostsAreExactOrSubdomainWildcards() {
-        GitPolicy c = new GitPolicy(true, true, true, true, null, List.of("github.com", "*.corp.example"), true);
+        GitPolicy c = new GitPolicy(true, true, true, true, null, List.of("github.com", "*.corp.example"), true, null);
         assertThat(PolicyGate.decideHost(c, "Prod", "git@github.com:o/r.git")).isNull();
         assertThat(PolicyGate.decideHost(c, "Prod", "https://git.corp.example/r.git")).isNull();
         assertThat(PolicyGate.decideHost(c, "Prod", "https://evilgithub.com/r.git")).isNotNull();
@@ -92,9 +92,15 @@ class PolicyGateTest {
         assertThat(PolicyGate.credentialMismatch("github.com", "https://gitlab.com/o/r.git"))
                 .startsWith("Refused to send the credential for github.com to gitlab.com");
         assertThat(PolicyGate.credentialMismatch("*.corp.example", "https://git.corp.example/r.git")).isNull();
-        // The HTTPS host field was a free-text label before; one that names no host binds nothing.
-        assertThat(PolicyGate.credentialMismatch("My GitHub token", "https://gitlab.com/o/r.git")).isNull();
-        assertThat(PolicyGate.credentialMismatch("", "https://gitlab.com/o/r.git")).isNull();
+        // 4.3.0: an HTTPS credential with no host, or a label for one, goes nowhere.
+        assertThat(PolicyGate.credentialMismatch("My GitHub token", "https://gitlab.com/o/r.git"))
+                .contains("it has no host set");
+        assertThat(PolicyGate.credentialMismatch("", "https://gitlab.com/o/r.git")).contains("no host set");
+        assertThat(PolicyGate.credentialMismatch("gitea", "https://gitea/o/r.git")).isNull();
+        assertThat(PolicyGate.credentialMismatch("gitea", "https://evil.example/o/r.git")).isNotNull();
+        // An SSH key carries no binding; a local folder sends nothing anywhere.
+        assertThat(PolicyGate.credentialMismatch(null, "https://gitlab.com/o/r.git")).isNull();
+        assertThat(PolicyGate.credentialMismatch("github.com", "/srv/git/r.git")).isNull();
     }
 
     @Test

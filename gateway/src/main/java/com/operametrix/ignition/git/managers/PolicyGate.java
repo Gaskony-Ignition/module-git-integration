@@ -150,23 +150,46 @@ public final class PolicyGate {
 
     /**
      * Whether a credential may be sent to {@code url}. {@code boundHost} is the host the credential
-     * belongs to: the config remote's URL host, or an HTTPS credential's host field when that names
-     * a host. A free-text label (no dot) binds nothing, as the field was only ever a label.
+     * belongs to: the config remote's URL host, or an HTTPS credential's host field. Null means the
+     * credential carries no binding (an SSH key, whose secret never leaves the gateway); an empty or
+     * non-matching host refuses. A URL with no host (a local folder) sends nothing anywhere.
      *
      * @return the refusal text, or null when it may be sent
      */
     public static String credentialMismatch(String boundHost, String url) {
-        String bound = boundHost == null ? "" : boundHost.trim().toLowerCase(Locale.ROOT);
-        if (bound.isEmpty() || !(bound.contains(".") || bound.equals("localhost"))) {
+        if (boundHost == null) {
             return null;
         }
+        String bound = boundHost.trim().toLowerCase(Locale.ROOT);
         String host = hostOf(url);
         if (host.isEmpty() || hostMatches(bound, host)) {
             return null;
         }
+        if (bound.isEmpty() || !isHostPattern(bound)) {
+            return "Refused to send this HTTPS credential to " + host + ": it has no host set. Edit the"
+                    + " credential and set the host it belongs to (github.com, say); it is only ever sent"
+                    + " there.";
+        }
         return "Refused to send the credential for " + bound + " to " + host + ". The remote's URL and"
                 + " its credential belong to different hosts; save the remote again with the right"
                 + " credential.";
+    }
+
+    private static final Pattern HOST_PATTERN =
+            Pattern.compile("(\\*\\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*");
+
+    /** A host field that names a host ({@code github.com}, {@code *.corp.example}, {@code gitea}). */
+    public static boolean isHostPattern(String hostField) {
+        return hostField != null && HOST_PATTERN.matcher(hostField.trim().toLowerCase(Locale.ROOT)).matches();
+    }
+
+    /** The URL rules ({@link RemoteUrls}) and the allowed hosts, as one refusal or null. */
+    public static Refused decideUrl(GitPolicy p, String mode, String url) {
+        String problem = RemoteUrls.problem(url, p.insecureRemotes());
+        if (problem != null) {
+            return new Refused("Not allowed " + where(mode) + ": " + problem, "remote not allowed " + where(mode));
+        }
+        return decideHost(p, mode, url);
     }
 
     // ── Live checks ───────────────────────────────────────────────────────────────────────────
@@ -194,8 +217,18 @@ public final class PolicyGate {
         }
     }
 
+    /**
+     * Before a remote URL is saved, tested or contacted: the URL rules, the allowed hosts, and (for
+     * a host name) that it does not resolve to this machine unless insecure remotes are allowed.
+     */
     public static void checkHost(String url) {
-        Refused r = decideHost(GitPolicyRecord.get(), mode(), url);
+        GitPolicy p = GitPolicyRecord.get();
+        Refused r = decideUrl(p, mode(), url);
+        if (r == null && !p.insecureRemotes() && RemoteUrls.resolvesLocal(hostOf(url))) {
+            r = new Refused("Not allowed " + where(mode()) + ": the remote " + hostOf(url)
+                    + " resolves to this machine or its link-local network." + RemoteUrls.INSECURE_HINT,
+                    "remote not allowed " + where(mode()));
+        }
         if (r != null) {
             throw r;
         }

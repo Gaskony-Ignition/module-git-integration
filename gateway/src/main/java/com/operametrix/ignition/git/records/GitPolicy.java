@@ -11,12 +11,17 @@ import java.util.List;
  */
 public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean branchSwitch,
                         Boolean layoutSwitch, List<String> deliveryModes,
-                        List<String> allowedRemoteHosts, Boolean forcePushAllowed) {
+                        List<String> allowedRemoteHosts, Boolean forcePushAllowed,
+                        Boolean allowInsecureRemotes) {
 
     public static final List<String> DELIVERY_MODES = List.of("off", "pull", "replace", "runner");
 
-    /** Today's behaviour: everything allowed, every host, force push as the Designer offers it. */
-    public static final GitPolicy DEFAULT = new GitPolicy(true, true, true, true, DELIVERY_MODES, List.of(), true);
+    /**
+     * Everything allowed, every host, force push as the Designer offers it; remotes over HTTPS or
+     * SSH only (4.3.0).
+     */
+    public static final GitPolicy DEFAULT =
+            new GitPolicy(true, true, true, true, DELIVERY_MODES, List.of(), true, false);
 
     public boolean push() {
         return pushAllowed == null || pushAllowed;
@@ -36,6 +41,11 @@ public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean bra
 
     public boolean forcePush() {
         return forcePushAllowed == null || forcePushAllowed;
+    }
+
+    /** Local folders, file://, git://, http:// and local-network targets. Off unless set. */
+    public boolean insecureRemotes() {
+        return allowInsecureRemotes != null && allowInsecureRemotes;
     }
 
     public List<String> deliveries() {

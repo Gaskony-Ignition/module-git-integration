@@ -106,7 +106,7 @@ public class DataDirGitManager {
             try (Git git = Git.init().setDirectory(dataDir().toFile())
                     .setInitialBranch(MasterRename.initialBranch(configured == null ? null : configured.getBranch()))
                     .call()) {
-                GitManager.disableSsl(git);
+                RepoHardening.harden(git.getRepository());
                 writeGitignore();
                 stageScope(git, false);
                 // Authored as the gateway (like the auto-commits), not the acting web user, so the
@@ -127,8 +127,8 @@ public class DataDirGitManager {
     private static void writeGitignore() throws IOException {
         Path gitignore = dataDir().resolve(".gitignore");
         if (!Files.exists(gitignore)) {
-            Files.write(gitignore,
-                    (String.join("\n", GITIGNORE_LINES) + "\n").getBytes(StandardCharsets.UTF_8));
+            Files.write(gitignore, IgnoreRules.withDenyBlock(String.join("\n", GITIGNORE_LINES))
+                    .getBytes(StandardCharsets.UTF_8));
         }
     }
 
@@ -858,7 +858,7 @@ public class DataDirGitManager {
                     // Re-establish the repo from the saved remote (post-restore recovery).
                     try (Git git = Git.init().setDirectory(dataDir().toFile())
                             .setInitialBranch(MasterRename.initialBranch(branch)).call()) {
-                        GitManager.disableSsl(git);
+                        RepoHardening.harden(git.getRepository());
                         git.remoteAdd().setName(ORIGIN).setUri(new URIish(remote.getUri())).call();
                     }
                     if (!Files.exists(dataDir().resolve(".gitignore"))) {
@@ -1661,7 +1661,8 @@ public class DataDirGitManager {
     public static void writeIgnoreFile(String text) {
         synchronized (DATA_DIR_LOCK) {
             try {
-                String body = text.endsWith("\n") ? text : text + "\n";
+                // Whatever was written, the deny block ends the file: no edit can re-include a key.
+                String body = IgnoreRules.withDenyBlock(text);
                 Files.write(dataDir().resolve(".gitignore"), body.getBytes(StandardCharsets.UTF_8));
             } catch (IOException e) {
                 logger.error("Error writing .gitignore", e);

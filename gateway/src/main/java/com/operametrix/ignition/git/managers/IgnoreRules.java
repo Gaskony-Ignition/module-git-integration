@@ -106,6 +106,54 @@ public final class IgnoreRules {
             "!/.gitignore"
     );
 
+    /** Heads the block {@link #withDenyBlock} keeps at the end of {@code .gitignore}. */
+    public static final String DENY_MARKER =
+            "# Never versioned: keys, certificates and per-gateway secrets (kept last by the Git module)";
+
+    /**
+     * Paths no edit can bring into the repository: the gateway's keystores and certificates, its
+     * local (never shared) config, {@code ignition.conf} (JVM arguments can hold passwords) and key
+     * files anywhere. Last in the file, so git's last-match-wins puts them above any negation.
+     */
+    public static final List<String> DENY = List.of(
+            "**/config/local/",
+            "**/config/resources/local/",
+            "**/keystore/",
+            "**/certificates/",
+            "/ignition.conf",
+            "*.jks",
+            "*.p12",
+            "*.pfx",
+            "*.pem",
+            "*.key",
+            "*.keystore");
+
+    /**
+     * {@code text} with the {@link #DENY} block moved to (or added at) its end, unchanged. Any line
+     * of the block found under its marker is dropped first, so the result is the same however
+     * often it is applied.
+     */
+    public static String withDenyBlock(String text) {
+        List<String> lines = new java.util.ArrayList<>(List.of((text == null ? "" : text).split("\n", -1)));
+        int marker = lines.indexOf(DENY_MARKER);
+        while (marker >= 0) {
+            lines.remove(marker);
+            while (marker < lines.size() && DENY.contains(lines.get(marker).trim())) {
+                lines.remove(marker);
+            }
+            marker = lines.indexOf(DENY_MARKER);
+        }
+        while (!lines.isEmpty() && lines.get(lines.size() - 1).isBlank()) {
+            lines.remove(lines.size() - 1);
+        }
+        if (!lines.isEmpty()) {
+            lines.add("");
+        }
+        lines.add(DENY_MARKER);
+        lines.addAll(DENY);
+        return String.join("\n", lines) + "\n";
+    }
+
     /** Parsed {@code .gitignore} rules, newest last (git's last-match-wins order). */
     public static List<FastIgnoreRule> parse(Path gitignore) throws IOException {
         if (!Files.exists(gitignore)) {

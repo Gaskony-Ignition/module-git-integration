@@ -80,9 +80,9 @@ public class GitManager {
         }
     }
 
+    /** {@code projects/<name>}; a name that is not a project name is refused ({@link SafePaths}). */
     public static Path getProjectFolderPath(String projectName) {
-        Path dataDir = getDataFolderPath();
-        return dataDir.resolve("projects").resolve(projectName);
+        return SafePaths.projectFolder(getDataFolderPath(), projectName);
     }
 
     public static Path getDataFolderPath() {
@@ -108,8 +108,16 @@ public class GitManager {
      * nothing is shared and nothing waits.
      */
     public static Object lockFor(RepoLocator.Repo repo) {
-        return repo.scoped() ? DataDirGitManager.lock() : new Object();
+        return repo.scoped() ? DataDirGitManager.lock()
+                : REPO_LOCKS.computeIfAbsent(repo.root().toAbsolutePath().normalize(), k -> new Object());
     }
+
+    /** One lock per Separate repository, so two Designers on one project take turns. */
+    private static final java.util.concurrent.ConcurrentHashMap<Path, Object> REPO_LOCKS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Seconds a fetch, push, pull or ls-remote may wait on the network before it fails. */
+    public static final int NET_TIMEOUT_SECONDS = 60;
 
 
     public static void clearDirectory(Path folderPath) {
@@ -132,6 +140,7 @@ public class GitManager {
      */
     public static void setAuthentication(TransportCommand<?, ?> command, String projectName,
                                           String userName, String remoteName) throws Exception {
+        command.setTimeout(NET_TIMEOUT_SECONDS);
         Path root = repoFor(projectName).root();
         if (combined()) {
             // One remote for the whole gateway, with the credential set on the Versioning page.
@@ -171,10 +180,15 @@ public class GitManager {
                 throw new Exception("No HTTPS credential assigned to remote '" + remoteName
                         + "'. Open the Remotes popup and pick an HTTPS credential for this remote.");
             }
-            guardUrls(urls, httpRecord.getHostPattern());
+            guardUrls(urls, boundHost(httpRecord));
             command.setCredentialsProvider(
                     new UsernamePasswordCredentialsProvider(httpRecord.getUserName(), httpRecord.getPassword()));
         }
+    }
+
+    /** An HTTPS credential's host; "" (bound to nothing, so sent nowhere) when it has none. */
+    private static String boundHost(GitUserHttpsCredentialRecord c) {
+        return c.getHostPattern() == null ? "" : c.getHostPattern();
     }
 
     /** Every URL a remote contacts: its fetch URL and any push URL. */
@@ -192,8 +206,9 @@ public class GitManager {
     }
 
     /**
-     * Before any credential is attached: the policy's allowed hosts, and the credential's own host.
-     * Refuses rather than sending a secret somewhere it was not set up for.
+     * Before any credential is attached: the URL rules and the policy's allowed hosts, and the
+     * credential's own host ({@code null} for an SSH key, which has none). Refuses rather than
+     * sending a secret somewhere it was not set up for.
      */
     private static void guardUrls(List<String> urls, String boundHost) throws Exception {
         for (String u : urls) {
@@ -212,6 +227,7 @@ public class GitManager {
      */
     public static void setAuthenticationFromIds(TransportCommand<?, ?> command, String url,
                                                 long sshKeyId, long httpsCredentialId) throws Exception {
+        command.setTimeout(NET_TIMEOUT_SECONDS);
         boolean isSsh = url != null && !url.toLowerCase().startsWith("http");
         if (isSsh) {
             GitUserSshKeyRecord keyRecord = sshKeyId > 0 ? GitUserSshKeyRecord.findById(sshKeyId) : null;
@@ -226,7 +242,7 @@ public class GitManager {
             if (httpRecord == null) {
                 throw new Exception("No HTTPS credential assigned to the config remote. Pick one in the Remote card.");
             }
-            guardUrls(url == null ? List.of() : List.of(url), httpRecord.getHostPattern());
+            guardUrls(url == null ? List.of() : List.of(url), boundHost(httpRecord));
             command.setCredentialsProvider(
                     new UsernamePasswordCredentialsProvider(httpRecord.getUserName(), httpRecord.getPassword()));
         }
@@ -239,6 +255,7 @@ public class GitManager {
     public static void setAuthenticationRaw(TransportCommand<?, ?> command, String url,
                                             String sshKeyPlaintext, String httpsUser,
                                             String httpsPassword) throws Exception {
+        command.setTimeout(NET_TIMEOUT_SECONDS);
         PolicyGate.checkHost(url);
         boolean isSsh = url != null && !url.toLowerCase().startsWith("http");
         if (isSsh) {
@@ -409,42 +426,6 @@ public class GitManager {
         return "unknown";
     }
 
-    public static void cloneRepo(String projectName, String userName, String URI, String branchName) {
-        File projectDirFile = getProjectFolderPath(projectName).toFile();
-        if (projectDirFile.exists()) {
-            try (Git git = Git.init().setDirectory(projectDirFile).setInitialBranch(MasterRename.initialBranch(branchName)).call()) {
-                disableSsl(git);
-
-                // GIT REMOTE ADD
-                URIish urIish = new URIish(URI);
-                git.remoteAdd()
-                        .setName(urIish.getHumanishName())
-                        .setUri(urIish).call();
-
-                //GIT FETCH
-                String remoteName = urIish.getHumanishName();
-                FetchCommand fetch = git.fetch()
-                        .setRemote(remoteName)
-                        .setRefSpecs(new RefSpec("refs/heads/" + branchName + ":refs/remotes/" + remoteName + "/" + branchName));
-
-                setAuthentication(fetch, projectName, userName, "origin");
-                fetch.call();
-
-                //GIT CHECKOUT
-                CheckoutCommand checkout = git.checkout()
-                        .setCreateBranch(true)
-                        .setName(branchName)
-                        .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
-                        .setStartPoint(urIish.getHumanishName() + "/" + branchName);
-                checkout.call();
-            } catch (Exception e) {
-                logger.error(e.toString());
-                throw new RuntimeException(e);
-            }
-        }
-    }
-
-
     public static ResourcePath getResourcePath(String resourcePath) {
         String moduleId = "";
         String typeId = "";
@@ -456,12 +437,6 @@ public class GitManager {
         if (paths.length > 2) resource = resourcePath.replace(moduleId + "/" + typeId + "/", "");
 
         return new ResourcePath(new ResourceType(moduleId, typeId), resource);
-    }
-
-    public static void disableSsl(Git git) throws IOException {
-        StoredConfig config = git.getRepository().getConfig();
-        config.setBoolean("http", null, "sslVerify", false);
-        config.save();
     }
 
     /**
@@ -821,6 +796,7 @@ public class GitManager {
 
     public static List<String> getResourceDiffContent(String projectName, String resourcePath) {
         Path projectPath = getProjectFolderPath(projectName);
+        SafePaths.repoPath(resourcePath);
 
         // For Ignition resources, the directory contains resource.json (metadata) plus
         // one or more data files (view.json, data.bin, code.py, etc.).
@@ -836,6 +812,7 @@ public class GitManager {
 
     /** {@code [oldContent, newContent]} of one file, HEAD vs working tree (JSON-normalized). */
     public static List<String> getWorkingTreeDiffContent(Path workDir, String filePath) {
+        SafePaths.repoPath(filePath);
         String oldContent = "";
         String newContent = "";
 
@@ -867,14 +844,12 @@ public class GitManager {
             logger.error("Error reading HEAD content for diff", e);
         }
 
-        // Read new content from working tree
-        Path workingTreeFile = workDir.resolve(filePath.replace("/", File.separator));
-        if (Files.exists(workingTreeFile)) {
-            try {
-                newContent = new String(Files.readAllBytes(workingTreeFile));
-            } catch (IOException e) {
-                logger.error("Error reading working tree content for diff", e);
-            }
+        // Read new content from working tree: only a regular file inside it, of a size a diff
+        // can show (refused with the reason, rather than read).
+        try {
+            newContent = SafePaths.readCapped(SafePaths.resolve(workDir, filePath), SafePaths.MAX_READ_BYTES);
+        } catch (IOException e) {
+            logger.error("Error reading working tree content for diff", e);
         }
 
         // Normalize JSON to eliminate key-ordering noise in diffs
@@ -925,6 +900,9 @@ public class GitManager {
         }
     }
 
+    /** The most commits one history page returns. */
+    public static final int MAX_LOG = 500;
+
     /**
      * Get paginated commit history from the repository log.
      *
@@ -939,6 +917,8 @@ public class GitManager {
 
     /** As above, limited to the project's folder when the repository is shared. */
     public static List<String[]> getCommitLog(RepoLocator.Repo scope, int skip, int limit) {
+        skip = Math.max(0, skip);
+        limit = Math.max(1, Math.min(MAX_LOG, limit));
         List<String[]> commits = new ArrayList<>();
         try (Git git = getGit(scope.root())) {
             Repository repo = git.getRepository();
@@ -1054,6 +1034,7 @@ public class GitManager {
      * @return two-element list: [oldContent, newContent]; empty strings for missing content
      */
     public static List<String> getCommitFileDiffContent(Path projectFolderPath, String commitHash, String filePath) {
+        SafePaths.repoPath(filePath);
         String oldContent = "";
         String newContent = "";
 
@@ -1125,6 +1106,7 @@ public class GitManager {
      * @return true if discard succeeded
      */
     public static boolean discardChanges(Path projectFolderPath, List<String> paths) {
+        paths.forEach(SafePaths::repoPath);
         try (Git git = getGit(projectFolderPath)) {
             Status status = git.status().call();
             Set<String> untracked = status.getUntracked();
@@ -1160,7 +1142,7 @@ public class GitManager {
             // + setCleanDirectories(true) silently no-ops on file paths that
             // aren't in getUntrackedFolders(); deleting via Files is reliable.
             for (String path : untrackedPaths) {
-                Path target = projectFolderPath.resolve(path);
+                Path target = SafePaths.resolve(projectFolderPath, path);
                 if (java.nio.file.Files.isDirectory(target)) {
                     try (java.util.stream.Stream<Path> walk = java.nio.file.Files.walk(target)) {
                         walk.sorted(java.util.Comparator.reverseOrder())
@@ -1395,6 +1377,7 @@ public class GitManager {
      * @param stage "OURS" or "THEIRS"
      */
     public static boolean resolveConflict(Path projectFolderPath, String filePath, String stage) {
+        SafePaths.repoPath(filePath);
         try (Git git = getGit(projectFolderPath)) {
             CheckoutCommand.Stage checkoutStage = "OURS".equals(stage)
                     ? CheckoutCommand.Stage.OURS
@@ -1467,6 +1450,7 @@ public class GitManager {
      * @return two-element list: [oursContent, theirsContent]
      */
     public static List<String> getConflictDiffContent(Path projectFolderPath, String filePath) {
+        SafePaths.repoPath(filePath);
         String oursContent = "";
         String theirsContent = "";
 

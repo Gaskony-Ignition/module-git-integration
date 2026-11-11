@@ -62,16 +62,32 @@ public final class RepoLocator {
             return prefix.isEmpty() || repoPath.startsWith(prefix) || repoPath.equals(pathspec());
         }
 
-        /**
-         * Project-relative to repo-relative. A leading {@code /} marks a path that is already
-         * repo-relative: {@link #toProjectPath} hands those out for files outside the project (a
-         * merge conflict in config, say) so the Designer can still name and resolve them.
-         */
+        /** Project-relative to repo-relative; a path outside the project (leading {@code /}) is refused. */
         public String toRepoPath(String projectPath) {
             if (prefix.isEmpty()) {
                 return projectPath;
             }
-            return projectPath.startsWith("/") ? projectPath.substring(1) : prefix + projectPath;
+            if (projectPath.startsWith("/")) {
+                throw new IllegalArgumentException("'" + projectPath + "' is outside this project.");
+            }
+            return prefix + projectPath;
+        }
+
+        /**
+         * As {@link #toRepoPath(String)}, also taking a leading {@code /} path (already repo-relative,
+         * as {@link #toProjectPath} hands out for a merge conflict in config, say) when it is one of
+         * {@code conflicting}, so the Designer can name and resolve it and nothing else outside.
+         */
+        public String toRepoPath(String projectPath, java.util.Collection<String> conflicting) {
+            if (!prefix.isEmpty() && projectPath.startsWith("/")) {
+                String p = projectPath.substring(1);
+                if (conflicting.contains(p)) {
+                    return p;
+                }
+                throw new IllegalArgumentException("'" + projectPath + "' is outside this project and not in"
+                        + " conflict.");
+            }
+            return toRepoPath(projectPath);
         }
 
         /** Repo-relative to project-relative; outside the project gets a leading {@code /}. */
@@ -98,10 +114,7 @@ public final class RepoLocator {
     }
 
     public static Repo forProject(Path dataDir, String projectName, Layout layout) {
-        if (projectName == null || projectName.isBlank() || projectName.contains("/")
-                || projectName.contains("\\") || projectName.equals("..") || projectName.equals(".")) {
-            throw new IllegalArgumentException("Not a project name: " + projectName);
-        }
+        SafePaths.projectName(projectName);
         return layout == Layout.COMBINED
                 ? new Repo(dataDir, "projects/" + projectName + "/")
                 : new Repo(dataDir.resolve("projects").resolve(projectName), "");

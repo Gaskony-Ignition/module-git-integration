@@ -244,6 +244,7 @@ public final class LayoutSwitch {
                     created.add(dir.resolve(".git"));
                     try (Git g = Git.init().setDirectory(dir.toFile())
                             .setInitialBranch(MasterRename.initialBranch(null)).call()) {
+                        RepoHardening.harden(g.getRepository());
                         g.add().addFilepattern(".").call();
                         g.commit().setMessage(PolicyGate.trailer("Initial commit (from the gateway repository)"))
                                 .setAuthor(author).setCommitter(author).call();
