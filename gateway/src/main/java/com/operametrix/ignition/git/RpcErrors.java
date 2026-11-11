@@ -31,8 +31,9 @@ final class RpcErrors {
                     } catch (InvocationTargetException e) {
                         Throwable cause = e.getCause();
                         String message = cause.getMessage();
-                        String shown = SafePaths.redact(message, GitManager.getDataFolderPath());
-                        if (message == null || message.equals(shown)) {
+                        String shown = SafePaths.redact(message == null ? cause.toString() : message,
+                                GitManager.getDataFolderPath());
+                        if ((message == null || message.equals(shown)) && !nestedPath(cause)) {
                             throw cause;
                         }
                         logger.info("Designer call {} failed: {}", method.getName(), message);
@@ -40,5 +41,16 @@ final class RpcErrors {
                         throw new RuntimeException(shown);
                     }
                 });
+    }
+
+    /** Whether a cause below the top one names an install folder (it may travel with the error). */
+    private static boolean nestedPath(Throwable top) {
+        for (Throwable t = top.getCause(); t != null && t != t.getCause(); t = t.getCause()) {
+            String m = t.getMessage();
+            if (m != null && !m.equals(SafePaths.redact(m, GitManager.getDataFolderPath()))) {
+                return true;
+            }
+        }
+        return false;
     }
 }

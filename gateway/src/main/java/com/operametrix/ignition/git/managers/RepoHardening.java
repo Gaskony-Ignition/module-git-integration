@@ -37,8 +37,9 @@ public final class RepoHardening {
     }
 
     /**
-     * TLS certificates verified (versions before 4.3.0 turned that off), and a symbolic link in a
-     * checkout written as a plain file, so a branch cannot point the working tree elsewhere.
+     * TLS certificates verified (versions before 4.3.0 turned that off), a symbolic link in a
+     * checkout written as a plain file, so a branch cannot point the working tree elsewhere, and
+     * HTTP redirects not followed, so a credential only goes to the remote's own host.
      *
      * @return whether anything changed
      */
@@ -51,6 +52,11 @@ public final class RepoHardening {
         }
         if (config.getBoolean("core", null, "symlinks", true)) {
             config.setBoolean("core", null, "symlinks", false);
+            changed = true;
+        }
+        // A redirect would take the credential with it to wherever the server points.
+        if (!"false".equals(config.getString("http", null, "followRedirects"))) {
+            config.setString("http", null, "followRedirects", "false");
             changed = true;
         }
         if (changed) {
@@ -145,7 +151,7 @@ public final class RepoHardening {
                     + " truststore.", tls);
         }
         if (touched > 0) {
-            logger.info("Symbolic links are now checked out as plain files in {} repositories.", touched);
+            logger.info("Symbolic links in checkouts and HTTP redirects are now off in {} repositories.", touched);
         }
     }
 
@@ -184,15 +190,15 @@ public final class RepoHardening {
     }
 
     /**
-     * Before 4.3.0 an HTTPS credential whose host field had no dot was a label bound to no host. It is
-     * bound now to the one host the remotes using it point at; with none or several it is left, and
-     * refused until someone sets its host.
+     * Before 4.3.0 an HTTPS credential's host field could be a label bound to no host (no dot, or
+     * not a host at all: "token v1.2"). It is bound now to the one host the remotes using it point
+     * at; with none or several it is left, and refused until someone sets its host.
      */
     private static void credentialHosts() {
         inEachCollection(c -> {
             for (GitUserHttpsCredentialRecord cred : GitUserHttpsCredentialRecord.listAll()) {
                 String field = cred.getHostPattern() == null ? "" : cred.getHostPattern().trim().toLowerCase(Locale.ROOT);
-                if (field.contains(".") || field.equals("localhost")
+                if (PolicyGate.isHostPattern(field) && (field.contains(".") || field.equals("localhost"))
                         || !definedIn(GitUserHttpsCredentialRecord.TYPE, String.valueOf(cred.getId()), c)) {
                     continue;
                 }

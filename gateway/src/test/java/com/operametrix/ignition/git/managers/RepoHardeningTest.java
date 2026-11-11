@@ -33,6 +33,7 @@ class RepoHardeningTest {
             StoredConfig c = git.getRepository().getConfig();
             assertThat(c.getString("http", null, "sslVerify")).isNull();
             assertThat(c.getBoolean("core", null, "symlinks", true)).isFalse();
+            assertThat(c.getString("http", null, "followRedirects")).isEqualTo("false");
             assertThat(c.getString("remote", "origin", "url")).isEqualTo("https://me@github.com/o/r.git");
             assertThat(c.getString("remote", "backup", "url")).isEqualTo("git@github.com:o/r.git");
         }

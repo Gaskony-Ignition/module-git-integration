@@ -389,8 +389,7 @@ public class DataDirGitManager {
             String path = SafePaths.repoPath(filePath);
             try (Git git = GitManager.getGit(dataDir())) {
                 boolean tracked = isTracked(git.getRepository(), path, false);
-                if (!tracked && (decide(ignoreRules(), path, false).excluded()
-                        || IgnoreRules.denied(path))) {
+                if (IgnoreRules.denied(path) || !tracked && decide(ignoreRules(), path, false).excluded()) {
                     throw new IllegalArgumentException(path + " is not versioned (.gitignore excludes it).");
                 }
             } catch (IOException e) {
@@ -398,7 +397,13 @@ public class DataDirGitManager {
             }
             return GitManager.getWorkingTreeDiffContent(dataDir(), path);
         }
-        return GitManager.getCommitFileDiffContent(dataDir(), commitHash, filePath);
+        // History holds what was once versioned, which a later .gitignore cannot take back; the
+        // never-versioned paths stay unreadable here too.
+        String path = SafePaths.repoPath(filePath);
+        if (IgnoreRules.denied(path)) {
+            throw new IllegalArgumentException(path + " is never shown (keys, certificates, local config).");
+        }
+        return GitManager.getCommitFileDiffContent(dataDir(), commitHash, path);
     }
 
     // ----- Remote (manual push only — never pushed automatically) -----

@@ -122,6 +122,11 @@ public final class PullGuard {
 
     private static String plainOne(Throwable e) {
         String m = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
+        if (m.contains("http.followredirects is false")) {
+            return "The server redirected the request to another address. The gateway does not follow"
+                    + " redirects, so a credential never reaches another host: update the remote URL to"
+                    + " the address the server moved to.";
+        }
         if (e instanceof RefNotAdvertisedException) {
             return "That branch is not on the remote: it was deleted or renamed there, or the credential"
                     + " cannot see it.";

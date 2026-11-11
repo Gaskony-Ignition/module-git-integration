@@ -59,16 +59,27 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
      * signed-in user.
      */
     static String caller(String claimed) {
-        RpcContext rpc = RpcDelegate.CURRENT_CONTEXT.get();
+        RpcContext rpc = designerRpc();
         if (rpc == null) {
             return claimed;
         }
-        Object name = rpc.session() == null ? null
-                : rpc.session().getAttribute(ClientReqSession.SESSION_USERNAME);
+        Object name = rpc.session().getAttribute(ClientReqSession.SESSION_USERNAME);
         if (name == null || name.toString().isBlank()) {
             throw new SecurityException("This Designer session has no signed-in user.");
         }
         return name.toString();
+    }
+
+    /**
+     * The RPC context of this call, or null when a gateway route called in directly. Only a
+     * Designer session may make these calls: a Vision client or Perspective session is refused.
+     */
+    private static RpcContext designerRpc() {
+        RpcContext rpc = RpcDelegate.CURRENT_CONTEXT.get();
+        if (rpc != null && (rpc.session() == null || !rpc.session().isDesigner())) {
+            throw new SecurityException("Git Integration calls are only accepted from a Designer.");
+        }
+        return rpc;
     }
 
     /**
@@ -77,7 +88,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
      */
     private String project(String projectName) {
         SafePaths.projectName(projectName);
-        RpcContext rpc = RpcDelegate.CURRENT_CONTEXT.get();
+        RpcContext rpc = designerRpc();
         if (rpc != null && !projectName.equals(rpc.projectName())) {
             throw new SecurityException("This Designer has project '" + rpc.projectName() + "' open, not '"
                     + projectName + "'.");
