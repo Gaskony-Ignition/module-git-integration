@@ -3,7 +3,7 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
-## 4.4.0 (unreleased)
+## [4.4.0] - 2026-11-11
 
 ### Security
 - A remote URL whose user name is a token (`https://ghp_…@github.com/…`) is refused, and remote
