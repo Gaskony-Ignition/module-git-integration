@@ -3,7 +3,7 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
-## 4.3.1 (unreleased)
+## [4.3.1] - 2026-11-11
 
 ### Security
 - Testing a remote on the Versioning page followed an HTTP redirect, credential and all, to
