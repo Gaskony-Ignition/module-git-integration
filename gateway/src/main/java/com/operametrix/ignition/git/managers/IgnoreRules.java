@@ -154,6 +154,28 @@ public final class IgnoreRules {
         return String.join("\n", lines) + "\n";
     }
 
+    /** Whether the {@link #DENY} block covers {@code path} or one of its folders. */
+    public static boolean denied(String path) {
+        IgnoreNode node = new IgnoreNode();
+        try {
+            node.parse(new java.io.ByteArrayInputStream(
+                    String.join("\n", DENY).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        String[] parts = path.split("/");
+        StringBuilder prefix = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            prefix.append(i > 0 ? "/" : "").append(parts[i]);
+            for (FastIgnoreRule r : node.getRules()) {
+                if (r.isMatch(prefix.toString(), i < parts.length - 1)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /** Parsed {@code .gitignore} rules, newest last (git's last-match-wins order). */
     public static List<FastIgnoreRule> parse(Path gitignore) throws IOException {
         if (!Files.exists(gitignore)) {

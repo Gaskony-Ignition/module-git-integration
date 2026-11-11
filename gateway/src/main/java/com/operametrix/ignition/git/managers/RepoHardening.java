@@ -8,14 +8,11 @@ import com.operametrix.ignition.git.records.GitUserSshKeyRecord;
 import com.operametrix.ignition.git.records.ModeStore;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.dircache.DirCache;
-import org.eclipse.jgit.ignore.FastIgnoreRule;
-import org.eclipse.jgit.ignore.IgnoreNode;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.lib.StoredConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -278,36 +275,15 @@ public final class RepoHardening {
 
     /** Index entries the deny block matches, by path or by any parent folder. */
     static List<String> trackedAndDenied(Repository repo) throws IOException {
-        IgnoreNode deny = new IgnoreNode();
-        deny.parse(new ByteArrayInputStream(String.join("\n", IgnoreRules.DENY).getBytes(StandardCharsets.UTF_8)));
-        List<FastIgnoreRule> rules = deny.getRules();
         List<String> out = new ArrayList<>();
         DirCache index = repo.readDirCache();
         for (int i = 0; i < index.getEntryCount(); i++) {
             String path = index.getEntry(i).getPathString();
-            if (denied(rules, path)) {
+            if (IgnoreRules.denied(path)) {
                 out.add(path);
             }
         }
         return out;
-    }
-
-    private static boolean denied(List<FastIgnoreRule> rules, String path) {
-        String[] parts = path.split("/");
-        StringBuilder prefix = new StringBuilder();
-        for (int i = 0; i < parts.length; i++) {
-            if (i > 0) {
-                prefix.append('/');
-            }
-            prefix.append(parts[i]);
-            boolean dir = i < parts.length - 1;
-            for (FastIgnoreRule r : rules) {
-                if (r.isMatch(prefix.toString(), dir)) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     /** Runs {@code work} once per collection (core, then each mode), reading and writing that one. */

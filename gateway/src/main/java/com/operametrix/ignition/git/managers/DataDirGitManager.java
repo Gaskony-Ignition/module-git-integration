@@ -384,7 +384,19 @@ public class DataDirGitManager {
      */
     public static List<String> fileDiff(String commitHash, String filePath) {
         if (commitHash == null || commitHash.isBlank()) {
-            return GitManager.getWorkingTreeDiffContent(dataDir(), filePath);
+            // The working tree holds far more than the repository: only a file it versions, or
+            // one .gitignore lets it version, is read.
+            String path = SafePaths.repoPath(filePath);
+            try (Git git = GitManager.getGit(dataDir())) {
+                boolean tracked = isTracked(git.getRepository(), path, false);
+                if (!tracked && (decide(ignoreRules(), path, false).excluded()
+                        || IgnoreRules.denied(path))) {
+                    throw new IllegalArgumentException(path + " is not versioned (.gitignore excludes it).");
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            return GitManager.getWorkingTreeDiffContent(dataDir(), path);
         }
         return GitManager.getCommitFileDiffContent(dataDir(), commitHash, filePath);
     }
