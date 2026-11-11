@@ -14,7 +14,7 @@ upstream's; everything below is this fork.
   and the project must exist; file paths in diffs, discards and conflict views must stay inside
   the project and repository, cannot name `.git`, and a symbolic link cannot lead outside. A
   working-tree diff reads at most 5 MB of a regular file, and the Versioning page only shows files
-  the repository versions. In the Combined layout a path outside the project is accepted only for
+  the repository versions, never a key, certificate or local-config file even from history. In the Combined layout a path outside the project is accepted only for
   a file in merge conflict.
 - **TLS certificates are verified.** Earlier versions turned certificate checks off in every
   repository they created. They are back on, and start-up turns them on in existing repositories
@@ -25,12 +25,21 @@ upstream's; everything below is this fork.
   start-up to the one host its remotes use; otherwise it is refused until its host is set, and
   the gateway log says which. Moving a project remote to another host detaches its credential.
   The remote test only resolves a Secret Provider reference that a saved credential for that host
-  already uses. The GitHub token check only runs for credentials bound to github.com.
+  already uses, and which provider secret a reference names is shown only with WRITE permission
+  (`POST /secret-ref`). The GitHub token check only runs for credentials bound to github.com.
 - **Remote URLs must be HTTPS or SSH.** Local folders, `file://`, `git://`, `http://` and targets on
   this machine or its link-local network (`localhost`, `127.x`, `169.254.x`) need the new policy
   setting **Insecure remotes** (off by default). A URL with a password in it is refused
   everywhere, and start-up removes such passwords from existing remotes (logged as a warning:
   enter them again as credentials).
+- Remote URLs are read the way JGit reads them (`file:/x` is a local folder, `host:path` is SSH),
+  and a host that is not a valid host name or IP address, or a URL an HTTP client would read
+  differently, is refused. The allowed-hosts list and credential binding use the same reading.
+- HTTP redirects are not followed, so a credential only reaches the remote's own host.
+- A Git policy that exists but cannot be read is treated as locked, not as the permissive default.
+  A delivery, restore, override or mode switch that loosens the effective policy is logged as a
+  warning on the Logs tab and in the gateway log.
+- Only a Designer session can make the module's Designer calls.
 - Checkouts write symbolic links as plain files (`core.symlinks=false`), set on new and existing
   repositories.
 - Legacy plaintext SSH keys are re-saved encrypted at start-up and the plaintext is no longer

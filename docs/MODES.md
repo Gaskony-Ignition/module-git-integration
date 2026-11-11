@@ -125,6 +125,12 @@ credential is refused for a host other than its own:
   again, and a Secret Provider reference can only be tested when a saved
   credential for that host already uses it.
 
+A policy that is saved but cannot be read is treated as locked (no push, branch or layout
+switch, no delivery but off, no remote), never as the permissive default; the gateway log says so.
+
+The gateway does not follow HTTP redirects (`http.followRedirects=false` in every repository),
+so a credential never travels to another host; a moved server needs the remote URL updated.
+
 TLS certificates are always verified (versions before 4.3.0 turned that off in
 every repository they created; start-up turns it back on). A git server with a
 certificate from a private CA needs that CA in the gateway's Java truststore —
@@ -138,7 +144,10 @@ see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 - **Allowed remote hosts** set to your git host.
 - Credentials as Secret Provider references, read-only tokens in Prod.
 - Branch protection on every branch a gateway follows ([AUTOMATION.md](AUTOMATION.md),
-  "Who can push is who can deploy").
+  "Who can push is who can deploy"), the config branch above all: the policy travels in it, so
+  whoever can push there can loosen Prod's policy. When a delivery, restore, override or mode
+  switch makes the effective policy allow more, the gateway log and the Logs tab get a warning
+  naming each loosened setting.
 - The Versioning page needs WRITE permission: give it to gateway administrators
   only.
 
