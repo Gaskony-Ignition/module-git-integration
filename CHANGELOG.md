@@ -3,7 +3,7 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
-## 4.3.0 (unreleased)
+## [4.3.0] - 2026-11-11
 
 ### Security
 - **Designer calls act as the signed-in Designer user on the open project.** The user and project
