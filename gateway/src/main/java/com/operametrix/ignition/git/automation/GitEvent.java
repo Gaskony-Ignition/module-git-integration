@@ -82,7 +82,7 @@ public record GitEvent(String type, String outcome, String scope, String project
         }
 
         public Builder remote(String v) {
-            this.remote = v;
+            this.remote = com.operametrix.ignition.git.managers.RemoteUrls.withoutUserInfo(v);
             return this;
         }
 
@@ -92,7 +92,7 @@ public record GitEvent(String type, String outcome, String scope, String project
         }
 
         public Builder message(String v) {
-            this.message = v;
+            this.message = com.operametrix.ignition.git.managers.RemoteUrls.withoutUserInfo(v);
             return this;
         }
 
@@ -107,12 +107,12 @@ public record GitEvent(String type, String outcome, String scope, String project
 
         /** Failure carries the reason in {@code message}, replacing any commit message set. */
         public GitEvent failure(String reason) {
-            this.message = reason;
+            this.message = com.operametrix.ignition.git.managers.RemoteUrls.withoutUserInfo(reason);
             return build(FAILURE);
         }
 
         public GitEvent warning(String reason) {
-            this.message = reason;
+            this.message = com.operametrix.ignition.git.managers.RemoteUrls.withoutUserInfo(reason);
             return build(WARNING);
         }
 

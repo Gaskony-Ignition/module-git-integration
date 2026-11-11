@@ -384,7 +384,7 @@ async function security(tag) {
     const urls = ['file:/x', 'file:x', 'FILE:/x', 'file:///etc', '/tmp/repo', `http://${BR}:${PORT}/gateway.git`, `git://${BR}/gateway.git`,
       'https://127.0.0.1/x.git', 'https://localhost/x.git', 'https://169.254.169.254/x.git', 'https://[::1]/x.git',
       `https://evil.example\\@${BR}:${PORT}/gateway.git`, `https://${BR}:${PORT}\\evil.example/gateway.git`,
-      `https://writer:${E.W_PW}@${BR}:${PORT}/gateway.git`];
+      `https://writer:${E.W_PW}@${BR}:${PORT}/gateway.git`, `https://ghp_${'a'.repeat(36)}@${BR}:${PORT}/gateway.git`];
     const leaks = [];
     for (const u of urls) {
       const t = await api('POST', '/remote-test', { uri: u, mode: 'inline', username: 'writer', password: 'x' });
@@ -595,6 +595,12 @@ async function sep3() {
     const left = dexec(`test -e ${DATA}/projects/Example_E && echo yes || echo no; ls ${DATA}/var/git-module-add 2>/dev/null | wc -l`);
     return pass(refused(r) && /project.json/.test(r.text) && left.startsWith('no') && left.endsWith('0'), `${r.status} ${r.text.slice(0, 160)} left=${left.replace('\n', ' ')}`);
   });
+  await check('Add from repository needs a pulling delivery in the policy', async () => {
+    await api('POST', '/policy', { ...OPEN_POLICY, deliveryModes: ['off', 'runner'] });
+    const r = await api('POST', '/project-add', { name: 'Example_G', url: `${SRV.dev}/example-b.git`, httpsCredentialId: credId.writer });
+    await api('POST', '/policy', OPEN_POLICY);
+    return pass(r.status === 403 && /Adding a project from its repository is off/.test(r.text), `${r.status} ${r.text.slice(0, 160)}`);
+  });
   await check('a file: URL is refused', async () => {
     const r = await api('POST', '/project-add', { name: 'Example_F', url: 'file:///tmp/x.git', httpsCredentialId: credId.writer });
     return pass(r.status === 403, `${r.status} ${r.text.slice(0, 160)}`);
@@ -773,7 +779,8 @@ async function audit() {
 // key (-Dgitmodule.trustedSigningKeys), so "signed by it" is what GitHub's merge button would give.
 async function merged() {
   phase = 'merged';
-  const MERGED = { ...OPEN_POLICY, githubMergedOnly: true };
+  // The suite's git server stands in for GitHub: its host is listed as a GitHub (Enterprise) host.
+  const MERGED = { ...OPEN_POLICY, githubMergedOnly: true, githubHosts: [BR] };
   const warnings = async (t0) => (await events()).filter((e) => e.outcome === 'warning'
     && /Not merged through GitHub/.test(e.message) && Date.parse(e.timestamp) >= t0 - 5000);
   await check('policy option saved and shown, off by default', async () => {
@@ -792,6 +799,13 @@ async function merged() {
     const w = await warnings(t0);
     return pass(ok(d) && /Not merged through GitHub/.test(s1.json.result || '') && fileIn(`projects/Example_A/${CODE}`) === was
       && w.length === 1, `sync1 ${s1.text.slice(0, 160)}; sync2 ${(s2.json.result || '').slice(0, 60)}; warnings=${w.length}`);
+  });
+  await check('a remote that is not a listed GitHub host is refused', async () => {
+    await api('POST', '/policy', { ...OPEN_POLICY, githubMergedOnly: true });
+    remoteCommit('dev', 'example-a', `printf "def hello():\\n\\treturn 'not-github'\\n" > ${CODE} && git commit -qam ng`, undefined, true);
+    const s1 = await api('POST', '/sync-now', { project: 'Example_A' });
+    await api('POST', '/policy', MERGED);
+    return pass(/isn't GitHub/.test(s1.json.result || '') && !fileIn(`projects/Example_A/${CODE}`).includes('not-github'), (s1.json.result || s1.text).slice(0, 200));
   });
   await check('Sync — pull installs a signed tip', async () => {
     remoteCommit('dev', 'example-a', `printf "def hello():\\n\\treturn 'signed'\\n" > ${CODE} && git commit -qam signed`, undefined, true);
@@ -822,6 +836,11 @@ async function merged() {
     // Back to main, for the phases after this one.
     const back = await api('POST', '/branch-checkout', { repo: 'config', branch: 'main' });
     return pass(ok(p) && back.json.ok && refusedOk && ok(s2) && got.includes('signed'), `unsigned: ${s1.text.slice(0, 160)}; signed: ${s2.text.slice(0, 160)}`);
+  });
+  await check('Add from repository refuses an unsigned head and leaves nothing', async () => {
+    const r = await api('POST', '/project-add', { name: 'Example_G', url: `${SRV.dev}/example-b.git`, httpsCredentialId: credId.writer });
+    const left = dexec(`test -e ${DATA}/projects/Example_G && echo yes || echo no`);
+    return pass(refused(r) && /Not merged through GitHub/.test(r.text) && left === 'no', `${r.status} ${r.text.slice(0, 160)} left=${left}`);
   });
   await check('turning the option off logs the loosening', async () => {
     const t0 = Date.now();

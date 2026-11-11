@@ -85,4 +85,19 @@ class RemoteUrlsTest {
         GitPolicy hosts = new GitPolicy(null, null, null, null, null, List.of("*.github.com"), null, null);
         assertThat(PolicyGate.decideHost(hosts, null, "https://evil.example\\.github.com/x")).isNotNull();
     }
+
+    @Test
+    void aTokenAsTheUserNameIsRefusedAndNeverLogged() {
+        for (String u : new String[] {"https://ghp_abcdefghijklmnopqrstuvwxyz0123@github.com/o/r.git",
+                "https://github_pat_11ABC@github.com/o/r.git", "https://glpat-xyz@gitlab.com/o/r.git",
+                "https://x-access-token@github.com/o/r.git",
+                "https://abcdefghijklmnopqrstuvwxyz0123456789@github.com/o/r.git"}) {
+            assertThat(RemoteUrls.problem(u, false)).as(u).contains("token in its user name");
+        }
+        assertThat(RemoteUrls.problem("https://deploy@git.example.com/o/r.git", false)).isNull();
+        assertThat(RemoteUrls.problem("git@github.com:o/r.git", false)).isNull();
+        assertThat(RemoteUrls.withoutUserInfo("Pushed to https://ghp_SECRET@github.com/o/r.git and ssh://git@h/x"))
+                .isEqualTo("Pushed to https://github.com/o/r.git and ssh://h/x");
+        assertThat(RemoteUrls.withoutUserInfo("https://github.com/o/r.git")).isEqualTo("https://github.com/o/r.git");
+    }
 }

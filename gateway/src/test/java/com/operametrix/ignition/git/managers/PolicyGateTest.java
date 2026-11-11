@@ -149,6 +149,6 @@ class PolicyGateTest {
         assertThat(older.weakerThan(strict)).containsExactly("deliveries not merged on GitHub");
         assertThat(strict.weakerThan(older)).isEmpty();
         assertThat(PolicyWatch.decode(PolicyWatch.encode(strict)).githubMerged()).isTrue();
-        assertThat(strict.summary()).endsWith("GitHub-merged only on");
+        assertThat(strict.summary()).endsWith("GitHub-merged only on (github.com)");
     }
 }

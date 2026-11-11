@@ -65,7 +65,7 @@ public final class PolicyWatch {
         return "push=" + p.push() + "\nforcePush=" + p.forcePush() + "\ncommit=" + p.commit()
                 + "\nbranches=" + p.branches() + "\nlayout=" + p.layout()
                 + "\ndeliveries=" + String.join(",", p.deliveries()) + "\nhosts=" + String.join(",", p.hosts())
-                + "\ninsecure=" + p.insecureRemotes() + "\ngithubMerged=" + p.githubMerged() + "\n";
+                + "\ninsecure=" + p.insecureRemotes() + "\ngithubMerged=" + p.githubMerged() + "\ngithubHosts=" + String.join(",", p.gitHubHosts()) + "\n";
     }
 
     static GitPolicy decode(String text) {
@@ -81,6 +81,6 @@ public final class PolicyWatch {
         return new GitPolicy(Boolean.valueOf(m.get("push")), Boolean.valueOf(m.get("commit")),
                 Boolean.valueOf(m.get("branches")), Boolean.valueOf(m.get("layout")), list.apply("deliveries"),
                 list.apply("hosts"), Boolean.valueOf(m.get("forcePush")), Boolean.valueOf(m.get("insecure")),
-                Boolean.valueOf(m.get("githubMerged")));
+                Boolean.valueOf(m.get("githubMerged")), list.apply("githubHosts"));
     }
 }

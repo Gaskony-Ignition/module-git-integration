@@ -782,6 +782,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     private static String checkAddInputs(String url, String user, long sshKeyId, long httpsId) {
         refuseInCombined("Adding a project from its repository");
+        PolicyGate.checkAddProject();
         if (url == null || url.isBlank()) {
             throw new IllegalArgumentException("A repository URL is required.");
         }
@@ -882,6 +883,10 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                         .setStartPoint("origin/" + b).call();
                 org.eclipse.jgit.lib.ObjectId h = git.getRepository().resolve("HEAD");
                 head = h == null ? "" : h.getName();
+                String notMerged = h == null ? null : GitHubMerged.refusal(git.getRepository(), h, url);
+                if (notMerged != null) {
+                    throw new IllegalArgumentException(notMerged + " Nothing was added.");
+                }
             }
             Files.move(work, target);
         } finally {

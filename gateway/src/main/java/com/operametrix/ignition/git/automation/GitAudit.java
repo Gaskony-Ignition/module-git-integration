@@ -98,7 +98,7 @@ public final class GitAudit {
             parts.add("commit=" + commit.trim());
         }
         if (detail != null && !detail.isBlank()) {
-            parts.add(detail.trim());
+            parts.add(com.operametrix.ignition.git.managers.RemoteUrls.withoutUserInfo(detail.trim()));
         }
         return String.join("; ", parts);
     }

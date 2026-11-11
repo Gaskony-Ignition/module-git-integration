@@ -12,14 +12,26 @@ import java.util.List;
 public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean branchSwitch,
                         Boolean layoutSwitch, List<String> deliveryModes,
                         List<String> allowedRemoteHosts, Boolean forcePushAllowed,
-                        Boolean allowInsecureRemotes, Boolean githubMergedOnly) {
+                        Boolean allowInsecureRemotes, Boolean githubMergedOnly, List<String> githubHosts) {
 
     /** A policy saved before 4.4.0: GitHub-merged-only reads as off. */
     public GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean branchSwitch, Boolean layoutSwitch,
                      List<String> deliveryModes, List<String> allowedRemoteHosts, Boolean forcePushAllowed,
                      Boolean allowInsecureRemotes) {
         this(pushAllowed, designerCommit, branchSwitch, layoutSwitch, deliveryModes, allowedRemoteHosts,
-                forcePushAllowed, allowInsecureRemotes, null);
+                forcePushAllowed, allowInsecureRemotes, null, null);
+    }
+
+    public GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean branchSwitch, Boolean layoutSwitch,
+                     List<String> deliveryModes, List<String> allowedRemoteHosts, Boolean forcePushAllowed,
+                     Boolean allowInsecureRemotes, Boolean githubMergedOnly) {
+        this(pushAllowed, designerCommit, branchSwitch, layoutSwitch, deliveryModes, allowedRemoteHosts,
+                forcePushAllowed, allowInsecureRemotes, githubMergedOnly, null);
+    }
+
+    /** github.com unless set: the hosts whose web-flow signature "merged on GitHub" trusts (GitHub Enterprise). */
+    public List<String> gitHubHosts() {
+        return githubHosts == null || githubHosts.isEmpty() ? List.of("github.com") : githubHosts;
     }
 
     public static final List<String> DELIVERY_MODES = List.of("off", "pull", "replace", "runner");
@@ -29,7 +41,7 @@ public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean bra
      * SSH only (4.3.0).
      */
     public static final GitPolicy DEFAULT =
-            new GitPolicy(true, true, true, true, DELIVERY_MODES, List.of(), true, false, false);
+            new GitPolicy(true, true, true, true, DELIVERY_MODES, List.of(), true, false, false, null);
 
     public boolean push() {
         return pushAllowed == null || pushAllowed;
@@ -56,7 +68,7 @@ public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean bra
      * delivery but off, no remote host at all ("-" is no host name), no insecure remotes.
      */
     public static final GitPolicy LOCKED =
-            new GitPolicy(false, true, false, false, List.of("off"), List.of("-"), false, false, true);
+            new GitPolicy(false, true, false, false, List.of("off"), List.of("-"), false, false, true, null);
 
     /** Local folders, file://, git://, http:// and local-network targets. Off unless set. */
     public boolean insecureRemotes() {
@@ -118,6 +130,13 @@ public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean bra
         if (!githubMerged() && before.githubMerged()) {
             out.add("deliveries not merged on GitHub");
         }
+        if (githubMerged() && before.githubMerged()) {
+            for (String h : gitHubHosts()) {
+                if (!before.gitHubHosts().contains(h)) {
+                    out.add("GitHub host " + h);
+                }
+            }
+        }
         return out;
     }
 
@@ -127,7 +146,8 @@ public record GitPolicy(Boolean pushAllowed, Boolean designerCommit, Boolean bra
                 + onOff(commit()) + ", branches " + onOff(branches()) + ", layout " + onOff(layout())
                 + ", deliveries " + String.join("/", deliveries()) + ", hosts "
                 + (hosts().isEmpty() ? "any" : String.join(" ", hosts())) + ", insecure remotes "
-                + onOff(insecureRemotes()) + ", GitHub-merged only " + onOff(githubMerged());
+                + onOff(insecureRemotes()) + ", GitHub-merged only " + onOff(githubMerged())
+                + (githubMerged() ? " (" + String.join(" ", gitHubHosts()) + ")" : "");
     }
 
     private static String onOff(boolean b) {

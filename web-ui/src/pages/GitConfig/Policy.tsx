@@ -60,6 +60,7 @@ const Policy = () => {
   const [open, setOpen] = React.useState(false);
   const [draft, setDraft] = React.useState<PolicyFields | null>(null);
   const [hosts, setHosts] = React.useState("");
+  const [ghHosts, setGhHosts] = React.useState("github.com");
   const modes = useModes();
   const [editing, setEditing] = useEditing(open, policy?.from);
   // The definition being edited, which on a gateway with modes need not be the one in use.
@@ -77,10 +78,12 @@ const Policy = () => {
       layoutSwitch: p.layoutSwitch,
       allowInsecureRemotes: !!p.allowInsecureRemotes,
       githubMergedOnly: !!p.githubMergedOnly,
+      githubHosts: p.githubHosts ?? ["github.com"],
       deliveryModes: p.deliveryModes,
       allowedRemoteHosts: p.allowedRemoteHosts,
     });
     setHosts(p.allowedRemoteHosts.join(", "));
+    setGhHosts((p.githubHosts ?? ["github.com"]).join(", "));
   };
 
   React.useEffect(() => {
@@ -109,6 +112,10 @@ const Policy = () => {
         ...draft.deliveryModes.filter((d) => d !== "off"),
       ] as DeliveryKind[],
       allowedRemoteHosts: hosts
+        .split(/[\s,]+/)
+        .map((h) => h.trim())
+        .filter((h) => h !== ""),
+      githubHosts: ghHosts
         .split(/[\s,]+/)
         .map((h) => h.trim())
         .filter((h) => h !== ""),
@@ -237,8 +244,17 @@ const Policy = () => {
             <p className="gitcfg-hint">
               Only deliver commits merged on GitHub: a delivery installs a
               branch tip only when GitHub signed it (a pull request merged on
-              GitHub). Others are refused and logged.
+              GitHub), and only from a GitHub host. Others are refused and
+              logged.
             </p>
+            <TextInput
+              label="GitHub hosts"
+              value={ghHosts}
+              placeholder="github.com"
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setGhHosts(e.target.value)
+              }
+            />
           </>
         ) : null}
       </SettingsDrawer>

@@ -283,10 +283,6 @@ public final class LayoutSwitch {
             throw new IllegalStateException("The layout is already Separate.");
         }
         List<String> projects = projectNames(dataDir);
-        List<String> problems = new ArrayList<>();
-        try (Git gw = open(dataDir)) {
-            requireClean(gw, "The gateway repository", dirty, problems);
-        }
         List<String> foreign = new ArrayList<>();
         for (String p : projects) {
             String why = foreignFolder(dataDir, p);
@@ -299,23 +295,38 @@ public final class LayoutSwitch {
                     + ". A project's own repository would be created there; move the project into the data"
                     + " directory, or remove the link or mount, first.");
         }
+        List<String> problems = new ArrayList<>();
         List<String> leftovers = nestedRepos(dataDir);
-        if (!archiveLeftovers) {
+        // Archived before the clean check: a nested .git makes its folder's tracked files read as
+        // changed in the gateway repository. Put back if the switch is refused.
+        List<Path[]> parked = new ArrayList<>();
+        if (archiveLeftovers) {
+            Path archive = dataDir.resolve(ARCHIVE_DIR);
+            Files.createDirectories(archive);
+            for (String p : leftovers) {
+                Path to = archive.resolve(p + "-leftover-" + stamp + ".git");
+                for (int i = 2; Files.exists(to); i++) {
+                    to = archive.resolve(p + "-leftover-" + stamp + "-" + i + ".git");
+                }
+                Path from = dataDir.resolve("projects").resolve(p).resolve(".git");
+                Files.move(from, to);
+                parked.add(new Path[] {from, to});
+            }
+        } else {
             for (String p : leftovers) {
                 problems.add("projects/" + p + " already has its own .git folder (tick Archive leftover .git"
                         + " folders to move it to " + ARCHIVE_DIR + ")");
             }
         }
-        refuseIf(problems);
-        for (String p : archiveLeftovers ? leftovers : List.<String>of()) {
-            Path archive = dataDir.resolve(ARCHIVE_DIR);
-            Files.createDirectories(archive);
-            Path to = archive.resolve(p + "-leftover-" + stamp + ".git");
-            for (int i = 2; Files.exists(to); i++) {
-                to = archive.resolve(p + "-leftover-" + stamp + "-" + i + ".git");
-            }
-            Files.move(dataDir.resolve("projects").resolve(p).resolve(".git"), to);
+        try (Git gw = open(dataDir)) {
+            requireClean(gw, "The gateway repository", dirty, problems);
         }
+        if (!problems.isEmpty()) {
+            for (Path[] m : parked) {
+                Files.move(m[1], m[0]);
+            }
+        }
+        refuseIf(problems);
 
         Path gitignore = dataDir.resolve(".gitignore");
         String ignoreBefore = Files.exists(gitignore) ? Files.readString(gitignore, StandardCharsets.UTF_8) : null;
@@ -393,6 +404,11 @@ public final class LayoutSwitch {
             for (Path[] r : restored) {
                 if (Files.exists(r[0]) && !Files.exists(r[1])) {
                     Files.move(r[0], r[1]);
+                }
+            }
+            for (Path[] m : parked) {
+                if (Files.exists(m[1]) && !Files.exists(m[0])) {
+                    Files.move(m[1], m[0]);
                 }
             }
             throw e;

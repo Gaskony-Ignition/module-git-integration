@@ -199,6 +199,17 @@ public final class PolicyGate {
     }
 
     /**
+     * Bringing a project in from its repository is a delivery in all but name: allowed when the
+     * policy allows Sync — pull or Sync — replace.
+     */
+    public static void checkAddProject() {
+        GitPolicy p = GitPolicyRecord.get();
+        if (!p.deliveries().contains("pull") && !p.deliveries().contains("replace")) {
+            throw refused(mode(), "Adding a project from its repository is");
+        }
+    }
+
+    /**
      * Before a remote URL is saved, tested or contacted: the URL rules, the allowed hosts, and (for
      * a host name) that it does not resolve to this machine unless insecure remotes are allowed.
      */

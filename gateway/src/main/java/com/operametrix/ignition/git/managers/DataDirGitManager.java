@@ -1224,7 +1224,7 @@ public class DataDirGitManager {
                 ObjectId head = repo.resolve(Constants.HEAD);
                 ObjectId applied = repo.resolve(SYNCED_REF);
                 if (!tip.equals(applied)) {
-                    String notMerged = GitHubMerged.refusal(repo, tip);
+                    String notMerged = GitHubMerged.refusal(repo, tip, remote.getUri());
                     if (notMerged != null) {
                         return ReplaceResult.refused(notMerged, GitHubMerged.firstRefusal("config", tip));
                     }
@@ -1452,7 +1452,7 @@ public class DataDirGitManager {
                 }
                 ObjectId before = repo.resolve(Constants.HEAD);
                 if (delivery && !tip.equals(before)) {
-                    String notMerged = GitHubMerged.refusal(repo, tip);
+                    String notMerged = GitHubMerged.refusal(repo, tip, remote.getUri());
                     if (notMerged != null) {
                         return new PullResult(false, "", List.of(), notMerged,
                                 GitHubMerged.firstRefusal("config", tip));

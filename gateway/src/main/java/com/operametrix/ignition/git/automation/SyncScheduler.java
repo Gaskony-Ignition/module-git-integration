@@ -11,8 +11,6 @@ import org.eclipse.jgit.api.CreateBranchCommand;
 import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.MergeResult;
-import org.eclipse.jgit.api.PullCommand;
-import org.eclipse.jgit.api.PullResult;
 import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.diff.DiffEntry;
@@ -231,7 +229,8 @@ public final class SyncScheduler {
             String message;
 
             if (switched || !tracked.equals(before)) {
-                String notMerged = GitHubMerged.refusal(repo, tracked);
+                String notMerged = GitHubMerged.refusal(repo, tracked,
+                        GitManager.getRemoteUrl(repo.getWorkTree().toPath(), remoteName));
                 if (notMerged != null) {
                     if (GitHubMerged.firstRefusal("project:" + project, tracked)) {
                         logger.warn("Project '{}': {}", project, notMerged);
@@ -271,19 +270,20 @@ public final class SyncScheduler {
                 }
 
                 if (!tracked.equals(local)) {
-                    PullCommand pull = git.pull().setRemote(remoteName).setRemoteBranchName(branch);
-                    GitManager.setAuthentication(pull, project, user, remoteName);
-                    PullResult result = pull.call();
-                    if (!result.isSuccessful()) {
+                    // Merge the very commit fetched and checked above, never a second fetch's tip:
+                    // a push in between would otherwise be installed unchecked.
+                    MergeResult merge = git.merge().include(tracked)
+                            .setMessage(com.operametrix.ignition.git.managers.PolicyGate.trailer(
+                                    "Merge " + remoteName + "/" + branch))
+                            .call();
+                    if (!merge.getMergeStatus().isSuccessful()) {
                         // A conflicted merge leaves markers in the project's files and the
                         // repository mid-merge, refusing every later sync; the tree was clean, so
                         // put it back as it was.
                         if (local != null) {
                             git.reset().setMode(ResetCommand.ResetType.HARD).setRef(local.getName()).call();
                         }
-                        MergeResult merge = result.getMergeResult();
-                        String reason = merge == null ? "pull rejected" : ("merge " + merge.getMergeStatus());
-                        throw new IllegalStateException(reason);
+                        throw new IllegalStateException("merge " + merge.getMergeStatus());
                     }
                 }
                 message = switched ? "Switched from " + current + " to " + branch + "; pulled" : "Pulled";

@@ -6,6 +6,8 @@ upstream's; everything below is this fork.
 ## 4.4.0 (unreleased)
 
 ### Security
+- A remote URL whose user name is a token (`https://ghp_…@github.com/…`) is refused, and remote
+  URLs are logged and audited without their user part.
 - Internal user sources' `users.json` (password hashes and their history) is never versioned, in
   every collection. Start-up untracks it in an existing repository in one commit and warns on the
   Logs tab: older commits still hold the hashes, so rotate those passwords if the repository was
@@ -36,7 +38,9 @@ upstream's; everything below is this fork.
   hold up the git action; a failing profile is logged once.
 - **Only deliver commits merged on GitHub**, a policy option, off by default and overridable per
   mode: deliveries (Sync — pull/replace for projects and the gateway repository, Runner — repo
-  updates) install a branch tip only when GitHub's web-flow key signed it. Others are refused,
+  updates, and Add from repository) install a branch tip only when GitHub's web-flow key signed it
+  and the remote is GitHub (`github.com` or a listed GitHub Enterprise host); the commit checked is
+  the commit merged, with no second fetch. Others are refused,
   with one warning per tip on the Logs tab; the runner route answers 409. GitHub's keys are bundled
   in the module (docs/MODES.md); nothing is fetched at run time.
 - Combined layout: the config ignore rules apply under `config/` only, so `!/projects/` alone

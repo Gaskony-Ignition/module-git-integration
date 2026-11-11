@@ -34,10 +34,11 @@ choice (Insecure remotes: On).
 | Commit from the Designer | Commit, amend, revert and completing a merge are refused in the Designer. The gateway's own config auto-commits carry on. |
 | Create, switch and delete branches | The Designer's branch actions and the page's Switch to this branch are refused. |
 | Switch the repository layout | The layout switch in Configure versioning is refused. |
-| Deliveries | Only the listed kinds (Sync — pull, Sync — replace, Runner) can be chosen, and the timer and the runner refuse the others. Off is always allowed. |
+| Deliveries | Only the listed kinds (Sync — pull, Sync — replace, Runner) can be chosen, and the timer and the runner refuse the others. Off is always allowed. Add from repository needs Sync — pull or Sync — replace in the list. |
 | Allowed remote hosts | Blank allows any. Otherwise every remote URL is checked before the gateway contacts it, and when a remote is saved or tested. `*.example.com` matches any subdomain. |
 | Insecure remotes | Off by default (4.3.0). Off, a remote must be `https://` or `ssh://` (or `git@host:path`) on a host that is not this machine or its link-local network. On allows local folders, `file://`, `git://`, `http://`, `localhost` and `169.254.x.x` — for a lab, not production. |
-| Only deliver commits merged on GitHub | Off by default (4.4.0). On, a delivery installs a branch tip only when GitHub signed it — see below. |
+| Only deliver commits merged on GitHub | Off by default (4.4.0). On, a delivery installs a branch tip only when GitHub signed it, from a GitHub host — see below. |
+| GitHub hosts | `github.com` unless set: the hosts the option above trusts (add a GitHub Enterprise host). |
 
 The default allows everything earlier versions allowed, any host, except
 insecure remotes. A URL with a password in it (`https://user:pass@host`) is
@@ -163,20 +164,34 @@ see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 For a security-conscious site, optional and off by default. On, every delivery — Sync — pull and
 Sync — replace for a project or the gateway repository, and Runner — repo updates — installs a
-branch tip only when its commit carries a valid signature by GitHub's web-flow key. GitHub signs
-the commits it makes itself: a pull request merged with its merge or squash button, and an
-edit made in its web editor. A commit pushed from someone's machine is not signed by that key, so
-the gateway stays on what it has and the Logs tab gets one warning per refused tip: *Not merged
-through GitHub: 1a2b3c4 — the commit is not signed.* Branch protection that requires a pull request
-(and blocks edits in the web editor where that matters) is what makes "signed by GitHub" mean
-"reviewed". Runner — release installs a zip, not a commit, so the option does not apply to it;
-manual actions on the page (Update from remote, restore, switch branch) are not deliveries either.
+branch tip only when its commit carries a valid signature by GitHub's web-flow key, and **Add from
+repository** adds a project only on such a commit. GitHub signs the commits it makes itself: a pull
+request merged with its merge or squash button, and an edit made in its web editor. A commit pushed
+from someone's machine is not signed by that key, so the gateway stays on what it has and the Logs
+tab gets one warning per refused tip: *Not merged through GitHub: 1a2b3c4 — the commit is not
+signed.* The commit checked is the commit installed: there is no second fetch in between.
+
+The signature says GitHub made the commit, not which repository or branch it was made on. So the
+option only means "merged here" when:
+
+- the remote is GitHub itself — `github.com`, or a GitHub Enterprise host listed under **GitHub
+  hosts** in the policy; any other remote is refused (*the remote isn't GitHub, so 'merged on
+  GitHub' can't be checked*);
+- the branch the gateway follows is protected on GitHub: pull requests required (and, where it
+  matters, no edits in the web editor), and **no force-push**. Sync — replace follows a branch that
+  was force-pushed back to an older GitHub-signed commit — that is a rollback by design — so only
+  branch protection stops someone from rolling a gateway back that way.
+
+Runner — release installs a zip, not a commit, so the option does not apply to it. Manual actions
+on the page — Pull, Update from remote, restore, switch branch, Join remote history — are not
+deliveries and are not checked; Add from repository is checked.
 
 The check is a v4 OpenPGP RSA signature over SHA-256/384/512, issuer and time from the signed part
 only, against the keys bundled in the module — nothing is fetched at run time. The bundle holds
 the keys published at `https://github.com/web-flow.gpg`: `968479A1AFF927E37D1A566BB5690EEEBB952194`
-(from 16/01/2024) and `5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23` (expired 16/01/2024, accepted only
-for signatures made before then). When GitHub publishes a new key, a module release carries it
+(from 16/01/2024) and `5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23`, which expired on 16/01/2024 and is
+trusted only for signatures whose signed creation time is before then. When GitHub publishes a new
+key, a module release carries it
 (`gateway/src/main/resources/com/operametrix/ignition/git/managers/github-web-flow.asc`).
 
 ## Audit log

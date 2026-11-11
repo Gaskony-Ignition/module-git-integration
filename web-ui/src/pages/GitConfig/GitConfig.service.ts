@@ -29,6 +29,8 @@ export interface PolicyFields {
   allowInsecureRemotes: boolean;
   // Deliveries install only tips signed by GitHub's web-flow key (4.4.0, off by default).
   githubMergedOnly: boolean;
+  // The hosts whose web-flow signature counts (github.com, or GitHub Enterprise hosts).
+  githubHosts: string[];
   deliveryModes: DeliveryKind[];
   allowedRemoteHosts: string[];
 }

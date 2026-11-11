@@ -464,4 +464,14 @@ class WebFlowSignatureTest {
         String c = Base64.getEncoder().encodeToString(new byte[] {(byte) (crc >> 16), (byte) (crc >> 8), (byte) crc});
         return "-----BEGIN PGP " + kind + "-----\n\n" + b64 + "\n=" + c + "\n-----END PGP " + kind + "-----\n";
     }
+
+    @Test
+    void onlyAGitHubRemoteCanBeCheckedForAGitHubMerge() {
+        List<String> hosts = List.of("github.com", "*.ghe.example");
+        assertThat(GitHubMerged.notGitHub(hosts, "https://github.com/o/r.git")).isNull();
+        assertThat(GitHubMerged.notGitHub(hosts, "git@github.com:o/r.git")).isNull();
+        assertThat(GitHubMerged.notGitHub(hosts, "https://code.ghe.example/o/r.git")).isNull();
+        assertThat(GitHubMerged.notGitHub(hosts, "https://gitlab.com/o/r.git")).contains("isn't GitHub");
+        assertThat(GitHubMerged.notGitHub(hosts, "https://evilgithub.com/o/r.git")).contains("isn't GitHub");
+    }
 }

@@ -96,11 +96,30 @@ public final class GitHubMerged {
      * Why the policy refuses to install {@code tip}, or null when the option is off or the tip is
      * signed by a trusted key.
      */
-    public static String refusal(Repository repo, ObjectId tip) {
-        if (!GitPolicyRecord.get().githubMerged()) {
+    public static String refusal(Repository repo, ObjectId tip, String remoteUrl) {
+        com.operametrix.ignition.git.records.GitPolicy p = GitPolicyRecord.get();
+        if (!p.githubMerged()) {
             return null;
         }
-        return problem(repo, tip, keys(), Instant.now());
+        String notGitHub = notGitHub(p.gitHubHosts(), remoteUrl);
+        return notGitHub != null ? notGitHub : problem(repo, tip, keys(), Instant.now());
+    }
+
+    /**
+     * A web-flow signature says GitHub made the commit, not which repository or branch it was
+     * made on, so it only means "merged here" when the remote is GitHub itself (github.com, or a
+     * GitHub Enterprise host listed in the policy).
+     */
+    static String notGitHub(java.util.List<String> githubHosts, String remoteUrl) {
+        String host = PolicyGate.hostOf(remoteUrl == null ? "" : remoteUrl);
+        for (String h : githubHosts) {
+            if (PolicyGate.hostMatches(h, host)) {
+                return null;
+            }
+        }
+        return "Not merged through GitHub: the remote " + (host.isEmpty() ? "" : host + " ")
+                + "isn't GitHub, so 'merged on GitHub' can't be checked. Turn the option off for this"
+                + " remote, or add its GitHub Enterprise host to the policy's GitHub hosts.";
     }
 
     /** As {@link #refusal}, without the policy (unit tests). */

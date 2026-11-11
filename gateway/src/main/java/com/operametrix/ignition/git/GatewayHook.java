@@ -1923,6 +1923,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         o.addProperty("forcePushAllowed", p.forcePush());
         o.addProperty("allowInsecureRemotes", p.insecureRemotes());
         o.addProperty("githubMergedOnly", p.githubMerged());
+        JsonArray gh = new JsonArray();
+        p.gitHubHosts().forEach(gh::add);
+        o.add("githubHosts", gh);
         JsonArray deliveries = new JsonArray();
         p.deliveries().forEach(deliveries::add);
         o.add("deliveryModes", deliveries);
@@ -1966,7 +1969,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     flag.apply("designerCommit"), flag.apply("branchSwitch"),
                     flag.apply("layoutSwitch"), deliveries, trimmed(stringList(body, "allowedRemoteHosts")),
                     flag.apply("forcePushAllowed"), flag.apply("allowInsecureRemotes"),
-                    flag.apply("githubMergedOnly"));
+                    flag.apply("githubMergedOnly"),
+                    body.has("githubHosts") ? trimmed(stringList(body, "githubHosts")) : null);
             GitPolicyRecord.save(saved);
             DataDirGitManager.commitAllIfDirty("Git policy changed");
             String in = queryParam(req, "saveTo");

@@ -35,7 +35,11 @@ public final class RemoteUrls {
      * @param local   a folder on the gateway (a {@code file} scheme or host, or no host)
      * @param problem why the URL is unusable whatever the policy, or null
      */
-    record Parsed(String scheme, String host, boolean local, boolean password, String problem) {}
+    record Parsed(String scheme, String host, boolean local, boolean password, String problem, String user) {
+        Parsed(String scheme, String host, boolean local, boolean password, String problem) {
+            this(scheme, host, local, password, problem, null);
+        }
+    }
 
     static Parsed parse(String url) {
         if (url == null || url.isBlank()) {
@@ -60,7 +64,21 @@ public final class RemoteUrls {
         String problem = !validHost || url.indexOf('\\') >= 0
                 || (u.getUser() != null && !USER.matcher(u.getUser()).matches())
                 ? "Not a valid remote URL: the host is not a host name or IP address." : null;
-        return new Parsed(scheme, host, false, u.getPass() != null, problem);
+        return new Parsed(scheme, host, false, u.getPass() != null, problem, u.getUser());
+    }
+
+    /** A user name that is a token: a known token prefix, or a long run of token characters. */
+    private static final Pattern TOKEN_USER = Pattern.compile(
+            "(?i)(ghp_|github_pat_|gho_|ghs_|ghu_|ghr_|glpat-|x-access-token|x-token-auth|oauth2).*|[A-Za-z0-9_]{30,}");
+
+    private static final Pattern USER_INFO = Pattern.compile("(?i)\\b([a-z][a-z0-9+.-]*://)[^/@\\s]+@");
+
+    /**
+     * {@code text} with the user part of every URL in it dropped ({@code https://tok@host} →
+     * {@code https://host}), for logs and audit rows: a token pasted as a user name must not travel.
+     */
+    public static String withoutUserInfo(String text) {
+        return text == null ? null : USER_INFO.matcher(text).replaceAll("$1");
     }
 
     private static boolean ipLiteral(String v6) {
@@ -80,6 +98,11 @@ public final class RemoteUrls {
         if (p.password()) {
             return "The remote URL has a password in it. Take it out of the URL and save it as a"
                     + " credential instead.";
+        }
+        if (p.user() != null && p.scheme() != null && p.scheme().startsWith("http")
+                && TOKEN_USER.matcher(p.user()).matches()) {
+            return "The remote URL has a token in its user name. Take it out of the URL and put the token"
+                    + " in a credential.";
         }
         if (p.local()) {
             return allowInsecure ? null : "A local folder or file: URL is a folder on the gateway, not a"
