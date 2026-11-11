@@ -189,8 +189,8 @@ deliveries and are not checked; Add from repository is checked.
 The check is a v4 OpenPGP RSA signature over SHA-256/384/512, issuer and time from the signed part
 only, against the keys bundled in the module — nothing is fetched at run time. The bundle holds
 the keys published at `https://github.com/web-flow.gpg`: `968479A1AFF927E37D1A566BB5690EEEBB952194`
-(from 16/01/2024) and `5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23`, which expired on 16/01/2024 and is
-trusted only for signatures whose signed creation time is before then. When GitHub publishes a new
+(valid from 16/01/2024) and `5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23` (valid until 16/01/2024),
+trusted only for signatures whose signed creation time falls before that date. When GitHub publishes a new
 key, a module release carries it
 (`gateway/src/main/resources/com/operametrix/ignition/git/managers/github-web-flow.asc`).
 
