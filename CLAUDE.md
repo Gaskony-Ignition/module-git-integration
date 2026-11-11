@@ -53,7 +53,7 @@ No Vision client scope.
   discards stale edits via `DesignableProject.discardChanges`, then reflectively
   calls `IgnitionDesigner.updateProject()`, or gateway changes never show.
 - **The config-as-code repo is rooted at the data directory and `.gitignore` is
-  the only thing deciding what it versions** (3.8.0 — never reintroduce a
+  the only thing deciding what it versions** (never reintroduce a
   staging scope; a file nothing ignored was silently never committed).
   `/*` + `!/config/` keep out other modules' runtimes (CPython, Chromium).
 - **`ConfigAutoCommitter` (a `ResourceCollectionListener`) is the only live
@@ -127,4 +127,4 @@ Module ID `com.operametrix.ignition.git`; version from `version.properties`
 plus a build timestamp. `requiredIgnitionVersion` is 8.3.0, apart from the SDK version. `:web-ui`'s bundle rides in the gateway jar via
 `modlImplementation(project(":web-ui"))`.
 Signing comes from `gradle.properties` (gitignored; template in
-`gradle.template.properties`). Every released `.modl` is signed.
+`gradle.template.properties`).
