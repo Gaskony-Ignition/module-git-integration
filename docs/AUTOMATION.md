@@ -122,6 +122,18 @@ session/CSRF model, because a workflow step has neither:
 - Query parameters are read from the raw query string: `getParameter` would make
   Jetty parse a large body without a zip Content-Type as a form and fail.
 - A release and a sync of the same project never run at once.
+- A release unpacks to at most 1 GB and 50,000 entries; `version` is up to 64
+  letters, digits and `. _ + -`. A bad token is logged once a minute per address.
+
+## Who can push is who can deploy
+
+A delivery applies whatever the followed branch holds: project views and
+scripts, and in Combined or on the gateway repository, gateway config. Anyone
+who can push to that branch can therefore change what the gateway runs, scripts
+included. The module does not and cannot check who wrote a commit. The control
+is on the remote: protect every delivered branch (required reviews, no direct
+or force pushes) and keep push rights to the people you would let change the
+gateway itself.
 
 ## After the change
 

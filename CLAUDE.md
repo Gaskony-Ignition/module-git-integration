@@ -1,8 +1,7 @@
 # CLAUDE.md
 
-Guidance for working in this repository. `docs/INTERNALS.md` has the REST
-route table, the persisted resource types, the manager classes and the
-Designer popup list — this file is standing instructions and gotchas only.
+Standing instructions and gotchas. `docs/INTERNALS.md` has the REST routes,
+resource types, manager classes and Designer popups.
 
 ## Project overview
 
@@ -69,17 +68,14 @@ No Vision client scope.
 - **Git Ignore tree**: excluding a tracked path also runs `git rm --cached`;
   re-including under a glob appends a negation, never edits it. Rules in
   `docs/INTERNALS.md`.
-- **Change badges are drawn by a `DotBorder`, not `addBadge`.** The tree's
-  cell-renderer delegate stops painting added badges after the session's first
-  commit; a border sidesteps it. Don't simplify this back.
+- **Change badges are a `DotBorder`, not `addBadge`** (the renderer stops painting
+  added badges after the first commit).
 - **The platform's `TextInput`/`SelectInput`/`TextArea` render their `label`
   prop into an invisible legend.** Import the wrapped versions from
   `web-ui/src/pages/GitConfig/fields.tsx`, not from `../../webui`.
-- **`Radio` is a radio GROUP** — it takes a `radios` array and maps over it.
-  Passing `label`/`checked` as a single control reads `.map` on undefined and
-  blanks the page. `SelectInput` needs `values` (not `options`), and its
-  `onChange` hands back MUI's event, not the value — sweep every form in a
-  browser before releasing.
+- **`Radio` is a radio GROUP** (a `radios` array; a single `label`/`checked`
+  blanks the page). `SelectInput` needs `values`, and its `onChange` hands back
+  MUI's event — sweep every form in a browser before releasing.
 - **Ignition rewrites the JSON it imports** (no final newline, escaped
   apostrophes, `"parent": ""`, reordered `files`), so git sees those files
   modified with identical content. Count changes through `IgnitionReformat`,
@@ -88,19 +84,15 @@ No Vision client scope.
   Projects drawer** — never add a migration that writes one. Off refuses the
   runner; `POST /delivery` keeps runner mode and sync record exclusive. Polling,
   not a webhook: GitHub cannot reach most gateways. See `docs/AUTOMATION.md`.
-- **Drawers render in a portal outside `.gitcfg`**, so their body needs the
-  `gitcfg` class or every `--gitcfg-*` token is undefined (`SettingsDrawer`).
+- **Drawers render in a portal outside `.gitcfg`**: their body needs the `gitcfg` class.
 - **A release replaces the project folder but carries `.git` and
   `global-props/data.bin` across**, or it destroys the repository and the
   gateway's project properties.
-- **Runner routes read the raw query string**, never `getParameter` (Jetty
-  parses a large non-zip body as a form and 500s).
-- **Styles:** colour and weight from the platform tokens (`--neutral-*`,
-  `--primary`, `--success`, `--error`, `--warning-dark` for amber text); type,
-  spacing, radius and mono stack from the `--gitcfg-*` block in `_styles.scss`.
-  No hex or font stack elsewhere. `.ia-card-header` and
-  `.gitcfg-blank > div:first-child` reach into platform DOM — re-check after a
-  web-ui upgrade.
+- **Runner routes read the raw query string**, never `getParameter` (Jetty 500s on a large body).
+- **Styles:** colour from the platform tokens (`--neutral-*`, `--primary`,
+  `--warning-dark` for amber text), the rest from `--gitcfg-*` in `_styles.scss`;
+  no hex or font stack elsewhere. `.ia-card-header` and
+  `.gitcfg-blank > div:first-child` reach into platform DOM.
 - **Every project git operation goes through `GitManager.repoFor(project)`**,
   never `projects/<name>` directly: in Combined the project is a prefix of the
   data-dir repository. Paths handed to the Designer stay project-relative
@@ -110,6 +102,12 @@ No Vision client scope.
 - **Modes (`docs/MODES.md`):** records go through `ModeStore` (`?saveTo=` any mode);
   credentials only via `GitManager.setAuthentication*` (policy, host checks);
   config remote ops use `authOrigin`, so `origin` follows the mode's record.
+- **Designer RPCs act as the session, not their arguments**: `GatewayScriptModule.caller`
+  and `project` read `RpcDelegate.CURRENT_CONTEXT` (user, open project); a route calls in
+  with no RPC context and passes `req.getActor()`. Attaching a credential checks its owner.
+- **Every client-supplied name or path goes through `SafePaths`** (project names,
+  repo-relative paths, 5 MB reads); in Combined a leading `/` path is accepted only for a
+  file in conflict. Remote URLs go through `PolicyGate.checkHost` (`RemoteUrls`).
 - **Image snapshot walks the store tree** (`getImages` lists one level and
   returns folders as entries with no bytes) **and import merges, never
   deletes** — the store is gateway-scoped, so clearing it first would make
@@ -117,18 +115,16 @@ No Vision client scope.
 
 ## Key libraries
 
-- Eclipse JGit 7.8.0 — all git operations
-- Apache MINA sshd — SSH transport
+- Eclipse JGit 7.8.1 — all git operations
+- Apache MINA sshd 2.20.1 — SSH transport
 - Lombok (designer)
 - React 18 + RTK Query + `@inductiveautomation/ignition-web-ui` — the
   `web-ui/` gateway page, bundled via `com.github.node-gradle.node` + webpack
 
 ## Module packaging
 
-Module ID `com.operametrix.ignition.git`; the version comes from
-`version.properties` and the build appends a timestamp. `compileSdkVersion` is
-decoupled from `requiredIgnitionVersion` so the `.modl` installs on any 8.3.x
-gateway. `:web-ui`'s bundle rides in the gateway jar via
+Module ID `com.operametrix.ignition.git`; version from `version.properties`
+plus a build timestamp. `requiredIgnitionVersion` is 8.3.0, apart from the SDK version. `:web-ui`'s bundle rides in the gateway jar via
 `modlImplementation(project(":web-ui"))`.
 Signing comes from `gradle.properties` (gitignored; template in
 `gradle.template.properties`). Every released `.modl` is signed.

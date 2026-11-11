@@ -35,8 +35,11 @@ setting's value and where it comes from (`from core` or `from Prod`).
 | Switch the repository layout | The layout switch in Configure Versioning is refused. |
 | Deliveries | Only the listed kinds (Sync — pull, Sync — replace, Runner) can be chosen, and the timer and the runner refuse the others. Off is always allowed. |
 | Allowed remote hosts | Blank allows any. Otherwise every remote URL is checked before the gateway contacts it, and when a remote is saved or tested. `*.example.com` matches any subdomain. |
+| Insecure remotes | Off by default (4.3.0). Off, a remote must be `https://` or `ssh://` (or `git@host:path`) on a host that is not this machine or its link-local network. On allows local folders, `file://`, `git://`, `http://`, `localhost` and `169.254.x.x` — for a lab, not production. |
 
-The default is how earlier versions behaved: everything allowed, any host.
+The default allows everything earlier versions allowed, any host, except
+insecure remotes. A URL with a password in it (`https://user:pass@host`) is
+refused whatever the policy; save the password as a credential.
 
 ![The Policy tab in deployment mode Prod: each setting, its value and where it comes from](images/versioning-policy.png)
 
@@ -112,11 +115,32 @@ credential is refused for a host other than its own:
 
 - the config remote's credential only goes to the host of its URL — including,
   in Combined, a Designer push to another remote;
-- an HTTPS credential whose host field names a host (`github.com`,
-  `*.example.com`) only goes to that host. A host field holding a label with no
-  dot binds nothing;
+- an HTTPS credential only goes to the host in its host field (`github.com`,
+  `*.example.com`). Since 4.3.0 the field is required to be a host; a credential
+  from an earlier version whose field was a label was bound at start-up to the
+  one host its remotes use, and otherwise is refused until its host is set (the
+  gateway log names it);
+- changing a project remote's URL to another host detaches its credential;
 - testing a saved credential against a URL on another host asks for the secret
-  again.
+  again, and a Secret Provider reference can only be tested when a saved
+  credential for that host already uses it.
+
+TLS certificates are always verified (versions before 4.3.0 turned that off in
+every repository they created; start-up turns it back on). A git server with a
+certificate from a private CA needs that CA in the gateway's Java truststore —
+see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+## Production checklist
+
+- The git server's CA in the gateway's truststore, if it is private.
+- In Prod, the policy overridden read-only: push, Designer commit, branches and
+  layout off; only the deliveries Prod uses; insecure remotes off.
+- **Allowed remote hosts** set to your git host.
+- Credentials as Secret Provider references, read-only tokens in Prod.
+- Branch protection on every branch a gateway follows ([AUTOMATION.md](AUTOMATION.md),
+  "Who can push is who can deploy").
+- The Versioning page needs WRITE permission: give it to gateway administrators
+  only.
 
 ## Commit trailer
 

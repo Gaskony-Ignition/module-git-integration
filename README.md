@@ -136,6 +136,10 @@ back to GitHub, and a release needs no git credentials on the gateway. Sync
 and a route to the git host, and nobody learns whether it was applied — check
 Logs.
 
+Remotes are HTTPS or SSH, with TLS certificates checked; for a private CA,
+local test remotes and a production checklist see [docs/MODES.md](docs/MODES.md)
+and [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
 To build from source, copy `gradle.template.properties` to `gradle.properties`,
 fill in the keystore details, then run `./gradlew build` for the signed
 `build/GitIntegration.modl`. The version lives in `version.properties` only.

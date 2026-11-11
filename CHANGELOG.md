@@ -3,6 +3,56 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## 4.3.0 (unreleased)
+
+### Security
+- **Designer calls act as the signed-in Designer user on the open project.** The user and project
+  names a call carries are no longer trusted: credentials, ownership and commit authors come from
+  the Designer session, and a Designer can only act on its own project. Attaching a credential to
+  a remote (Designer, Projects tab, project setup) requires it to be your own.
+- **Project names and file paths are checked.** A project name must be an Ignition project name
+  and the project must exist; file paths in diffs, discards and conflict views must stay inside
+  the project and repository, cannot name `.git`, and a symbolic link cannot lead outside. A
+  working-tree diff reads at most 5 MB of a regular file, and the Versioning page only shows files
+  the repository versions. In the Combined layout a path outside the project is accepted only for
+  a file in merge conflict.
+- **TLS certificates are verified.** Earlier versions turned certificate checks off in every
+  repository they created. They are back on, and start-up turns them on in existing repositories
+  (logged). A git server with a private CA needs that CA in the gateway's Java truststore
+  (docs/TROUBLESHOOTING.md).
+- **HTTPS credentials go only to their own host.** The host field is required and always binds
+  the credential. A credential from an earlier version whose field was a label is bound at
+  start-up to the one host its remotes use; otherwise it is refused until its host is set, and
+  the gateway log says which. Moving a project remote to another host detaches its credential.
+  The remote test only resolves a Secret Provider reference that a saved credential for that host
+  already uses. The GitHub token check only runs for credentials bound to github.com.
+- **Remote URLs must be HTTPS or SSH.** Local folders, `file://`, `git://`, `http://` and targets on
+  this machine or its link-local network (`localhost`, `127.x`, `169.254.x`) need the new policy
+  setting **Insecure remotes** (off by default). A URL with a password in it is refused
+  everywhere, and start-up removes such passwords from existing remotes (logged as a warning:
+  enter them again as credentials).
+- Checkouts write symbolic links as plain files (`core.symlinks=false`), set on new and existing
+  repositories.
+- Legacy plaintext SSH keys are re-saved encrypted at start-up and the plaintext is no longer
+  read.
+- The data directory's `.gitignore` always ends with a fixed block that keeps keystores,
+  certificates, `config/local`, `config/resources/local`, `ignition.conf` and key files out of
+  the repository; no edit can re-include them. Tracked files it covers are untracked at start-up
+  (earlier commits still hold them).
+- Runner release: unpacks to at most 1 GB and 50,000 entries, and the `version` label is limited
+  to 64 letters, digits and `. _ + -`. A bad runner token is logged once a minute per address.
+- `GET /secret-providers` needs WRITE permission. Errors shown on the page and in the Designer no
+  longer name the gateway's install folders; the gateway log keeps the detail.
+- History pages return at most 500 commits; fetch, push, pull and ls-remote time out after 60 s.
+  In the Combined layout the Designer's pull fetches before taking the gateway repository's lock;
+  in the Separate layout each project repository has its own lock.
+
+### Changed
+- Dependencies: JGit 7.8.1, Apache MINA sshd 2.20.1, slf4j 2.0.20 (and jcl-over-slf4j to match),
+  commons-codec 1.23.0; web-ui React pins 18.3.1.
+- Docs: a production checklist (docs/MODES.md) and why branch protection on the remote is the
+  control for delivered branches (docs/AUTOMATION.md).
+
 ## [4.2.0] - 2026-11-10
 
 ### Changed

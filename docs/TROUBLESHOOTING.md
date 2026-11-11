@@ -1,5 +1,28 @@
 # Troubleshooting
 
+## A remote over HTTPS fails with a certificate error (4.3.0)
+
+**Symptom.** Push, pull or Test fails with `PKIX path building failed` or
+`unable to find valid certification path`, against a server that worked before
+4.3.0.
+
+**Cause.** Versions before 4.3.0 turned TLS certificate checks off in every
+repository they created (`http.sslVerify=false`); 4.3.0 turns them back on at
+start-up. A server whose certificate comes from a private or self-signed CA is
+no longer trusted blindly.
+
+**Fix.** Add the CA certificate to the truststore of the gateway's Java runtime
+and restart the gateway, e.g.
+
+```text
+keytool -importcert -alias corp-git-ca -file corp-ca.crt \
+  -keystore <ignition>/lib/runtime/jre-nix/lib/security/cacerts -storepass changeit
+```
+
+(Linux path, default store password; Windows has `jre-win`. A container needs it in the image or
+a mounted truststore). Turning certificate checks off again is not an option.
+
+
 ## The Designer vanishes on macOS, with no error
 
 **Symptom.** The Designer window disappears outright — no dialog, no stack
