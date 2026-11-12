@@ -1062,3 +1062,24 @@ button.gitcfg-ref {
   pointer-events: none;
   background: linear-gradient(to bottom, transparent, var(--white));
 }
+
+// A settings tab on the platform's singleton page (Policy, Remote, Runner). It scrolls inside
+// the tab, as the other tabs' tables do, so the page title and tabs stay put; the platform's
+// sticky header and category list stick to this box.
+.gitcfg-singleton {
+  height: calc(100vh - 16rem);
+  overflow-y: auto;
+}
+
+.gitcfg-label-help {
+  display: inline-flex;
+  align-items: center;
+}
+
+// The singleton menu's Add Backup Version is for a redundant pair's backup node; this module's
+// records have no backup values. The menu renders in a portal, so the hide is keyed on a body
+// class that only this module's singleton tabs set while they are mounted.
+body.gitcfg-no-backup [data-label="Add Backup Version"],
+body.gitcfg-no-backup [data-label="Add Backup Version"] + hr {
+  display: none;
+}

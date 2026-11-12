@@ -802,6 +802,24 @@ export const gitConfigApi = baseApi.injectEndpoints({
         "definition",
       ],
     }),
+    // After the platform's Create Override / Move Definition / Remove Override: the audit row.
+    overrideAudit: builder.mutation<
+      unknown,
+      {
+        type: string;
+        action: "create" | "move" | "remove";
+        from: string;
+        to: string;
+        project?: string;
+      }
+    >({
+      query: (body) => ({
+        url: `${BASE}/override-audit`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["history"],
+    }),
     getDefinition: builder.query<
       DefinitionResp,
       RecordRef & { collection: string }
@@ -878,6 +896,7 @@ export const {
   useSavePolicyMutation,
   useModeResetMutation,
   useModeOverrideMutation,
+  useOverrideAuditMutation,
   useRenameMasterMutation,
   useGetDefinitionQuery,
   useGetAuditQuery,

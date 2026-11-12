@@ -1,22 +1,18 @@
 import React from "react";
-import { Button, Loading, useToastNotifications } from "../../webui";
-import { HelpButton, TextInput } from "./fields";
-import SettingsDrawer from "./SettingsDrawer";
+import { Card, Checkbox, FormControlInput, TextInput, yup } from "../../webui";
+import { HelpButton } from "./fields";
 import AuditSetting from "./AuditSetting";
-import ScrollBox from "./ScrollBox";
-import Definitions, {
-  OverrideTag,
-  saveToParam,
-  useEditing,
-  useModes,
-} from "./ModeScope";
 import {
-  DeliveryKind,
-  PolicyFields,
-  useGetDefinitionQuery,
-  useGetStatusQuery,
-  useSavePolicyMutation,
-} from "./GitConfig.service";
+  FormContent,
+  RESOURCE,
+  ResourceModeSingletonPage,
+  useConfigurationModeContext,
+} from "../../gatewayLib";
+import { OnGatewayStore, OnOwnStore } from "../../store/bridge";
+import { useFormContext } from "react-hook-form";
+import { DeliveryKind, PolicyFields } from "./GitConfig.service";
+import { useNoBackupMenu, useSingletonSave } from "./singleton";
+import { useSavePolicyMutation } from "./GitConfig.service";
 
 const FLAGS: [keyof PolicyFields, string][] = [
   ["pushAllowed", "Push to remotes"],
@@ -31,12 +27,7 @@ const FLAGS: [keyof PolicyFields, string][] = [
   ["githubMergedOnly", "Only deliver commits merged on GitHub"],
 ];
 
-// The value that allows more than the default is the one worth a second look; the rest are plain.
-const RISKY: Partial<Record<keyof PolicyFields, boolean>> = {
-  allowInsecureRemotes: true,
-};
-
-// What each setting allows, shown behind its "?" so the table stays short.
+// What each setting allows, shown behind its "?" so the form stays short.
 const HELP: Record<string, string> = {
   pushAllowed:
     "Sending commits to a remote, from a Designer or this page. Off: commits stay on this gateway.",
@@ -56,6 +47,8 @@ const HELP: Record<string, string> = {
     "How projects and the gateway repository may be updated without anyone at a Designer. Sync — pull merges the branch in when it moves and waits while anyone has uncommitted changes. Sync — replace makes the project match the branch exactly, overwriting local edits. Runner takes releases and updates from a GitHub Actions runner. Off is always allowed.",
   allowedRemoteHosts:
     "Hosts a remote may point at, checked before the gateway connects and when a remote is saved. *.example.com matches subdomains. Blank allows any host.",
+  githubHosts:
+    "The hosts whose GitHub signature counts for the option above: github.com, or your GitHub Enterprise host.",
 };
 
 const DELIVERIES: [DeliveryKind, string][] = [
@@ -64,258 +57,186 @@ const DELIVERIES: [DeliveryKind, string][] = [
   ["runner", "Runner"],
 ];
 
-const onOff = (key: keyof PolicyFields, v: boolean) => (
-  <span className={RISKY[key] === v ? "gitcfg-err" : ""}>
-    {v ? "On" : "Off"}
-  </span>
-);
+// A saved policy leaves out what is at its default (allowed), never reads it as off.
+const DEFAULTS: PolicyFields = {
+  pushAllowed: true,
+  forcePushAllowed: true,
+  designerCommit: true,
+  branchSwitch: true,
+  layoutSwitch: true,
+  allowInsecureRemotes: false,
+  githubMergedOnly: false,
+  githubHosts: ["github.com"],
+  deliveryModes: ["off", "pull", "replace", "runner"],
+  allowedRemoteHosts: [],
+};
 
-// The Git policy: what this module may do on this gateway, and in which deployment mode. It is
-// the one record of this module that is versioned with the config, so an override written for a
-// mode travels to every gateway that follows the branch.
-const Policy = () => {
-  const { data, isLoading } = useGetStatusQuery();
-  const [save] = useSavePolicyMutation();
-  const toasts = useToastNotifications();
-  const policy = data?.policy;
-  const mode = policy?.mode ?? null;
-  const [open, setOpen] = React.useState(false);
-  // The one setting whose explanation is showing, in the table or the drawer.
+const hostList = (v: unknown) =>
+  String(v ?? "")
+    .split(/[\s,]+/)
+    .map((h) => h.trim())
+    .filter((h) => h !== "");
+
+// The stored record as the form edits it: lists of hosts as text, each delivery a tick.
+const toForm = (c: Partial<PolicyFields> | undefined) => {
+  const p = { ...DEFAULTS };
+  Object.entries(c ?? {}).forEach(([k, v]) => {
+    if (v !== null && v !== undefined) (p as any)[k] = v;
+  });
+  const form: Record<string, unknown> = { ...p };
+  form.allowedRemoteHosts = p.allowedRemoteHosts.join(", ");
+  form.githubHosts = p.githubHosts.join(", ");
+  DELIVERIES.forEach(([d]) => {
+    form[`delivery_${d}`] = p.deliveryModes.includes(d);
+  });
+  delete form.deliveryModes;
+  return form;
+};
+
+const fromForm = (f: Record<string, unknown>): PolicyFields => ({
+  pushAllowed: !!f.pushAllowed,
+  forcePushAllowed: !!f.forcePushAllowed,
+  designerCommit: !!f.designerCommit,
+  branchSwitch: !!f.branchSwitch,
+  layoutSwitch: !!f.layoutSwitch,
+  allowInsecureRemotes: !!f.allowInsecureRemotes,
+  githubMergedOnly: !!f.githubMergedOnly,
+  // Off is always allowed; listing it keeps the stored record readable.
+  deliveryModes: [
+    "off",
+    ...DELIVERIES.filter(([d]) => f[`delivery_${d}`]).map(([d]) => d),
+  ],
+  allowedRemoteHosts: hostList(f.allowedRemoteHosts),
+  githubHosts: hostList(f.githubHosts),
+});
+
+const schema = yup.object({
+  allowedRemoteHosts: yup.string().nullable(),
+  githubHosts: yup.string().nullable(),
+});
+
+const CATEGORIES = [
+  { label: "Actions", id: "git-policy-actions" },
+  { label: "Deliveries", id: "git-policy-deliveries" },
+  { label: "Remotes", id: "git-policy-remotes" },
+  { label: "Audit", id: "git-policy-audit" },
+];
+
+const PolicyForm = () => {
+  const { getValues } = useFormContext();
+  const { mode } = useConfigurationModeContext();
+  const n = `${mode === "primary" ? "config" : "backupConfig"}.`;
+  // The one setting whose explanation is showing.
   const [help, setHelp] = React.useState<string | null>(null);
-  const toggle = (key: string) => setHelp(help === key ? null : key);
-  const helpButton = (key: string, label: string) => (
-    <HelpButton
-      label={label}
-      open={help === key}
-      onToggle={() => toggle(key)}
+  const label = (key: string, text: string) => (
+    <span className="gitcfg-label-help">
+      {text}
+      <HelpButton
+        label={text}
+        open={help === key}
+        onToggle={() => setHelp(help === key ? null : key)}
+      />
+    </span>
+  );
+  const check = (key: string, text: string, field = key) => (
+    <FormControlInput
+      key={field}
+      name={n + field}
+      id={`git-policy-${field}`}
+      label={label(key, text)}
+      description={help === key ? HELP[key] : undefined}
+      input={<Checkbox defaultValue={getValues(n + field)} label="Allowed" />}
     />
   );
-  const helpRow = (key: string) =>
-    help === key ? (
-      <tr className="gitcfg-help-row">
-        <td colSpan={2}>{HELP[key]}</td>
-      </tr>
-    ) : null;
-  const [draft, setDraft] = React.useState<PolicyFields | null>(null);
-  const [hosts, setHosts] = React.useState("");
-  const [ghHosts, setGhHosts] = React.useState("github.com");
-  const modes = useModes();
-  const [editing, setEditing] = useEditing(open, policy?.from);
-  // The definition being edited, which on a gateway with modes need not be the one in use.
-  const { data: def } = useGetDefinitionQuery(
-    { type: "policy", collection: editing },
-    { skip: !open || !modes.length }
+  const text = (key: string, t: string, placeholder: string) => (
+    <FormControlInput
+      name={n + key}
+      id={`git-policy-${key}`}
+      label={label(key, t)}
+      description={help === key ? HELP[key] : undefined}
+      input={<TextInput placeholder={placeholder} />}
+    />
   );
-
-  const load = (p: PolicyFields) => {
-    setDraft({
-      pushAllowed: p.pushAllowed,
-      forcePushAllowed: p.forcePushAllowed,
-      designerCommit: p.designerCommit,
-      branchSwitch: p.branchSwitch,
-      layoutSwitch: p.layoutSwitch,
-      allowInsecureRemotes: !!p.allowInsecureRemotes,
-      githubMergedOnly: !!p.githubMergedOnly,
-      githubHosts: p.githubHosts ?? ["github.com"],
-      deliveryModes: p.deliveryModes,
-      allowedRemoteHosts: p.allowedRemoteHosts,
-    });
-    setHosts(p.allowedRemoteHosts.join(", "));
-    setGhHosts((p.githubHosts ?? ["github.com"]).join(", "));
-  };
-
-  React.useEffect(() => {
-    if (open && def && def.collection === editing) {
-      load(def as unknown as PolicyFields);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, def, editing]);
-
-  if (isLoading || !policy) {
-    return <Loading isLoading={true} />;
-  }
-
-  const openEdit = () => {
-    load(policy);
-    setOpen(true);
-  };
-
-  const submit = async () => {
-    if (!draft) return;
-    await save({
-      ...draft,
-      // Off is always allowed; listing it keeps the stored record readable.
-      deliveryModes: [
-        "off",
-        ...draft.deliveryModes.filter((d) => d !== "off"),
-      ] as DeliveryKind[],
-      allowedRemoteHosts: hosts
-        .split(/[\s,]+/)
-        .map((h) => h.trim())
-        .filter((h) => h !== ""),
-      githubHosts: ghHosts
-        .split(/[\s,]+/)
-        .map((h) => h.trim())
-        .filter((h) => h !== ""),
-      saveTo: saveToParam(modes, editing),
-    }).unwrap();
-    toasts.notifySuccess("Git policy saved");
-  };
-
-  const defs = {
-    record: { type: "policy" as const },
-    defined: def?.defined ?? policy.defined ?? [],
-    editing,
-    onEditing: setEditing,
-  };
-
   return (
-    <div>
-      <div className="gitcfg-page-head">
-        <div>
-          <h3>Policy</h3>
-          <p>
-            What Git Integration may do here
-            {mode ? ` in ${mode}` : ""}. Versioned with the config. Settings
-            from <strong>{policy.from || "core"}</strong>.{" "}
-            <OverrideTag defined={policy.defined} from={policy.from} />
-          </p>
-        </div>
-        <div className="gitcfg-actions">
-          <Button colorClass="primary" onClick={openEdit}>
-            Edit policy
-          </Button>
-        </div>
-      </div>
-
-      <ScrollBox className="gitcfg-table-scroll gitcfg-policy-scroll">
-        <table className="gitcfg-table">
-          <thead>
-            <tr>
-              <th>Setting</th>
-              <th>Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            {FLAGS.map(([key, label]) => (
-              <React.Fragment key={key}>
-                <tr>
-                  <td>
-                    {label}
-                    {helpButton(key, label)}
-                  </td>
-                  <td>{onOff(key, !!policy[key])}</td>
-                </tr>
-                {helpRow(key)}
-              </React.Fragment>
-            ))}
-            <tr>
-              <td>
-                Deliveries
-                {helpButton("deliveries", "Deliveries")}
-              </td>
-              <td>
-                {DELIVERIES.filter(([d]) => policy.deliveryModes.includes(d))
-                  .map(([, l]) => l)
-                  .join(", ") || "Off only"}
-              </td>
-            </tr>
-            {helpRow("deliveries")}
-            <tr>
-              <td>
-                Allowed remote hosts
-                {helpButton("allowedRemoteHosts", "Allowed remote hosts")}
-              </td>
-              <td>
-                {policy.allowedRemoteHosts.length
-                  ? policy.allowedRemoteHosts.join(", ")
-                  : "Any"}
-              </td>
-            </tr>
-            {helpRow("allowedRemoteHosts")}
-            <AuditSetting />
-          </tbody>
-        </table>
-      </ScrollBox>
-
-      <SettingsDrawer
-        open={open}
-        title="Git policy"
-        onClose={() => setOpen(false)}
-        onSave={submit}
-        errorTitle="Could not save the Git policy"
-        defs={defs}
-      >
-        {draft ? (
-          <>
-            <Definitions {...defs} />
-            {FLAGS.map(([key, label]) => (
-              <React.Fragment key={key}>
-                <div className="gitcfg-check-row">
-                  <label className="gitcfg-check">
-                    <input
-                      type="checkbox"
-                      checked={draft[key] as boolean}
-                      onChange={(e) =>
-                        setDraft({ ...draft, [key]: e.target.checked })
-                      }
-                    />
-                    <span>{label}</span>
-                  </label>
-                  {helpButton(key, label)}
-                </div>
-                {help === key ? (
-                  <p className="gitcfg-hint">{HELP[key]}</p>
-                ) : null}
-              </React.Fragment>
-            ))}
+    <FormContent>
+      <div className="cardContainer gitcfg-policy-form">
+        <section id="git-policy-actions">
+          <Card title="ACTIONS">
             <p className="gitcfg-hint">
-              Deliveries allowed (Off always is allowed):
-              {helpButton("deliveries", "Deliveries")}
+              What Git Integration may do on a gateway running this definition.
+              Versioned with the config, so a mode&apos;s definition travels to
+              every gateway that follows the branch.
+            </p>
+            {FLAGS.slice(0, 5).map(([k, t]) => check(k, t))}
+          </Card>
+        </section>
+        <section id="git-policy-deliveries">
+          <Card title="DELIVERIES">
+            <p className="gitcfg-hint">
+              {label("deliveries", "Deliveries allowed (Off always is)")}
             </p>
             {help === "deliveries" ? (
               <p className="gitcfg-hint">{HELP.deliveries}</p>
             ) : null}
-            {DELIVERIES.map(([d, label]) => (
-              <label className="gitcfg-check" key={d}>
-                <input
-                  type="checkbox"
-                  checked={draft.deliveryModes.includes(d)}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      deliveryModes: e.target.checked
-                        ? [...draft.deliveryModes, d]
-                        : draft.deliveryModes.filter((x) => x !== d),
-                    })
-                  }
-                />
-                <span>{label}</span>
-              </label>
-            ))}
-            <TextInput
-              label="Allowed remote hosts"
-              value={hosts}
-              placeholder="github.com, *.example.com"
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setHosts(e.target.value)
-              }
-            />
-            <p className="gitcfg-hint">
-              Blank allows any host. Checked against a remote&apos;s URL before
-              the gateway contacts it, and when a remote is saved.
-            </p>
-            <TextInput
-              label="GitHub hosts"
-              value={ghHosts}
-              placeholder="github.com"
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setGhHosts(e.target.value)
-              }
-            />
-          </>
-        ) : null}
-      </SettingsDrawer>
+            {DELIVERIES.map(([d, t]) =>
+              check("deliveries", t, `delivery_${d}`)
+            )}
+            {check("githubMergedOnly", FLAGS[6][1])}
+            {text("githubHosts", "GitHub hosts", "github.com")}
+          </Card>
+        </section>
+        <section id="git-policy-remotes">
+          <Card title="REMOTES">
+            {text(
+              "allowedRemoteHosts",
+              "Allowed remote hosts",
+              "github.com, *.example.com"
+            )}
+            {check("allowInsecureRemotes", FLAGS[5][1])}
+          </Card>
+        </section>
+        <section id="git-policy-audit">
+          <Card title="AUDIT">
+            <OnOwnStore>
+              <table className="gitcfg-table">
+                <tbody>
+                  <AuditSetting />
+                </tbody>
+              </table>
+            </OnOwnStore>
+          </Card>
+        </section>
+      </div>
+    </FormContent>
+  );
+};
+
+// The Git policy on the platform's settings page: Save Changes and the Resource Definitions menu
+// (Create Override, Move Definition, Remove Override) as on the gateway's own settings.
+const Policy = () => {
+  useNoBackupMenu();
+  const [savePolicy] = useSavePolicyMutation();
+  const save = useSingletonSave("policy", (config, saveTo) =>
+    savePolicy({ ...fromForm(config), saveTo }).unwrap()
+  );
+  return (
+    <div className="gitcfg-singleton">
+      <OnGatewayStore>
+        <ResourceModeSingletonPage
+          resourceType={RESOURCE.policy}
+          title="Git Policy"
+          configSchema={schema}
+          categories={CATEGORIES}
+          transformData={(data: any) => ({
+            ...data,
+            config: toForm(data?.config),
+          })}
+          handleSubmit={save.handleSubmit}
+          {...save.callbacks}
+        >
+          <PolicyForm />
+        </ResourceModeSingletonPage>
+      </OnGatewayStore>
     </div>
   );
 };

@@ -1,13 +1,12 @@
 import React from "react";
-import { Provider } from "react-redux";
-import store from "../../store";
+import { PageStores } from "../../store/bridge";
 import GitConfig from "../GitConfig";
 
 const RootPage = () => {
   return (
-    <Provider store={store}>
+    <PageStores>
       <GitConfig />
-    </Provider>
+    </PageStores>
   );
 };
 

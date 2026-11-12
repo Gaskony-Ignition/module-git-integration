@@ -537,6 +537,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         routes.newRoute("/mode-override").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleModeOverride).mount();
+        routes.newRoute("/override-audit").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleOverrideAudit).mount();
         routes.newRoute("/definition").method(HttpMethod.GET).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.READ).nocache()
                 .handler(this::handleGetDefinition).mount();
@@ -2167,6 +2170,43 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
 
     /** What an override route names, for an audit row: "policy", "credential 3", "sync Example_A". */
+    /**
+     * The audit row for a Create Override, Move Definition or Remove Override done with the
+     * platform's own Resource Definitions menu, which calls the platform's resource routes and so
+     * passes none of this module's. Written only when the record's definitions show the action
+     * happened, so the page cannot write a row for something that did not.
+     */
+    private Object handleOverrideAudit(RequestContext req, HttpServletResponse resp) {
+        try {
+            JsonObject body = new Gson().fromJson(req.readBody(), JsonObject.class);
+            String action = String.valueOf(optString(body, "action"));
+            String from = ModeStore.target(optString(body, "from"));
+            String to = ModeStore.target(optString(body, "to"));
+            RecordRef ref = recordRef(body);
+            List<String> d = ref == null ? List.of() : ModeStore.definers(ref.type(), ref.name());
+            boolean happened = switch (action) {
+                case "create" -> to != null && d.contains(to);
+                case "move" -> to != null && from != null && d.contains(to) && !d.contains(from);
+                case "remove" -> from != null && !d.contains(from);
+                default -> false;
+            };
+            if (!happened) {
+                throw new IllegalArgumentException("The record's definitions do not show that " + action + ".");
+            }
+            String detail = switch (action) {
+                case "create" -> recordLabel(body) + " in " + to + " (copied from "
+                        + (from == null ? ModeStore.CORE : from) + ")";
+                case "move" -> recordLabel(body) + " moved from " + from + " to " + to;
+                default -> recordLabel(body) + " in " + from;
+            };
+            GitAudit.record("remove".equals(action) ? GitAudit.OVERRIDE_REMOVED : GitAudit.OVERRIDE_CREATED,
+                    webUser(req).orElse(req.getActor()), null, null, null, detail);
+            return ok();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
     private static String recordLabel(JsonObject body) {
         String type = optString(body, "type");
         String key = optString(body, "project");

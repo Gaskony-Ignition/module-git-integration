@@ -147,7 +147,8 @@ public final class ModeStore {
             return null;
         }
         String r = requested.trim();
-        if (CORE.equals(r) || modes().contains(r)) {
+        // local: the platform's Create Override offers this gateway's own collection too.
+        if (CORE.equals(r) || ConfigurationManager.LOCAL.equals(r) || modes().contains(r)) {
             return r;
         }
         throw new IllegalArgumentException("There is no deployment mode '" + r + "' on this gateway.");
