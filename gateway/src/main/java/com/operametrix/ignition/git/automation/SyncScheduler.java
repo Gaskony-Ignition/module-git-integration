@@ -7,6 +7,7 @@ import com.operametrix.ignition.git.managers.ProjectScope;
 import com.operametrix.ignition.git.managers.PullGuard;
 import com.operametrix.ignition.git.managers.GitProjectManager;
 import com.operametrix.ignition.git.managers.IgnitionReformat;
+import com.operametrix.ignition.git.records.GitRunnerRecord;
 import com.operametrix.ignition.git.records.GitSyncRecord;
 import org.eclipse.jgit.api.CreateBranchCommand;
 import org.eclipse.jgit.api.FetchCommand;
@@ -286,7 +287,9 @@ public final class SyncScheduler {
                     if (!switched && tracked.equals(before)) {
                         return "up to date";
                     }
-                    message = replace(git, repo, branch, current, remoteName, tracked, before, switched);
+                    message = replace(git, repo, branch, current, remoteName, tracked, before, switched,
+                            project, GitEvent.of(GitEvent.SYNC).project(project).user(user).branch(branch)
+                                    .remote(remoteName).commit(tracked.getName()));
                 } else {
                     // Sync set to follow a branch that is not the one checked out: switch to it.
                     // Pulling it into whatever IS checked out merges the wrong branch, and because the
@@ -363,11 +366,13 @@ public final class SyncScheduler {
      * Makes the project exactly the remote branch, as {@link ReleaseReceiver} does with a zip: files
      * the branch dropped disappear, uncommitted edits are overwritten, and a branch moved backwards
      * is followed. The gateway's own project properties are kept, because they hold per-gateway
-     * settings a branch ships neutral. Returns the start of the event message.
+     * settings a branch ships neutral, unless the project was set to take them from the branch.
+     * Returns the start of the event message, which says which happened.
      */
     private static String replace(Git git, Repository repo, String branch, String current,
                                   String remoteName, ObjectId tracked, ObjectId before,
-                                  boolean switched) throws Exception {
+                                  boolean switched, String project, GitEvent.Builder warning)
+            throws Exception {
         Path props = repo.getWorkTree().toPath().resolve(ReleaseReceiver.GLOBAL_PROPS);
         byte[] keptProps = Files.isRegularFile(props) ? Files.readAllBytes(props) : null;
 
@@ -384,10 +389,8 @@ public final class SyncScheduler {
         }
         git.reset().setMode(ResetCommand.ResetType.HARD).setRef(tracked.getName()).call();
 
-        if (keptProps != null) {
-            Files.createDirectories(props.getParent());
-            Files.write(props, keptProps);
-        }
+        String propsNote = ProjectProps.settle(props, keptProps,
+                GitRunnerRecord.get().keepsProjectProperties(project), "branch", project, warning);
 
         // The rollback leads: it is the one thing in this message someone reading the log is
         // looking for.
@@ -397,6 +400,9 @@ public final class SyncScheduler {
         }
         if (!overwritten.isEmpty()) {
             m.append("Overwrote ").append(overwritten.size()).append(" uncommitted change(s). ");
+        }
+        if (propsNote != null) {
+            m.append(Character.toUpperCase(propsNote.charAt(0))).append(propsNote.substring(1)).append(". ");
         }
         m.append(switched
                 ? "Switched from " + current + " to " + branch + "; replaced with" : "Replaced with");

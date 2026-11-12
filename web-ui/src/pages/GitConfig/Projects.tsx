@@ -74,6 +74,8 @@ const Projects = () => {
   const [every, setEvery] = React.useState("300");
   const [user, setUser] = React.useState("");
   const [initialDelivery, setInitialDelivery] = React.useState<Delivery>("off");
+  const [keepProps, setKeepProps] = React.useState(true);
+  const [initialKeepProps, setInitialKeepProps] = React.useState(true);
 
   // Combined: one gateway repository, so the remote, branch and pulls are the gateway's. A
   // project keeps only Off or a runner release, which replaces this one project.
@@ -98,6 +100,7 @@ const Projects = () => {
     setBranch(d.syncBranch || target?.branch || "");
     setEvery(String(d.syncIntervalSeconds));
     setUser(d.syncUser);
+    setKeepProps(d.keepProjectProperties ?? true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, def, editing]);
   const defs = {
@@ -133,6 +136,8 @@ const Projects = () => {
     setBranch(p.syncBranch || p.branch || "");
     setEvery(String(p.syncIntervalSeconds));
     setUser(p.syncUser);
+    setKeepProps(p.keepProjectProperties ?? true);
+    setInitialKeepProps(p.keepProjectProperties ?? true);
     setOpen(true);
   };
 
@@ -147,6 +152,7 @@ const Projects = () => {
       branch: branch.trim(),
       intervalSeconds: Number(every) || 300,
       ignitionUser: user.trim(),
+      keepProjectProperties: keepProps,
     };
 
     if (combined) {
@@ -154,10 +160,11 @@ const Projects = () => {
         await setImages({ project: target.name, imagePrefix }).unwrap();
       }
       // Saved only when changed, so an inactive pulling delivery survives a switch back.
-      if (delivery !== initialDelivery) {
+      if (delivery !== initialDelivery || keepProps !== initialKeepProps) {
         await saveDelivery({
           project: target.name,
           delivery,
+          keepProjectProperties: keepProps,
           saveTo,
         }).unwrap();
       }
@@ -521,6 +528,23 @@ const Projects = () => {
                 Replace makes the project match the branch exactly, overwriting
                 local edits.
               </p>
+            ) : null}
+            {delivery === "sync-replace" || delivery === "runner-release" ? (
+              <>
+                <label className="gitcfg-check">
+                  <input
+                    type="checkbox"
+                    checked={keepProps}
+                    onChange={(e) => setKeepProps(e.target.checked)}
+                  />
+                  <span>Keep this gateway&apos;s project properties</span>
+                </label>
+                <p className="gitcfg-hint">
+                  Project properties hold per-gateway settings such as the
+                  identity provider and default database. Untick to take them
+                  from the branch.
+                </p>
+              </>
             ) : null}
             {needsRemote(delivery) ? (
               <>

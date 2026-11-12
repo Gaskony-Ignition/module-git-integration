@@ -1,8 +1,10 @@
 package com.operametrix.ignition.git.records;
 
 import com.inductiveautomation.ignition.common.gson.Gson;
+import com.inductiveautomation.ignition.common.gson.JsonArray;
 import com.inductiveautomation.ignition.common.gson.JsonElement;
 import com.inductiveautomation.ignition.common.gson.JsonObject;
+import com.inductiveautomation.ignition.common.gson.JsonPrimitive;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceType;
 import com.inductiveautomation.ignition.gateway.config.DecodedResource;
 import com.inductiveautomation.ignition.gateway.config.NamedResourceHandler;
@@ -59,9 +61,14 @@ public class GitRunnerRecord {
      * Release, which set deliveries nobody had chosen — including on projects that were not even
      * versioned. A record saved before 3.7.0 decodes it as false, which triggers the one-time
      * {@link #clearAssignedDeliveries}; from then on a delivery only ever comes from the drawer.
+     *
+     * <p>{@code takeProps} arrived in 4.4.4: a JSON array of the projects whose Sync — replace or
+     * Release takes the project properties from the branch or zip. It sits here, beside
+     * {@code modes}, because this is the gateway's per-project delivery record in both layouts. A
+     * record saved earlier decodes it as null, which is empty: every project keeps its own.
      */
     public record Config(boolean enabled, SecretConfig token, String ignitionUser,
-                         String modes, boolean optIn, boolean cleared) {}
+                         String modes, boolean optIn, boolean cleared, String takeProps) {}
 
     public static final ResourceType TYPE = new ResourceType(MODULE_ID, "git-runner");
 
@@ -84,6 +91,7 @@ public class GitRunnerRecord {
     private SecretConfig token;
     private String ignitionUser = "";
     private JsonObject modes = new JsonObject();
+    private JsonArray takeProps = new JsonArray();
     // Kept so a 3.5.0/3.6.0 record still round-trips; nothing reads it.
     private boolean optIn = true;
     // True for anything created from 3.7.0 on; only a record saved earlier starts false.
@@ -104,6 +112,13 @@ public class GitRunnerRecord {
             this.modes = m == null ? new JsonObject() : m;
         } catch (Exception e) {
             this.modes = new JsonObject();
+        }
+        try {
+            JsonArray t = c.takeProps() == null || c.takeProps().isBlank()
+                    ? null : new Gson().fromJson(c.takeProps(), JsonArray.class);
+            this.takeProps = t == null ? new JsonArray() : t;
+        } catch (Exception e) {
+            this.takeProps = new JsonArray();
         }
     }
 
@@ -176,6 +191,25 @@ public class GitRunnerRecord {
     }
 
     /**
+     * Whether a replace keeps this gateway's project properties ({@code data.bin}) for the project:
+     * true unless it was turned off, so a release never changes the identity provider or default
+     * database by surprise.
+     */
+    public boolean keepsProjectProperties(String project) {
+        return project == null || !takeProps.contains(new JsonPrimitive(project));
+    }
+
+    public void setKeepProjectProperties(String project, boolean keep) {
+        if (project == null || project.isBlank()) {
+            return;
+        }
+        takeProps.remove(new JsonPrimitive(project));
+        if (!keep) {
+            takeProps.add(project);
+        }
+    }
+
+    /**
      * Drops every runner mode for a project the gateway no longer has. A name left behind by a
      * deleted project would otherwise hand its delivery to whatever is created under that name next.
      *
@@ -187,6 +221,15 @@ public class GitRunnerRecord {
             if (!projects.contains(name)) {
                 modes.remove(name);
                 gone.add(name);
+            }
+        }
+        // Same reason: a new project under a deleted one's name starts keeping its own properties.
+        for (JsonElement e : takeProps.deepCopy()) {
+            if (!projects.contains(e.getAsString())) {
+                takeProps.remove(e);
+                if (!gone.contains(e.getAsString())) {
+                    gone.add(e.getAsString());
+                }
             }
         }
         return gone;
@@ -268,7 +311,7 @@ public class GitRunnerRecord {
     public void save() {
         try {
             Config c = new Config(enabled, token, getIgnitionUser(), modes.toString(), optIn,
-                    cleared);
+                    cleared, takeProps.toString());
             ModeStore.save(handler, META, NAME, c);
         } catch (Exception e) {
             throw new RuntimeException(e);

@@ -1881,7 +1881,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                         String project = optString(q, "project");
                         GitSyncRecord sync = GitSyncRecord.findByProject(project);
                         o = new JsonObject();
-                        o.addProperty("delivery", deliveryOf(GitRunnerRecord.get(), sync, project));
+                        GitRunnerRecord runner = GitRunnerRecord.get();
+                        o.addProperty("delivery", deliveryOf(runner, sync, project));
+                        o.addProperty("keepProjectProperties", runner.keepsProjectProperties(project));
                         o.addProperty("syncBranch", sync == null ? "" : sync.getBranch());
                         o.addProperty("syncIntervalSeconds", sync == null
                                 ? GitSyncRecord.DEFAULT_INTERVAL_SECONDS : sync.getIntervalSeconds());
@@ -2382,6 +2384,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.addProperty("runnerEnabled", runnerOn);
                 GitSyncRecord sync = GitSyncRecord.findByProject(p.name());
                 o.addProperty("delivery", deliveryOf(runner, sync, p.name()));
+                o.addProperty("keepProjectProperties", runner.keepsProjectProperties(p.name()));
                 o.addProperty("syncBranch", sync == null ? "" : sync.getBranch());
                 o.addProperty("syncIntervalSeconds", sync == null
                         ? GitSyncRecord.DEFAULT_INTERVAL_SECONDS : sync.getIntervalSeconds());
@@ -2671,6 +2674,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             } else {
                 runner.setMode(project, GitRunnerRecord.MODE_RELEASE);
             }
+            keepProjectProperties(body, runner, project);
             runner.save();
             return;
         }
@@ -2714,6 +2718,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             case "runner-repo" -> runner.setMode(project, GitRunnerRecord.MODE_REPO);
             default -> runner.clearMode(project);
         }
+        keepProjectProperties(body, runner, project);
         runner.save();
 
         // The sync record also carries the branch and credential a runner repo update pulls
@@ -2738,6 +2743,13 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 sync.setIgnitionUser(owner);
             }
             sync.save();
+        }
+    }
+
+    /** Stored whatever the delivery; only Sync — replace and Release read it. Absent leaves it. */
+    private static void keepProjectProperties(JsonObject body, GitRunnerRecord runner, String project) {
+        if (body.has("keepProjectProperties") && !body.get("keepProjectProperties").isJsonNull()) {
+            runner.setKeepProjectProperties(project, body.get("keepProjectProperties").getAsBoolean());
         }
     }
 

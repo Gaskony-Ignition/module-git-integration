@@ -96,6 +96,9 @@ changes in; nothing is pushed.
 | Sync — pull | The gateway fetches on a timer and fast-forwards; refused while anyone has local changes. |
 | Sync — replace | The gateway fetches on a timer and makes the project match the branch exactly, rollbacks included. |
 
+Release and replace keep the gateway's own project properties (identity provider, default
+database) unless **Keep this gateway's project properties** is unticked for that project.
+
 Runner deliveries need **Credentials → Runner access** switched on and a token.
 Repo updates and sync need a remote and a credential.
 

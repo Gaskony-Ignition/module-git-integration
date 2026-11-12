@@ -220,6 +220,8 @@ export interface ProjectStatus {
   syncBranch: string;
   syncIntervalSeconds: number;
   syncUser: string;
+  // False when Sync — replace or a release takes ignition/global-props from the branch or zip.
+  keepProjectProperties?: boolean;
   // Where the delivery record comes from: "core" or a mode name; null when none is saved.
   syncFrom?: string | null;
   syncDefined?: string[];
@@ -240,6 +242,8 @@ export interface DeliveryReq {
   branch?: string;
   intervalSeconds?: number;
   ignitionUser?: string;
+  // Absent leaves the stored choice as it is.
+  keepProjectProperties?: boolean;
 }
 export interface GraphCommit {
   sha: string;

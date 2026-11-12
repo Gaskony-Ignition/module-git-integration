@@ -3,6 +3,16 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [4.4.4] - 2026-11-12
+
+### Added
+- "Keep this gateway's project properties", per project, in the Projects drawer for Sync — replace
+  and Runner — release. On (the default, and what every earlier version did) a replace puts the
+  gateway's own `ignition/global-props/data.bin` back; off takes the branch's or the zip's, keeping
+  the gateway's only when the incoming project has none. The run's log entry says which, and
+  keeping properties that name no identity provider when the incoming ones name one logs a
+  warning once per incoming file. `POST /delivery` takes `keepProjectProperties`.
+
 ## [4.4.3] - 2026-11-12
 
 ### Fixed

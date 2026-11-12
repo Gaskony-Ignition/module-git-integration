@@ -44,7 +44,7 @@ branch with HEAD, act if it moved. Works behind NAT and with any git host.
 - **Pull** fast-forwards, and refuses while the tree has real local changes or
   when the remote moved backwards.
 - **Replace** hard-resets and cleans to the remote branch, keeping
-  `ignition/global-props/data.bin`. It runs only when the branch moves, overwrites
+  `ignition/global-props/data.bin` (see Project properties below). It runs only when the branch moves, overwrites
   and counts local edits, and follows a branch moved backwards. This is the
   runnerless release route: a tag holds source, so a workflow builds each
   release and commits it to a branch of releases, and a promotion moves the
@@ -59,7 +59,7 @@ would put repository-supplied shell beside the project store.
 - **Release.** The workflow uploads a project export zip to `ReleaseReceiver`
   (`POST /runner-release`). The gateway replaces the whole project — a file
   dropped from the release disappears — keeping `.git` and
-  `ignition/global-props/data.bin`. Staged under `var/git-release`, moved in and
+  `ignition/global-props/data.bin` (see Project properties below). Staged under `var/git-release`, moved in and
   scanned: no restart, no repository needed on the gateway.
 - **Repo updates.** The workflow calls `RunnerTrigger` (`POST /runner-sync`) and
   the gateway pulls, using the project's sync record for branch and credential
@@ -96,6 +96,19 @@ Per-project sync records and runner repo-update modes are kept, inactive, while 
 drawer never rewrites them unless that project's delivery is changed — so switching back to
 Separate brings them back. The gateway's Pull and Runner modes are likewise kept but inactive while
 Separate.
+
+## Project properties
+
+`ignition/global-props/data.bin` holds per-gateway settings: identity provider, default database,
+default tag provider. By default Sync — replace and Runner — release copy it aside and put it back,
+so a branch or release cannot change them. Unticking **Keep this gateway's project properties** in
+the project's drawer (stored per project in `GitRunnerRecord.takeProps`, `keepProjectProperties`
+on `POST /delivery`) takes the branch's or the zip's instead; with none in it, the gateway's stays,
+so a project is never left without one. Sync — pull is a merge and takes whatever the branch
+commits either way. The log entry says which happened. When the kept file names no identity
+provider and the incoming one does, a warning is logged once per incoming file: the file is
+Ignition's gzipped binary serialisation of `GlobalProps`, read with the platform's
+`XMLDeserializer`, because its string table cannot be scanned for the value reliably.
 
 ## Local changes
 

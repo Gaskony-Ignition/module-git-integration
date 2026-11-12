@@ -17,7 +17,6 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -34,7 +33,8 @@ import java.util.stream.Stream;
  *   deleting the folder would destroy it and every local commit. The working tree IS replaced, so
  *   afterwards the Changes list shows exactly how the gateway differs from its last commit.</li>
  *   <li>{@code ignition/global-props/data.bin} — the project properties hold per-gateway settings
- *   such as the default database connection, which a release ships neutral.</li>
+ *   such as the default database connection, which a release ships neutral. A project set not
+ *   to keep them takes the zip's, if it has one.</li>
  * </ul>
  *
  * <p>A release is authoritative: uncommitted edits on the gateway are overwritten, as with any
@@ -132,7 +132,9 @@ public final class ReleaseReceiver {
             // A release carries no repository of its own; one in the zip would replace ours.
             deleteRecursively(staged.resolve(".git"));
 
-            boolean[] kept = replace(project, staged, work);
+            boolean keep = GitRunnerRecord.get().keepsProjectProperties(project);
+            String propsNote = replace(project, staged, work, keep);
+            boolean keptGit = Files.isDirectory(GitManager.getProjectFolderPath(project).resolve(".git"));
             // Combined: the release is recorded in the gateway repository, limited to this project.
             String committed = GitManager.combined()
                     ? com.operametrix.ignition.git.managers.DataDirGitManager.commitProjectFolder(project,
@@ -151,7 +153,8 @@ public final class ReleaseReceiver {
             GitEvents.fire(GitEvent.of(GitEvent.RELEASE)
                     .project(project)
                     .user("runner")
-                    .message("Installed " + label + " (" + files + " files)")
+                    .message("Installed " + label + " (" + files + " files)"
+                            + (propsNote == null ? "" : "; " + propsNote))
                     .success());
             GitAudit.record(GitAudit.DELIVERY, "runner", project, null, committed,
                     "Runner — release " + (version.isEmpty() ? "(no version)" : version) + ", " + files + " file(s)");
@@ -161,8 +164,8 @@ public final class ReleaseReceiver {
             o.addProperty("project", project);
             o.addProperty("version", version);
             o.addProperty("files", files);
-            o.addProperty("keptRepository", kept[0]);
-            o.addProperty("keptProjectProperties", kept[1]);
+            o.addProperty("keptRepository", keptGit);
+            o.addProperty("keptProjectProperties", ProjectProps.KEPT.equals(propsNote));
             if (committed != null) {
                 o.addProperty("commit", committed);
             }
@@ -191,10 +194,12 @@ public final class ReleaseReceiver {
     }
 
     /**
-     * Swaps the staged project in, keeping the repository and the project properties.
-     * Returns whether each was kept. The repository is put back even if the swap fails part way.
+     * Swaps the staged project in, keeping the repository and, unless the project takes them from
+     * the release, the project properties. Returns the note saying which properties it has. The
+     * repository is put back even if the swap fails part way.
      */
-    private static boolean[] replace(String project, Path staged, Path work) throws IOException {
+    private static String replace(String project, Path staged, Path work, boolean keep)
+            throws IOException {
         Path target = GitManager.getProjectFolderPath(project);
         Path keptGit = work.resolve("kept-git");
         Path keptProps = work.resolve("kept-global-props.bin");
@@ -210,18 +215,15 @@ public final class ReleaseReceiver {
         try {
             deleteRecursively(target);
             Files.move(staged, target);
-            if (hadProps) {
-                Path props = target.resolve(GLOBAL_PROPS);
-                Files.createDirectories(props.getParent());
-                Files.copy(keptProps, props, StandardCopyOption.REPLACE_EXISTING);
-            }
+            return ProjectProps.settle(target.resolve(GLOBAL_PROPS),
+                    hadProps ? Files.readAllBytes(keptProps) : null, keep, "release", project,
+                    GitEvent.of(GitEvent.RELEASE).project(project).user("runner"));
         } finally {
             if (hadGit) {
                 Files.createDirectories(target);
                 Files.move(keptGit, target.resolve(".git"));
             }
         }
-        return new boolean[] {hadGit, hadProps};
     }
 
     private static long copyCapped(InputStream in, Path out) throws IOException, Refused {
