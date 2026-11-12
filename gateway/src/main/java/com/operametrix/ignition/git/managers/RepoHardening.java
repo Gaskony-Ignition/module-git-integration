@@ -167,7 +167,7 @@ public final class RepoHardening {
         }
         inEachCollection(c -> {
             GitConfigRemoteRecord r = GitConfigRemoteRecord.get();
-            if (r != null && definedIn(GitConfigRemoteRecord.TYPE, GitConfigRemoteRecord.SINGLETON_NAME, c)) {
+            if (r != null && definedIn(GitConfigRemoteRecord.TYPE, null, c)) {
                 String clean = RemoteUrls.withoutPassword(r.getUri());
                 if (clean != null && !clean.equals(r.getUri())) {
                     r.setUri(clean);

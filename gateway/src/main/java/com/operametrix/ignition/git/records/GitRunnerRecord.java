@@ -7,7 +7,7 @@ import com.inductiveautomation.ignition.common.gson.JsonObject;
 import com.inductiveautomation.ignition.common.gson.JsonPrimitive;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceType;
 import com.inductiveautomation.ignition.gateway.config.DecodedResource;
-import com.inductiveautomation.ignition.gateway.config.NamedResourceHandler;
+import com.inductiveautomation.ignition.gateway.config.SingletonResourceHandler;
 import com.inductiveautomation.ignition.gateway.config.ResourceTypeMeta;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import com.inductiveautomation.ignition.gateway.secrets.Plaintext;
@@ -37,8 +37,8 @@ public class GitRunnerRecord {
 
     public static final String MODULE_ID = "com.operametrix.ignition.git";
 
-    /** The one resource name; the runner configuration is a gateway-level singleton. */
-    public static final String NAME = "runner";
+    /** The name it was stored under before 4.5.0 made it a singleton ({@code SingletonMigration}). */
+    public static final String LEGACY_NAME = "runner";
 
     /** How a runner delivers to a project: a release zip replacing it, or a pull of its branch. */
     public static final String MODE_RELEASE = "release";
@@ -73,9 +73,10 @@ public class GitRunnerRecord {
     public static final ResourceType TYPE = new ResourceType(MODULE_ID, "git-runner");
 
     public static final ResourceTypeMeta<Config> META =
-            ModeStore.overridable(Config.class, TYPE, "Git Actions Runner");
+            ModeStore.singleton(Config.class, TYPE, "Git Actions Runner",
+                    new Config(false, null, "", "{}", true, true, "[]"));
 
-    public static final class Handler extends NamedResourceHandler<Config> {
+    public static final class Handler extends SingletonResourceHandler<Config> {
         public Handler(GatewayContext context) {
             super(context, META);
         }
@@ -125,7 +126,7 @@ public class GitRunnerRecord {
     /** The stored configuration, or a disabled default when none has been saved. */
     public static GitRunnerRecord get() {
         try {
-            return ModeStore.find(handler, META, NAME)
+            return ModeStore.findSingleton(META)
                     .map(DecodedResource::config)
                     .map(GitRunnerRecord::new)
                     .orElseGet(GitRunnerRecord::new);
@@ -247,7 +248,7 @@ public class GitRunnerRecord {
      */
     public static List<String> clearAssignedDeliveries() {
         Handler h = handler;
-        if (h == null || ModeStore.find(h, META, NAME).isEmpty()) {
+        if (h == null || ModeStore.findSingleton(META).isEmpty()) {
             return null;
         }
         GitRunnerRecord r = get();
@@ -312,7 +313,7 @@ public class GitRunnerRecord {
         try {
             Config c = new Config(enabled, token, getIgnitionUser(), modes.toString(), optIn,
                     cleared, takeProps.toString());
-            ModeStore.save(handler, META, NAME, c);
+            ModeStore.saveSingleton(META, c);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -320,7 +321,7 @@ public class GitRunnerRecord {
 
     /** Where this record's effective value comes from: core, a mode, or null when unsaved. */
     public String definedIn() {
-        return ModeStore.definedIn(TYPE, NAME);
+        return ModeStore.definedIn(TYPE, null);
     }
 
 }

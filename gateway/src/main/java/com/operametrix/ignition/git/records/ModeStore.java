@@ -10,6 +10,7 @@ import com.inductiveautomation.ignition.common.resourcecollection.ResourceSignat
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceType;
 import com.inductiveautomation.ignition.gateway.config.ConfigurationManager;
 import com.inductiveautomation.ignition.gateway.config.DecodedResource;
+import com.inductiveautomation.ignition.gateway.config.DefaultResourceTypeMeta;
 import com.inductiveautomation.ignition.gateway.config.NamedResourceHandler;
 import com.inductiveautomation.ignition.gateway.config.ResourceTypeMeta;
 import com.inductiveautomation.ignition.gateway.config.actions.ResourceActionSet;
@@ -65,6 +66,36 @@ public final class ModeStore {
                 .build();
     }
 
+    /**
+     * {@link #overridable} for a record a gateway has one of. Stored at the type's own folder
+     * ({@code <collection>/<module>/<type>/}), which is what the platform's
+     * {@code resources/singleton} route and its Resource Definitions panel read; a named record
+     * there is invisible to both.
+     */
+    public static <T> ResourceTypeMeta<T> singleton(Class<T> config, ResourceType type, String category,
+                                                    T unset) {
+        DefaultResourceTypeMeta.Builder<T> b = ResourceTypeMeta.newBuilder(config)
+                .resourceType(type)
+                .categoryName(category)
+                .singleton();
+        // With a default, the platform's singleton handler writes it to core at startup when core
+        // has none, and the platform's page can open a collection with no definition yet (its
+        // first read asks with defaultIfUndefined; without a default that read is a 404). Null
+        // for the policy: a default written over one that has not been moved yet would hide it.
+        if (unset != null) {
+            b.defaultConfig(unset);
+        }
+        return b.withActionSet(ResourceActionSet.DEFAULT)
+                .buildRouteDelegate(r -> {
+                })
+                .build();
+    }
+
+    /** Where a record lives: its type's folder for a singleton (null name), else its own. */
+    public static ResourcePath path(ResourceType type, String name) {
+        return name == null ? type.rootPath() : type.childPath(name);
+    }
+
     private static ConfigurationManager configManager() {
         GatewayContext ctx = GatewayHook.getContext();
         return ctx == null ? null : ctx.getConfigurationManager();
@@ -86,7 +117,7 @@ public final class ModeStore {
         try {
             ConfigurationManager cm = configManager();
             return cm == null ? null
-                    : cm.getNamedResource(type, name).map(Resource::getDefiningCollectionName).orElse(null);
+                    : cm.getResource(path(type, name)).map(Resource::getDefiningCollectionName).orElse(null);
         } catch (Exception e) {
             return null;
         }
@@ -129,7 +160,7 @@ public final class ModeStore {
             if (cm == null) {
                 return List.of();
             }
-            Set<String> d = cm.getDefiningCollectionNames(type.childPath(name));
+            Set<String> d = cm.getDefiningCollectionNames(path(type, name));
             List<String> out = new ArrayList<>();
             if (d.contains(CORE)) {
                 out.add(CORE);
@@ -192,6 +223,53 @@ public final class ModeStore {
             return Optional.empty();
         }
         return cm.getResource(from, path).flatMap(r -> meta.getCodec().decodeIfValid(r));
+    }
+
+    /** The singleton record as the current read sees it (see {@link #find}). */
+    public static <R> Optional<DecodedResource<R>> findSingleton(ResourceTypeMeta<R> meta) {
+        ConfigurationManager cm = configManager();
+        if (cm == null) {
+            return Optional.empty();
+        }
+        ResourcePath path = meta.getResourceType().rootPath();
+        String c = READ.get();
+        Optional<Resource> r;
+        if (c == null) {
+            r = cm.getResource(path);
+        } else {
+            Set<String> d = cm.getDefiningCollectionNames(path);
+            String from = d.contains(c) ? c : d.contains(CORE) ? CORE : null;
+            r = from == null ? Optional.empty() : cm.getResource(from, path);
+        }
+        return r.flatMap(x -> meta.getCodec().decodeIfValid(x));
+    }
+
+    /**
+     * {@link #save} for a singleton. No handler write fits: the platform's singleton handler only
+     * updates the effective copy, so every write is pushed against the collection it targets —
+     * where it is defined (core when nowhere), or the route's {@code saveTo}.
+     */
+    static <R> void saveSingleton(ResourceTypeMeta<R> meta, R config) throws Exception {
+        ConfigurationManager cm = configManager();
+        ResourcePath path = meta.getResourceType().rootPath();
+        String target = TARGET.get();
+        if (target == null) {
+            target = cm.getResource(path).map(Resource::getDefiningCollectionName).orElse(CORE);
+        }
+        Optional<Resource> existing = cm.getDefiningCollectionNames(path).contains(target)
+                ? cm.getResource(target, path) : Optional.empty();
+        ResourceBuilder b = existing.isPresent() ? existing.get().toBuilder()
+                : Resource.newBuilder().setResourcePath(path);
+        b.setResourceCollectionName(target);
+        meta.getCodec().encode(config, b);
+        Resource updated = LastModification.update(b.build(), ACTOR);
+        if (existing.isPresent()) {
+            ResourceSignature sig = new ResourceSignature(new ResourceId(target, path),
+                    existing.get().getContentDigest());
+            cm.push(List.of(ChangeOperation.newModifyOp(updated, sig))).join();
+        } else {
+            cm.push(List.of(ChangeOperation.newCreateOp(updated))).join();
+        }
     }
 
     /** Every record as the current read sees it (see {@link #find}). */
@@ -296,7 +374,7 @@ public final class ModeStore {
             throw new IllegalArgumentException("core is the base definition, not an override.");
         }
         ConfigurationManager cm = configManager();
-        ResourcePath path = type.childPath(name);
+        ResourcePath path = path(type, name);
         if (!cm.getDefiningCollectionNames(path).contains(m)) {
             return false;
         }
@@ -317,7 +395,7 @@ public final class ModeStore {
             throw new IllegalArgumentException("Choose a deployment mode for the override.");
         }
         ConfigurationManager cm = configManager();
-        ResourcePath path = type.childPath(name);
+        ResourcePath path = path(type, name);
         Set<String> d = cm.getDefiningCollectionNames(path);
         if (d.contains(to)) {
             throw new IllegalArgumentException(to + " already has its own definition.");

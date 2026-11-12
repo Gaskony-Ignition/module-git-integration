@@ -88,6 +88,13 @@ class IgnoreRulesTest {
         assertThat(excluded(base + "/git-user-https-credential/1/config.json", false)).isTrue();
         assertThat(excluded("config/resources/Prod/com.operametrix.ignition.git/git-runner/runner/config.json", false))
                 .isTrue();
+        // 4.5.0's singleton layout: the same lines, files one level up.
+        assertThat(excluded(base + "/git-policy/config.json", false)).isFalse();
+        assertThat(excluded("config/resources/Staging/com.operametrix.ignition.git/git-policy/resource.json", false))
+                .isFalse();
+        assertThat(excluded(base + "/git-config-remote/config.json", false)).isTrue();
+        assertThat(excluded("config/resources/Prod/com.operametrix.ignition.git/git-runner/config.json", false))
+                .isTrue();
         // Other modules' records are untouched by the carve-out.
         assertThat(excluded("config/resources/core/ignition/git-policy/x.json", false)).isFalse();
     }

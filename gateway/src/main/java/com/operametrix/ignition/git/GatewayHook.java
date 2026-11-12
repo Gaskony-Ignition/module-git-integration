@@ -165,6 +165,25 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
     @Override
     public void startup(LicenseState licenseState) {
+        // 4.5.0: the policy, the gateway remote and the runner are singletons now; move each
+        // collection's copy to where a singleton lives before anything reads them.
+        try {
+            com.operametrix.ignition.git.records.legacy.SingletonMigration.Result moved =
+                    com.operametrix.ignition.git.records.legacy.SingletonMigration.migrate(
+                            DataDirGitManager.dataDir().resolve("config").resolve("resources"));
+            if (moved.changed()) {
+                context.getConfigurationManager().requestScan().join();
+                logger.info("Moved {} to the platform's singleton layout.", moved.moved());
+            }
+            for (String k : moved.kept()) {
+                logger.warn("{} is left over beside its singleton and is not read; delete it.", k);
+            }
+        } catch (Exception e) {
+            // Unmoved, a Prod lock-down override would read as no policy at all: lock instead.
+            GitPolicyRecord.unreadable();
+            logger.error("Could not move the Git policy, remote and runner settings to the singleton"
+                    + " layout; the policy stays locked until it succeeds (restart the module).", e);
+        }
         projectHandler.startup();
         repoUserHandler.startup();
         sshKeyHandler.startup();
@@ -1294,7 +1313,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.addProperty("uri", remote.getUri());
                 o.addProperty("branch", remote.getBranch());
                 o.addProperty("from", remote.definedIn());
-                o.add("defined", definedJson(GitConfigRemoteRecord.TYPE, GitConfigRemoteRecord.SINGLETON_NAME));
+                o.add("defined", definedJson(GitConfigRemoteRecord.TYPE, null));
                 // Secret prefill: mode + (referenced) provider/secret + (https) username. The
                 // embedded secret itself is never returned — the drawer leaves it blank to keep it.
                 SecretConfig secret = null;
@@ -1910,13 +1929,13 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         String type = optString(body, "type");
         switch (type == null ? "" : type) {
             case "policy" -> {
-                return new RecordRef(GitPolicyRecord.TYPE, GitPolicyRecord.NAME);
+                return new RecordRef(GitPolicyRecord.TYPE, null);
             }
             case "remote" -> {
-                return new RecordRef(GitConfigRemoteRecord.TYPE, GitConfigRemoteRecord.SINGLETON_NAME);
+                return new RecordRef(GitConfigRemoteRecord.TYPE, null);
             }
             case "runner" -> {
-                return new RecordRef(GitRunnerRecord.TYPE, GitRunnerRecord.NAME);
+                return new RecordRef(GitRunnerRecord.TYPE, null);
             }
             case "sync" -> {
                 GitSyncRecord r = GitSyncRecord.findByProject(optString(body, "project"));
@@ -2048,7 +2067,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         String mode = ModeStore.activeMode().orElse(null);
         o.addProperty("mode", mode);
         o.addProperty("from", GitPolicyRecord.definedIn());
-        o.add("defined", definedJson(GitPolicyRecord.TYPE, GitPolicyRecord.NAME));
+        o.add("defined", definedJson(GitPolicyRecord.TYPE, null));
         GitPolicy p = GitPolicyRecord.get();
         o.addProperty("pushAllowed", p.push());
         o.addProperty("designerCommit", p.commit());
@@ -2841,7 +2860,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             // Never the token itself: it is shown once, when generated.
             o.addProperty("hasToken", cfg.hasToken());
             o.addProperty("from", cfg.definedIn());
-            o.add("defined", definedJson(GitRunnerRecord.TYPE, GitRunnerRecord.NAME));
+            o.add("defined", definedJson(GitRunnerRecord.TYPE, null));
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);

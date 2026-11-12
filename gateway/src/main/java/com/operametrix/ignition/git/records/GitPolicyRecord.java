@@ -2,7 +2,7 @@ package com.operametrix.ignition.git.records;
 
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceType;
 import com.inductiveautomation.ignition.gateway.config.DecodedResource;
-import com.inductiveautomation.ignition.gateway.config.NamedResourceHandler;
+import com.inductiveautomation.ignition.gateway.config.SingletonResourceHandler;
 import com.inductiveautomation.ignition.gateway.config.ResourceTypeMeta;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
@@ -14,14 +14,15 @@ import com.inductiveautomation.ignition.gateway.model.GatewayContext;
  */
 public class GitPolicyRecord {
 
-    public static final String NAME = "policy";
+    /** The name it was stored under before 4.5.0 made it a singleton ({@code SingletonMigration}). */
+    public static final String LEGACY_NAME = "policy";
 
     public static final ResourceType TYPE = new ResourceType(GitProjectsConfigRecord.MODULE_ID, "git-policy");
 
     public static final ResourceTypeMeta<GitPolicy> META =
-            ModeStore.overridable(GitPolicy.class, TYPE, "Git Policy");
+            ModeStore.singleton(GitPolicy.class, TYPE, "Git Policy", null);
 
-    public static final class Handler extends NamedResourceHandler<GitPolicy> {
+    public static final class Handler extends SingletonResourceHandler<GitPolicy> {
         public Handler(GatewayContext context) {
             super(context, META);
         }
@@ -37,6 +38,13 @@ public class GitPolicyRecord {
     }
 
     private static volatile long lastLogged;
+
+    private static volatile boolean unmoved;
+
+    /** The 4.5.0 move to the singleton layout failed: the saved policy can't be found. */
+    public static void unreadable() {
+        unmoved = true;
+    }
 
     /** Every read asks for the policy, so the error is logged once a minute, not per request. */
     private static boolean dueToLog() {
@@ -60,12 +68,15 @@ public class GitPolicyRecord {
         if (h == null) {
             return GitPolicy.DEFAULT;
         }
+        if (unmoved) {
+            return GitPolicy.LOCKED;
+        }
         try {
-            java.util.Optional<GitPolicy> p = ModeStore.find(h, META, NAME).map(DecodedResource::config);
+            java.util.Optional<GitPolicy> p = ModeStore.findSingleton(META).map(DecodedResource::config);
             if (p.isPresent()) {
                 return p.get();
             }
-            if (ModeStore.definedIn(TYPE, NAME) == null) {
+            if (ModeStore.definedIn(TYPE, null) == null) {
                 return GitPolicy.DEFAULT;
             }
             if (dueToLog()) {
@@ -83,12 +94,12 @@ public class GitPolicyRecord {
 
     /** Where the effective policy comes from: core, a mode, or null when none is saved. */
     public static String definedIn() {
-        return ModeStore.definedIn(TYPE, NAME);
+        return ModeStore.definedIn(TYPE, null);
     }
 
     public static void save(GitPolicy c) {
         try {
-            ModeStore.save(handler, META, NAME, c);
+            ModeStore.saveSingleton(META, c);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -100,7 +111,7 @@ public class GitPolicyRecord {
      */
     public static void ensureCore() {
         Handler h = handler;
-        if (h != null && ModeStore.definedIn(TYPE, NAME) == null && ModeStore.find(h, META, NAME).isEmpty()) {
+        if (h != null && !unmoved && ModeStore.definedIn(TYPE, null) == null && ModeStore.findSingleton(META).isEmpty()) {
             ModeStore.writingTo(ModeStore.CORE, () -> {
                 save(GitPolicy.DEFAULT);
                 return null;

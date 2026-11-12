@@ -1,7 +1,7 @@
 package com.operametrix.ignition.git.records;
 
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceType;
-import com.inductiveautomation.ignition.gateway.config.NamedResourceHandler;
+import com.inductiveautomation.ignition.gateway.config.SingletonResourceHandler;
 import com.inductiveautomation.ignition.gateway.config.ResourceTypeMeta;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 
@@ -18,9 +18,10 @@ public class GitConfigRemoteRecord {
             new ResourceType(GitProjectsConfigRecord.MODULE_ID, "git-config-remote");
 
     public static final ResourceTypeMeta<Config> META =
-            ModeStore.overridable(Config.class, TYPE, "Git Config Remote");
+            ModeStore.singleton(Config.class, TYPE, "Git Config Remote",
+                    new Config(1L, "", "", 0L, 0L));
 
-    public static final class Handler extends NamedResourceHandler<Config> {
+    public static final class Handler extends SingletonResourceHandler<Config> {
         public Handler(GatewayContext context) {
             super(context, META);
         }
@@ -33,7 +34,8 @@ public class GitConfigRemoteRecord {
     }
 
     private static final long SINGLETON_ID = 1L;
-    public static final String SINGLETON_NAME = String.valueOf(SINGLETON_ID);
+    /** The name it was stored under before 4.5.0 made it a singleton ({@code SingletonMigration}). */
+    public static final String LEGACY_NAME = String.valueOf(SINGLETON_ID);
 
     private String uri;
     private String branch;
@@ -85,32 +87,35 @@ public class GitConfigRemoteRecord {
     public void save() {
         try {
             Config c = new Config(SINGLETON_ID, uri, branch, sshKeyId, httpsCredentialId);
-            ModeStore.save(handler, META, SINGLETON_NAME, c);
+            ModeStore.saveSingleton(META, c);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
+    /** Blanks the remote where it is defined: a singleton stays, a blank URI reads as none. */
     public void delete() {
         try {
-            if (ModeStore.find(handler, META, SINGLETON_NAME).isPresent()) {
-                handler.delete(SINGLETON_NAME).join();
-            }
+            ModeStore.saveSingleton(META, new Config(SINGLETON_ID, "", "", 0L, 0L));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
-    /** @return the configured remote, or null when none is set. */
+    /**
+     * @return the configured remote, or null when none is set. A blank URI is none: as a singleton
+     *         the record always exists in core (the platform writes the blank default at startup).
+     */
     public static GitConfigRemoteRecord get() {
-        return ModeStore.find(handler, META, SINGLETON_NAME)
+        return ModeStore.findSingleton(META)
+                .filter(d -> d.config().uri() != null && !d.config().uri().isBlank())
                 .map(d -> new GitConfigRemoteRecord(d.config()))
                 .orElse(null);
     }
 
     /** Where this record's effective value comes from: core, a mode, or null when unsaved. */
     public String definedIn() {
-        return ModeStore.definedIn(TYPE, SINGLETON_NAME);
+        return ModeStore.definedIn(TYPE, null);
     }
 
 }
