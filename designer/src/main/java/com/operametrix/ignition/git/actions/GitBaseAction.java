@@ -133,6 +133,9 @@ public class GitBaseAction {
     }
 
     public static void handlePullAction(String remoteName, boolean importTags, boolean importTheme, boolean importImages) {
+        if (offerOpenMerge() || !noUnsavedChanges("Pull")) {
+            return;
+        }
         handlePullAction(remoteName, importTags, importTheme, importImages, null);
     }
 
@@ -276,6 +279,9 @@ public class GitBaseAction {
         if (choice != 0) {
             return;
         }
+        if (!noUnsavedChanges("Switch and pull")) {
+            return;
+        }
         try {
             closeAllEditorTabs();
             rpc.checkoutBranch(projectName, target);
@@ -332,11 +338,15 @@ public class GitBaseAction {
     }
 
     public static void handleCheckoutAction(String branchName) {
+        if (offerOpenMerge() || !noUnsavedChanges("Checkout")) {
+            return;
+        }
         if (gatewayWide()) {
             int choice = JOptionPane.showConfirmDialog(context.getFrame(),
                     "Check out " + branchName + "?\n\nThis gateway keeps every project and its config in one"
                             + " repository, so this switches the gateway config and every project on it,"
-                            + " not only this one.",
+                            + " not only this one. It is refused while anything in that repository is"
+                            + " uncommitted: commit or discard this project's changes first.",
                     "Checkout Branch", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
             if (choice != JOptionPane.YES_OPTION) {
                 return;
@@ -401,20 +411,89 @@ public class GitBaseAction {
         }
     }
 
+    /** Unsaved Designer edits, as resource paths. */
+    static List<ResourcePath> unsavedChanges() {
+        List<ResourcePath> out = new ArrayList<>();
+        for (ChangeOperation op : context.getProject().getChanges()) {
+            ResourceId rid = ChangeOperation.getResourceIdFromChange(op);
+            if (rid != null) {
+                out.add(rid.getResourcePath());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Before an action that reloads the project from the gateway, which drops the Designer's
+     * unsaved edits: true when there are none. Otherwise lists them and asks for a save first;
+     * nothing is done either way, so no edit is lost to the reload.
+     */
+    public static boolean noUnsavedChanges(String action) {
+        List<ResourcePath> unsaved = unsavedChanges();
+        if (unsaved.isEmpty()) {
+            return true;
+        }
+        StringBuilder m = new StringBuilder(action + " reloads this project from the gateway, which would"
+                + " throw away these unsaved edits:\n\n");
+        for (int i = 0; i < Math.min(15, unsaved.size()); i++) {
+            m.append(unsaved.get(i)).append('\n');
+        }
+        if (unsaved.size() > 15) {
+            m.append("... and ").append(unsaved.size() - 15).append(" more\n");
+        }
+        m.append("\nSave them first (File > Save), then try again. Nothing was changed.");
+        Object[] options = {"Save first", "Cancel"};
+        JOptionPane.showOptionDialog(context.getFrame(), m.toString(), action, JOptionPane.DEFAULT_OPTION,
+                JOptionPane.WARNING_MESSAGE, null, options, options[0]);
+        return false;
+    }
+
+    /**
+     * A merge an earlier pull left open (the Designer was closed while it was in conflict) blocks
+     * every later pull and checkout. When there is one, offer its conflict dialog, where it is
+     * completed or aborted, and return true.
+     */
+    public static boolean offerOpenMerge() {
+        List<String> files;
+        try {
+            files = rpc.getConflictingFiles(projectName);
+        } catch (Exception e) {
+            return false;
+        }
+        if (files == null || files.isEmpty()) {
+            return false;
+        }
+        int c = JOptionPane.showConfirmDialog(context.getFrame(),
+                "A merge from an earlier pull is still open, with " + files.size() + " file(s) in conflict."
+                        + "\nNothing can be pulled or checked out until it is completed or aborted."
+                        + "\n\nOpen it now?",
+                "Merge in progress", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (c == JOptionPane.YES_OPTION) {
+            showMergeConflictPopup(projectName, userName, files);
+        }
+        return true;
+    }
+
     public static void pullProjectFromGateway() {
+        pullProjectFromGateway(null);
+    }
+
+    /**
+     * @param only the resource paths (as {@code ResourcePath.toString()}) whose Designer edits are
+     *             dropped, or null for all of them
+     */
+    public static void pullProjectFromGateway(java.util.Set<String> only) {
         try {
             // 8.3 replacement for the removed DesignableProject.notifyPushComplete(List):
             // before pulling the gateway/branch state, discard any local Designer edits so
             // the pull adopts the gateway state wholesale instead of opening the Resolve
-            // Conflicts dialog. On a deliberate branch checkout/pull the gateway is
-            // authoritative; uncommitted work is preserved per-branch by the gateway-side
-            // git stash/restore, so stale local Designer edits must not be treated as
-            // conflicts.
+            // Conflicts dialog. The actions that get here refuse first while the Designer has
+            // unsaved edits (noUnsavedChanges), so what is dropped is only stale state.
             var project = context.getProject();
             List<ResourcePath> stalePaths = new ArrayList<>();
             for (ChangeOperation op : project.getChanges()) {
                 ResourceId rid = ChangeOperation.getResourceIdFromChange(op);
-                if (rid != null) {
+                if (rid != null && (only == null || only.contains(rid.getResourcePath().toString()))) {
                     stalePaths.add(rid.getResourcePath());
                 }
             }
@@ -565,6 +644,9 @@ public class GitBaseAction {
     }
 
     public static void handleCheckoutCommitAction(String commitHash, String shortHash) {
+        if (offerOpenMerge() || !noUnsavedChanges("Checkout")) {
+            return;
+        }
         int choice = JOptionPane.showConfirmDialog(context.getFrame(),
                 "Check out commit " + shortHash + "?\n\n"
                         + "This will put the repository in 'detached HEAD' state.\n"
@@ -572,7 +654,8 @@ public class GitBaseAction {
                         + "To keep changes, create a new branch first."
                         + (gatewayWide()
                                 ? "\n\nThis gateway keeps every project and its config in one repository,"
-                                + " so this switches the gateway config and every project on it."
+                                + " so this switches the gateway config and every project on it. It is"
+                                + " refused while anything in that repository is uncommitted."
                                 : ""),
                 "Checkout Commit", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
 
@@ -629,6 +712,9 @@ public class GitBaseAction {
     }
 
     public static void handleRevertCommitAction(String commitHash, String shortHash, String message) {
+        if (!noUnsavedChanges("Revert")) {
+            return;
+        }
         int choice = JOptionPane.showConfirmDialog(context.getFrame(),
                 "Revert commit " + shortHash + "?\n\n\"" + message + "\"\n\n"
                         + "This will create a new commit that undoes the changes.",

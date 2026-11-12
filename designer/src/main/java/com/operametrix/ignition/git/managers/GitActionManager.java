@@ -1,5 +1,6 @@
 package com.operametrix.ignition.git.managers;
 
+import com.operametrix.ignition.git.actions.GitBaseAction;
 import com.operametrix.ignition.git.BranchPopup;
 import com.operametrix.ignition.git.CommitDetailPopup;
 import com.operametrix.ignition.git.CreateBranchPopup;
@@ -847,7 +848,7 @@ public class GitActionManager {
                 int confirm = JOptionPane.showConfirmDialog(this,
                         "Abort the merge? All changes from the pull will be discarded.",
                         "Abort Merge", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-                if (confirm != JOptionPane.YES_OPTION) return;
+                if (confirm != JOptionPane.YES_OPTION || !GitBaseAction.noUnsavedChanges("Abort merge")) return;
 
                 new Thread(() -> {
                     try {
@@ -871,6 +872,9 @@ public class GitActionManager {
 
             @Override
             public void onCompleteMerge() {
+                if (!GitBaseAction.noUnsavedChanges("Complete merge")) {
+                    return;
+                }
                 new Thread(() -> {
                     try {
                         rpc.completeMergeCommit(projectName, userName);
@@ -928,7 +932,8 @@ public class GitActionManager {
         panel.setOnDiscardRequested(paths -> new Thread(() -> {
             try {
                 rpc.discardChanges(projectName, paths);
-                pullProjectFromGateway();
+                // Only the discarded resources' Designer edits go; the rest stay unsaved as they were.
+                pullProjectFromGateway(new java.util.HashSet<>(paths));
                 if (DesignerHook.instance != null) {
                     DesignerHook.instance.refreshCommitPanel();
                 }
