@@ -1,7 +1,7 @@
 import React from "react";
 import { Button, Loading, useToastNotifications } from "../../webui";
 // Label-painting wrappers — the platform inputs render `label` into an invisible notch legend.
-import { SelectInput, TextInput } from "./fields";
+import { HelpTip, SelectInput, TextInput } from "./fields";
 import {
   Delivery,
   ProjectStatus,
@@ -78,6 +78,10 @@ const Projects = () => {
   const [initialDelivery, setInitialDelivery] = React.useState<Delivery>("off");
   const [keepProps, setKeepProps] = React.useState(true);
   const [initialKeepProps, setInitialKeepProps] = React.useState(true);
+  // The drawer's two halves are tabs, so neither scrolls inside the drawer at 1366x640.
+  const [drawerTab, setDrawerTab] = React.useState<"repository" | "delivery">(
+    "repository"
+  );
 
   // Combined: one gateway repository, so the remote, branch and pulls are the gateway's. A
   // project keeps only Off or a runner release, which replaces this one project.
@@ -144,6 +148,7 @@ const Projects = () => {
     setUser(p.syncUser);
     setKeepProps(p.keepProjectProperties ?? true);
     setInitialKeepProps(p.keepProjectProperties ?? true);
+    setDrawerTab("repository");
     setOpen(true);
   };
 
@@ -415,181 +420,217 @@ const Projects = () => {
       >
         {target ? (
           <>
-            <h4>Repository</h4>
-            {combined ? (
-              <p className="gitcfg-hint">
-                Versioned in the gateway repository. Its remote and credential
-                are the gateway&apos;s, set in Configure versioning.
-              </p>
-            ) : null}
-            {!target.versioned && !combined ? (
-              <label className="gitcfg-check">
-                <input
-                  type="checkbox"
-                  checked={version}
-                  onChange={(e) => setVersion(e.target.checked)}
-                />
-                <span>Put this project under version control</span>
-              </label>
-            ) : null}
-            {version && !combined ? (
+            <div className="gitcfg-tabs" role="tablist">
+              {(
+                [
+                  ["repository", "Repository"],
+                  ["delivery", "Delivery"],
+                ] as const
+              ).map(([key, text]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={drawerTab === key}
+                  className={drawerTab === key ? "is-active" : ""}
+                  onClick={() => setDrawerTab(key)}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+            {drawerTab === "repository" ? (
               <>
-                <TextInput
-                  label={
-                    target.versioned
-                      ? "Remote URL"
-                      : "Remote URL — empty for a local-only repository"
-                  }
-                  placeholder="https://github.com/org/repo.git"
-                  value={url}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    setUrl(e.target.value)
-                  }
-                />
-                {url.trim() !== "" ? (
-                  <SelectInput
-                    label="Credential"
-                    value={credId}
-                    values={credentials.map((c) => ({
-                      label: `${c.type} — ${c.label}`,
-                      value: String(c.id),
-                    }))}
-                    onChange={(e: unknown) => setCredId(selectValue(e))}
-                  />
+                {combined ? (
+                  <p className="gitcfg-hint">
+                    Versioned in the gateway repository. Its remote and
+                    credential are the gateway&apos;s, set in Configure
+                    versioning.
+                  </p>
                 ) : null}
-              </>
-            ) : null}
-            {target.versioned ? (
-              <>
-                <SelectInput
-                  label="Images folder this project versions"
-                  // "" reads as no selection to the platform select, so None needs a value.
-                  value={imagePrefix || NONE}
-                  values={[
-                    { label: "None", value: NONE },
-                    ...imageFolders.map((f: string) => ({
-                      label: f,
-                      value: f,
-                    })),
-                  ]}
-                  onChange={(e: unknown) => {
-                    const v = selectValue(e);
-                    setImagePrefix(v === NONE ? "" : v);
-                  }}
-                />
-                {target.imagePrefix ? (
-                  <div className="gitcfg-actions is-end">
-                    <Button
-                      colorClass="secondary"
-                      disabled={snapshotting}
-                      onClick={() =>
-                        snapshotImages({ project: target.name })
-                          .unwrap()
-                          .then(() =>
-                            toasts.notifySuccess(
-                              `Wrote ${target.imagePrefix} into ${target.name}`
-                            )
-                          )
-                          .catch(
-                            errorToast(toasts, "Could not snapshot the images")
-                          )
+                {!target.versioned && !combined ? (
+                  <label className="gitcfg-check">
+                    <input
+                      type="checkbox"
+                      checked={version}
+                      onChange={(e) => setVersion(e.target.checked)}
+                    />
+                    <span>Put this project under version control</span>
+                  </label>
+                ) : null}
+                {version && !combined ? (
+                  <>
+                    <TextInput
+                      label={
+                        target.versioned
+                          ? "Remote URL"
+                          : "Remote URL — empty for a local-only repository"
                       }
-                    >
-                      {snapshotting ? "Writing…" : "Snapshot images now"}
-                    </Button>
-                  </div>
+                      placeholder="https://github.com/org/repo.git"
+                      value={url}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setUrl(e.target.value)
+                      }
+                    />
+                    {url.trim() !== "" ? (
+                      <SelectInput
+                        label="Credential"
+                        value={credId}
+                        values={credentials.map((c) => ({
+                          label: `${c.type} — ${c.label}`,
+                          value: String(c.id),
+                        }))}
+                        onChange={(e: unknown) => setCredId(selectValue(e))}
+                      />
+                    ) : null}
+                  </>
+                ) : null}
+                {target.versioned ? (
+                  <>
+                    <SelectInput
+                      label="Images folder this project versions"
+                      // "" reads as no selection to the platform select, so None needs a value.
+                      value={imagePrefix || NONE}
+                      values={[
+                        { label: "None", value: NONE },
+                        ...imageFolders.map((f: string) => ({
+                          label: f,
+                          value: f,
+                        })),
+                      ]}
+                      onChange={(e: unknown) => {
+                        const v = selectValue(e);
+                        setImagePrefix(v === NONE ? "" : v);
+                      }}
+                    />
+                    {target.imagePrefix ? (
+                      <div className="gitcfg-actions is-end">
+                        <Button
+                          colorClass="secondary"
+                          disabled={snapshotting}
+                          onClick={() =>
+                            snapshotImages({ project: target.name })
+                              .unwrap()
+                              .then(() =>
+                                toasts.notifySuccess(
+                                  `Wrote ${target.imagePrefix} into ${target.name}`
+                                )
+                              )
+                              .catch(
+                                errorToast(
+                                  toasts,
+                                  "Could not snapshot the images"
+                                )
+                              )
+                          }
+                        >
+                          {snapshotting ? "Writing…" : "Snapshot images now"}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </>
                 ) : null}
               </>
-            ) : null}
-
-            <h4>Delivery</h4>
-            {perMode ? <Definitions {...defs} /> : null}
-            <SelectInput
-              label="How changes reach this project"
-              value={delivery}
-              // Without a remote only Off and a runner release are possible; the rest stay
-              // listed but disabled so it is clear they exist.
-              values={(Object.keys(DELIVERY_LABEL) as Delivery[])
-                .filter((d) => !combined || !needsRemote(d))
-                .map((d) => {
-                  // Refused by the Git policy: listed, disabled, and saying why.
-                  const off =
-                    d !== "off" && d !== delivery
-                      ? refused[`delivery:${kindOf(d)}`]
-                      : undefined;
-                  return {
-                    label: off
-                      ? `${DELIVERY_LABEL[d]} (not allowed by policy)`
-                      : DELIVERY_LABEL[d],
-                    value: d,
-                    disabled:
-                      (!hasRemote && needsRemote(d) && d !== delivery) || !!off,
-                  };
-                })}
-              onChange={(e: unknown) =>
-                setDelivery((selectValue(e) as Delivery) || "off")
-              }
-            />
-            {combined ? (
-              <p className="gitcfg-hint">
-                Repo updates and sync are set once for the whole gateway in
-                Configure versioning › Delivery.
-              </p>
-            ) : !hasRemote ? (
-              <p className="gitcfg-hint">
-                Repo updates and sync need a remote.
-              </p>
-            ) : null}
-            {delivery === "sync-replace" ? (
-              <p className="gitcfg-hint">
-                Replace makes the project match the branch exactly, overwriting
-                local edits.
-              </p>
-            ) : null}
-            {delivery === "sync-replace" || delivery === "runner-release" ? (
+            ) : (
               <>
-                <label className="gitcfg-check">
-                  <input
-                    type="checkbox"
-                    checked={keepProps}
-                    onChange={(e) => setKeepProps(e.target.checked)}
-                  />
-                  <span>Keep this gateway&apos;s project properties</span>
-                </label>
-                <p className="gitcfg-hint">
-                  Project properties hold per-gateway settings such as the
-                  identity provider and default database. Untick to take them
-                  from the branch.
-                </p>
-              </>
-            ) : null}
-            {needsRemote(delivery) ? (
-              <>
-                <TextInput
-                  label="Branch"
-                  value={branch}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    setBranch(e.target.value)
+                {perMode ? <Definitions {...defs} /> : null}
+                <SelectInput
+                  label="How changes reach this project"
+                  value={delivery}
+                  // Without a remote only Off and a runner release are possible; the rest stay
+                  // listed but disabled so it is clear they exist.
+                  values={(Object.keys(DELIVERY_LABEL) as Delivery[])
+                    .filter((d) => !combined || !needsRemote(d))
+                    .map((d) => {
+                      // Refused by the Git policy: listed, disabled, and saying why.
+                      const off =
+                        d !== "off" && d !== delivery
+                          ? refused[`delivery:${kindOf(d)}`]
+                          : undefined;
+                      return {
+                        label: off
+                          ? `${DELIVERY_LABEL[d]} (not allowed by policy)`
+                          : d === "sync-replace"
+                          ? `${DELIVERY_LABEL[d]} (overwrites local edits)`
+                          : DELIVERY_LABEL[d],
+                        value: d,
+                        disabled:
+                          (!hasRemote && needsRemote(d) && d !== delivery) ||
+                          !!off,
+                      };
+                    })}
+                  onChange={(e: unknown) =>
+                    setDelivery((selectValue(e) as Delivery) || "off")
                   }
                 />
-                {isSync(delivery) ? (
-                  <TextInput
-                    label="Every (seconds, minimum 30)"
-                    value={every}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setEvery(e.target.value)
-                    }
-                  />
+                {combined ? (
+                  <p className="gitcfg-hint">
+                    Repo updates and sync are set once for the whole gateway in
+                    Configure versioning › Delivery.
+                  </p>
+                ) : !hasRemote ? (
+                  <p className="gitcfg-hint">
+                    Repo updates and sync need a remote.
+                  </p>
                 ) : null}
-                <TextInput
-                  label="Authenticate as — whose stored credential pulls; empty is you (only you or the user already set)"
-                  value={user}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    setUser(e.target.value)
-                  }
-                />
+                {delivery === "sync-replace" ||
+                delivery === "runner-release" ? (
+                  <>
+                    <label className="gitcfg-check">
+                      <input
+                        type="checkbox"
+                        checked={keepProps}
+                        onChange={(e) => setKeepProps(e.target.checked)}
+                      />
+                      <span>Keep this gateway&apos;s project properties</span>
+                      <HelpTip label="Keep this gateway's project properties">
+                        Project properties hold per-gateway settings such as the
+                        identity provider and default database. Untick to take
+                        them from the branch.
+                      </HelpTip>
+                    </label>
+                  </>
+                ) : null}
+                {needsRemote(delivery) ? (
+                  <>
+                    <div className="gitcfg-field-row">
+                      <TextInput
+                        label="Branch"
+                        value={branch}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setBranch(e.target.value)
+                        }
+                      />
+                      {isSync(delivery) ? (
+                        <TextInput
+                          label="Every (seconds, minimum 30)"
+                          value={every}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            setEvery(e.target.value)
+                          }
+                        />
+                      ) : null}
+                    </div>
+                    <TextInput
+                      id="gitcfg-field-authenticate-as"
+                      label={
+                        <>
+                          Authenticate as
+                          <HelpTip label="Authenticate as">
+                            Whose stored credential pulls. Empty is you; only
+                            you or the user already set can be entered.
+                          </HelpTip>
+                        </>
+                      }
+                      value={user}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setUser(e.target.value)
+                      }
+                    />
+                  </>
+                ) : null}
               </>
-            ) : null}
+            )}
           </>
         ) : null}
       </SettingsDrawer>

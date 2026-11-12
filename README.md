@@ -39,8 +39,8 @@ everything excluded, and Expand/Collapse.
 ![The Git ignore tree on the gateway Versioning page](docs/images/excluded-files.png)
 
 The **Projects** tab lists every project on the gateway, unversioned ones
-included, and how changes reach each one. **Edit** opens a drawer with the
-project's repository and delivery; **Branches** opens its commit graph. **Add
+included, and how changes reach each one. **Edit** opens a drawer with
+**Repository** and **Delivery** tabs; **Branches** opens its commit graph. **Add
 from repository** brings in a project this gateway does not have yet: it reads
 the repository's branches and the project's title, clones the branch into a new
 project and loads it (Separate layout).
@@ -49,7 +49,7 @@ project and loads it (Separate layout).
 
 ![The Projects tab: each project's branch, remote, delivery and state](docs/images/versioning-projects.png)
 
-![A project's drawer: repository, attached credential and delivery](docs/images/versioning-project-drawer.png)
+![A project's drawer, Delivery tab](docs/images/versioning-project-drawer.png)
 
 **Credentials** shows, for each repository credential, when its token expires,
 what it is allowed to touch, and which projects it can read or push. The host is

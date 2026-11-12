@@ -3,6 +3,7 @@ import {
   SelectInput as BaseSelectInput,
   TextArea as BaseTextArea,
   TextInput as BaseTextInput,
+  Tooltip,
 } from "../../webui";
 
 /**
@@ -111,4 +112,26 @@ export const HelpButton = ({
   >
     ?
   </button>
+);
+
+// A "?" whose explanation is the platform tooltip (hover or focus), for a drawer: it floats over
+// the form instead of opening in place, so the drawer never grows a scroll bar.
+export const HelpTip = ({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) => (
+  <Tooltip
+    content={children}
+    position="top"
+    type="multiline"
+    size="large"
+    showArrow
+  >
+    <button type="button" className="gitcfg-help" aria-label={`About ${label}`}>
+      ?
+    </button>
+  </Tooltip>
 );

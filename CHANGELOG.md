@@ -3,10 +3,15 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
-## [Unreleased]
+## [4.5.1] - 2026-11-12
 
 ### Fixed
 - Every "?" help button is drawn as a small circle, as the one beside Deliveries allowed was.
+- A project's drawer on the Versioning page scrolled inside itself at 1366x640-768, cutting off
+  "Every (seconds…)". It now has two tabs, Repository and Delivery; Branch and Every sit side by
+  side; the explanations of "Keep this gateway's project properties" and "Authenticate as" are
+  tooltips on their "?"; Sync — replace says "(overwrites local edits)" in the list instead of a
+  line under it. Nothing scrolls at 1366x640, with deployment-mode definitions shown too.
 
 ## [4.5.0] - 2026-11-12
 

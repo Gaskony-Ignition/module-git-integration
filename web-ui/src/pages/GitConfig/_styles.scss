@@ -1086,3 +1086,20 @@ body.gitcfg-no-backup [data-label="Add Backup Version"],
 body.gitcfg-no-backup [data-label="Add Backup Version"] + hr {
   display: none;
 }
+
+// Two short fields side by side in a drawer (Branch and Every), so a project's Delivery tab fits
+// 1366x640 without the drawer scrolling.
+.gitcfg-field-row {
+  display: flex;
+  gap: var(--gitcfg-space-3);
+
+  > .gitcfg-field {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+// The project drawer's Repository / Delivery tabs: the form's own gap spaces them from the fields.
+.gitcfg-form > .gitcfg-tabs {
+  margin-bottom: 0;
+}
