@@ -3,7 +3,7 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
-## [4.5.0] - Unreleased
+## [4.5.0] - 2026-11-12
 
 ### Fixed
 - Configure versioning showed a remote's saved Secret Provider reference blank when the
