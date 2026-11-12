@@ -26,6 +26,7 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
   });
   const [push, { isLoading: pushing }] = usePushMutation();
   const { data: status } = useGetStatusQuery();
+  const layoutCombined = status?.layout === "combined";
   // Shown disabled with the reason, never hidden, when the Git policy turns pushing off.
   const pushRefused = status?.policy?.refused?.PUSH;
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -205,7 +206,24 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
         modalConfig={{
           confirmationText: `The remote branch ${
             remote?.pushTo ?? ""
-          } started from another gateway, so it shares no history with this one and push and pull refuse it. Joining moves this gateway's branch onto the remote's latest commit and records this gateway's config, exactly as it is now, as one commit on top. Nothing on this gateway changes; the next push sends that commit. Refused if the remote's layout does not match.`,
+          } started from another gateway, so it shares no history with this one and push and pull refuse it. Joining moves this gateway's branch onto the remote's latest commit and records this gateway's config, exactly as it is now, as one commit on top. Nothing on this gateway changes; the next push sends that commit. Refused if the remote's layout does not match.${
+            remote?.joinDeletesCount
+              ? `\n\nThis commit also deletes ${
+                  remote.joinDeletesCount
+                } file(s) the remote branch has outside config/${
+                  layoutCombined ? " and projects/" : ""
+                } that this gateway does not:\n${(
+                  remote.joinDeletes ?? []
+                ).join("\n")}${
+                  remote.joinDeletesCount > (remote.joinDeletes ?? []).length
+                    ? `\n… and ${
+                        remote.joinDeletesCount -
+                        (remote.joinDeletes ?? []).length
+                      } more`
+                    : ""
+                }`
+              : ""
+          }`,
           primaryText: joining ? "Joining…" : "Join",
           secondaryText: "Cancel",
           warningGeneral: true,

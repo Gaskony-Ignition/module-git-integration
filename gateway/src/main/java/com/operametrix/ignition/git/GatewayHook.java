@@ -1332,6 +1332,14 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 DataDirGitManager.Relation rel = DataDirGitManager.relation();
                 o.addProperty("behind", rel.behind());
                 o.addProperty("unrelated", rel.unrelated());
+                if (rel.unrelated()) {
+                    // Shown in the Join confirmation, so nobody deletes another gateway's files unawares.
+                    List<String> gone = DataDirGitManager.joinDeletions();
+                    JsonArray list = new JsonArray();
+                    gone.stream().limit(20).forEach(list::add);
+                    o.add("joinDeletes", list);
+                    o.addProperty("joinDeletesCount", gone.size());
+                }
                 o.addProperty("renameMaster", renameMaster);
                 // What Remote sync pushes: the checked-out branch, and where it goes.
                 String[] target = DataDirGitManager.pushTargetNow(remote);

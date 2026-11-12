@@ -945,6 +945,46 @@ public class DataDirGitManager {
     /** Commits on the fetched remote branch that are not here, and whether it shares no history. */
     public record Relation(int behind, boolean unrelated) {}
 
+    /**
+     * What Join remote history would delete: files on the fetched remote branch, outside
+     * {@code config/} (and {@code projects/} in Combined), that this gateway does not have. The
+     * join commits this gateway's files as they are, so each of these goes from the branch.
+     */
+    public static List<String> joinDeletions() {
+        GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+        if (remote == null || !isInitialized()) {
+            return List.of();
+        }
+        boolean combined = GitManager.combined();
+        synchronized (DATA_DIR_LOCK) {
+            try (Git git = GitManager.getGit(dataDir())) {
+                Repository repo = git.getRepository();
+                ObjectId tip = repo.resolve(trackingRef(pushBranch(repo, remote)) + "^{tree}");
+                if (tip == null) {
+                    return List.of();
+                }
+                List<String> out = new ArrayList<>();
+                try (org.eclipse.jgit.treewalk.TreeWalk tw = new org.eclipse.jgit.treewalk.TreeWalk(repo)) {
+                    tw.addTree(tip);
+                    tw.setRecursive(true);
+                    while (tw.next()) {
+                        String p = tw.getPathString();
+                        if (p.startsWith("config/") || (combined && p.startsWith("projects/"))
+                                || p.equals(".gitignore")) {
+                            continue;
+                        }
+                        if (!Files.exists(dataDir().resolve(p))) {
+                            out.add(p);
+                        }
+                    }
+                }
+                return out;
+            } catch (Exception e) {
+                return List.of();
+            }
+        }
+    }
+
     public static Relation relation() {
         GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
         if (remote == null || !isInitialized()) {
