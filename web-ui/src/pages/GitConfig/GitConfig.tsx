@@ -20,6 +20,9 @@ import Logs from "./Logs";
 import ExcludedFiles from "./ExcludedFiles";
 import BranchesView from "./BranchesView";
 import Policy from "./Policy";
+import Remote from "./Remote";
+import Runner from "./Runner";
+import { OpenTabContext } from "./tabs";
 import "./_styles.scss";
 
 type Tab =
@@ -28,6 +31,8 @@ type Tab =
   | "excluded"
   | "projects"
   | "credentials"
+  | "remote"
+  | "runner"
   | "policy"
   | "logs";
 
@@ -39,6 +44,8 @@ const TABS: [Tab, string][] = [
   ["excluded", "Git ignore"],
   ["projects", "Projects"],
   ["credentials", "Credentials"],
+  ["remote", "Remote"],
+  ["runner", "Runner"],
   ["policy", "Policy"],
   ["logs", "Logs"],
 ];
@@ -161,6 +168,10 @@ const GitConfig = () => {
           <Projects />
         ) : tab === "credentials" ? (
           <Credentials />
+        ) : tab === "remote" ? (
+          <Remote />
+        ) : tab === "runner" ? (
+          <Runner />
         ) : tab === "policy" ? (
           <Policy />
         ) : (
@@ -171,10 +182,12 @@ const GitConfig = () => {
   };
 
   return (
-    <div className="gitcfg">
-      <RemoteSync initialized={initialized} />
-      <div className="gitcfg-content">{renderBody()}</div>
-    </div>
+    <OpenTabContext.Provider value={(t) => setTab(t as Tab)}>
+      <div className="gitcfg">
+        <RemoteSync initialized={initialized} />
+        <div className="gitcfg-content">{renderBody()}</div>
+      </div>
+    </OpenTabContext.Provider>
   );
 };
 

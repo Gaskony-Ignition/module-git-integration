@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
 import { DeleteGw } from "@inductiveautomation/ignition-icons";
 import {
   Button,
@@ -9,33 +8,15 @@ import {
   DrawerTemplate,
   DrawerTemplateSize,
   DrawerTemplateColorTheme,
-  Form,
-  FormControlInput,
   Modal,
-  Radio,
-  TextArea,
-  TextAutocomplete,
-  TextInput,
   useToastNotifications,
 } from "../../webui";
 import { SelectInput, TextInput as LabelledTextInput } from "./fields";
 import { selectValue } from "./selectValue";
 import { errorToast } from "./errors";
-import Definitions, {
-  DefinitionMenu,
-  saveToParam,
-  useEditing,
-  useModes,
-} from "./ModeScope";
+import { useOpenTab } from "./tabs";
 import {
-  RemoteResp,
-  useGetDefinitionQuery,
   useGetRemoteQuery,
-  useGetSecretProvidersQuery,
-  useGetSecretRefMutation,
-  useSaveRemoteMutation,
-  useRemoveRemoteMutation,
-  useTestRemoteMutation,
   useDeinitMutation,
   useSaveConfigDeliveryMutation,
   useConfigSyncNowMutation,
@@ -61,24 +42,9 @@ const DELIVERY_OPTIONS: {
 const asMode = (v: string): ConfigDeliveryMode =>
   v === "replace" || v === "pull" || v === "runner" ? v : "off";
 
-const errText = (e: any): string =>
-  (e && e.data && e.data.error) || "Request failed";
-
-interface FormShape {
-  uri: string;
-  branch: string;
-  mode: "inline" | "reference";
-  key: string; // embedded SSH private key
-  password: string; // embedded HTTPS password/token
-  username: string; // HTTPS username
-  provider: string; // referenced provider
-  secretName: string; // referenced secret name
-}
-
-// The "Configure versioning" lateral panel. The remote's secret is entered/referenced inline in
-// the drawer (no credential dropdown, no popup): choose Embedded or Referenced with a radio, then
-// either type the secret or point at a gateway Secret Provider secret. The gateway owns a single
-// dedicated credential record for the config remote (auto-named), so no name is asked for.
+// The "Configure versioning" lateral panel: the gateway repository's delivery, layout and removal.
+// Its remote moved to the Remote tab (4.5.0), the platform's settings page, so each deployment
+// mode can have its own through the gateway's Resource Definitions menu.
 const ConfigDrawer = ({
   open,
   onClose,
@@ -87,104 +53,30 @@ const ConfigDrawer = ({
   onClose: () => void;
 }) => {
   const { data: remote } = useGetRemoteQuery();
-  const { data: providersResp } = useGetSecretProvidersQuery();
-  const [saveRemote, { isLoading: saving }] = useSaveRemoteMutation();
-  const [removeRemote] = useRemoveRemoteMutation();
-  const [getSecretRef] = useGetSecretRefMutation();
-  const [testRemote, { isLoading: testing }] = useTestRemoteMutation();
   const [deinit] = useDeinitMutation();
-  const [saveDelivery] = useSaveConfigDeliveryMutation();
+  const [saveDelivery, { isLoading: saving }] = useSaveConfigDeliveryMutation();
   const [syncNow, { isLoading: syncing }] = useConfigSyncNowMutation();
   const toasts = useToastNotifications();
+  const openTab = useOpenTab();
   const [deliveryMode, setDeliveryMode] = useState<ConfigDeliveryMode>("off");
   const { data: status } = useGetStatusQuery();
   const [saveLayout, { isLoading: switching }] = useSaveLayoutMutation();
   const layout: Layout =
-    status?.layout === "combined" ? "combined" : "separate";
+    status && status.layout === "combined" ? "combined" : "separate";
   const combined = layout === "combined";
   const [confirmLayout, setConfirmLayout] = useState(false);
   const [restoreHistory, setRestoreHistory] = useState(true);
   const [archiveLeftovers, setArchiveLeftovers] = useState(false);
   const [deliveryBranch, setDeliveryBranch] = useState("");
   const [deliveryEvery, setDeliveryEvery] = useState("300");
-  const modes = useModes();
-  const [editing, setEditing] = useEditing(open, remote?.from);
-  const { data: def } = useGetDefinitionQuery(
-    { type: "remote", collection: editing },
-    { skip: !open || !modes.length || !remote?.configured }
-  );
   const refused = status?.policy?.refused ?? {};
-
-  const form = useForm<FormShape>({
-    defaultValues: {
-      uri: "",
-      branch: DEFAULT_BRANCH,
-      mode: "inline",
-      key: "",
-      password: "",
-      username: "",
-      provider: "",
-      secretName: "",
-    },
-  });
-  const { watch, setValue, getValues, reset, handleSubmit } = form;
-  const uri = watch("uri");
-  const mode = watch("mode");
-  const key = watch("key");
-  const password = watch("password");
-  const provider = watch("provider");
-  const secretName = watch("secretName");
-
-  const [feedback, setFeedback] = useState<{
-    ok: boolean;
-    text: string;
-  } | null>(null);
-  const [confirmRemoveRemote, setConfirmRemoveRemote] = useState(false);
   const [confirmDeinit, setConfirmDeinit] = useState(false);
   const [dropRemote, setDropRemote] = useState(false);
-  // The saved reference, fetched separately (WRITE only). Kept here because the definition can
-  // load after it and its prefill would blank the provider and secret name again.
-  const [savedRef, setSavedRef] = useState<{
-    provider: string;
-    secretName: string;
-  } | null>(null);
-
-  // Prefill from the saved remote each time the drawer opens (embedded secrets stay blank), and
-  // from the selected definition when another one is chosen.
-  useEffect(() => {
-    if (!open || !def || def.collection !== editing) {
-      return;
-    }
-    const d = def as unknown as RemoteResp;
-    reset({
-      ...getValues(),
-      uri: d.uri || "",
-      branch: d.branch || DEFAULT_BRANCH,
-      mode: d.secretMode || "inline",
-      key: "",
-      password: "",
-      username: d.username || "",
-      provider: d.providerName || savedRef?.provider || "",
-      secretName: d.secretName || savedRef?.secretName || "",
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, def, editing]);
 
   useEffect(() => {
     if (!open || !remote) {
       return;
     }
-    reset({
-      uri: remote.uri || "",
-      branch: remote.branch || DEFAULT_BRANCH,
-      mode: remote.secretMode || "inline",
-      key: "",
-      password: "",
-      username: remote.username || "",
-      provider: remote.providerName || savedRef?.provider || "",
-      secretName: remote.secretName || savedRef?.secretName || "",
-    });
-    setFeedback(null);
     setDeliveryMode(asMode(remote.delivery?.mode || "off"));
     setDeliveryBranch(
       remote.delivery?.branch || remote.branch || DEFAULT_BRANCH
@@ -193,66 +85,10 @@ const ConfigDrawer = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // The referenced provider and secret come from a WRITE-only call, after the prefill above.
-  const shownMode =
-    (def as unknown as RemoteResp | undefined)?.secretMode ??
-    remote?.secretMode;
-  useEffect(() => {
-    if (!open || shownMode !== "reference") {
-      setSavedRef(null);
-      return;
-    }
-    getSecretRef({ collection: editing })
-      .unwrap()
-      .then((r) => {
-        setSavedRef({
-          provider: r.providerName || "",
-          secretName: r.secretName || "",
-        });
-        setValue("provider", r.providerName || "");
-        setValue("secretName", r.secretName || "");
-      })
-      .catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, editing, shownMode]);
-
   const configured = !!(remote && remote.configured);
-  const sshUri = !!uri && !uri.trim().toLowerCase().startsWith("http");
-  const credType: "SSH" | "HTTPS" = sshUri ? "SSH" : "HTTPS";
 
-  const providers = providersResp ? providersResp.providers : [];
-  const providerNames = providers.map((p) => p.name);
-  const noProviders = providerNames.length === 0;
-  const secretNames = providers.find((p) => p.name === provider)?.secrets || [];
-
-  // A secret is available to save when: referencing (provider + name), typing a new embedded
-  // secret, or editing an already-configured remote (a blank secret keeps the current one, so a
-  // branch change needs nothing re-entered; the gateway asks again only for a new host).
-  const hasSecret =
-    mode === "reference"
-      ? (!!provider && !!secretName) || configured
-      : (credType === "SSH" ? !!key : !!password) || configured;
-  const saveEnabled = !!uri.trim() && hasSecret;
-
-  const secretPayload = (d: FormShape) => ({
-    uri: d.uri.trim(),
-    mode: d.mode,
-    key: d.key,
-    password: d.password,
-    username: d.username.trim(),
-    providerName: d.provider,
-    secretName: d.secretName,
-  });
-
-  const onSave = handleSubmit(async (d) => {
-    setFeedback(null);
+  const onSave = async () => {
     try {
-      await saveRemote({
-        ...secretPayload(d),
-        branch: d.branch.trim() || DEFAULT_BRANCH,
-        saveTo: saveToParam(modes, editing),
-      }).unwrap();
-      // The remote record has to exist before a delivery can be set against it.
       await saveDelivery({
         mode: deliveryMode,
         branch: deliveryBranch.trim(),
@@ -260,181 +96,30 @@ const ConfigDrawer = ({
       }).unwrap();
       onClose();
     } catch (e: any) {
-      setFeedback({ ok: false, text: errText(e) });
-    }
-  });
-
-  const doTest = async () => {
-    setFeedback(null);
-    try {
-      const res: any = await testRemote(secretPayload(getValues())).unwrap();
-      setFeedback({
-        ok: true,
-        text:
-          res && res.fingerprint
-            ? `Connection OK. Server key ${res.fingerprint}.`
-            : "Connection OK.",
-      });
-    } catch (e: any) {
-      setFeedback({ ok: false, text: errText(e) });
+      errorToast(toasts, "Could not save the delivery")(e);
     }
   };
-
-  const defs = {
-    record: configured ? { type: "remote" as const } : undefined,
-    defined: def?.defined ?? remote?.defined ?? [],
-    editing,
-    onEditing: setEditing,
-  };
-
-  const keepHint = configured ? " (leave blank to keep current)" : "";
 
   const drawerBody = (
-    <Form context={form} className="gitcfg gitcfg-form">
+    <div className="gitcfg gitcfg-form">
       <Card title="Remote">
-        <Definitions {...defs} />
-        {modes.length ? (
-          <p className="gitcfg-hint">
-            Saved to the selected definition. For a per-mode secret, prefer a
-            Secret Provider reference.
-          </p>
-        ) : null}
-        <FormControlInput
-          name="uri"
-          id="cfg-uri"
-          label="Repository URI"
-          description={
-            combined
-              ? "SSH or HTTPS URL of the gateway repository's remote: config and every project."
-              : "SSH or HTTPS URL of the config repository's remote."
-          }
-          input={
-            <TextInput placeholder="ssh://git@host/org/gateway-config.git" />
-          }
-        />
-        <FormControlInput
-          name="branch"
-          id="cfg-branch"
-          label="Branch"
-          description="Remote branch to push to."
-          input={<TextInput placeholder={DEFAULT_BRANCH} />}
-        />
-        <FormControlInput
-          name="mode"
-          id="cfg-mode"
-          label="Secret"
-          input={
-            <Radio
-              name="cfg-mode"
-              value={mode}
-              radios={[
-                { label: "Embedded", value: "inline" },
-                { label: "Referenced", value: "reference" },
-              ]}
-              onChange={(_e: any, value: string) =>
-                setValue("mode", value as "inline" | "reference")
-              }
-            />
-          }
-        />
-        {credType === "HTTPS" ? (
-          <FormControlInput
-            name="username"
-            id="cfg-username"
-            label="Username"
-            input={<TextInput />}
-          />
-        ) : null}
-        {mode === "inline" ? (
-          <FormControlInput
-            name={credType === "SSH" ? "key" : "password"}
-            id="cfg-secret"
-            label={
-              (credType === "SSH" ? "Private key" : "Password / token") +
-              keepHint
-            }
-            input={
-              credType === "SSH" ? (
-                <TextArea placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" />
-              ) : (
-                <TextInput type="password" />
-              )
-            }
-          />
-        ) : (
-          <>
-            <FormControlInput
-              name="provider"
-              id="cfg-provider"
-              label="Provider"
-              disabled={noProviders}
-              otherProps={{ disabled: noProviders }}
-              description={
-                <span className="gitcfg-desc">
-                  Select a secret provider from the available options
-                  {noProviders ? (
-                    <span className="gitcfg-provider-error">
-                      No Providers Exist. Please Create one.
-                    </span>
-                  ) : null}
-                </span>
-              }
-              input={
-                <TextAutocomplete
-                  id="cfg-provider-ac"
-                  options={providerNames}
-                  value={provider}
-                  disabled={noProviders}
-                  placeholder="Select secret provider"
-                  onChange={(value: string) => {
-                    setValue("provider", value || "");
-                    setValue("secretName", "");
-                  }}
-                />
-              }
-            />
-            <FormControlInput
-              name="secretName"
-              id="cfg-secretname"
-              label="Secret name"
-              disabled={noProviders || !provider}
-              otherProps={{ disabled: noProviders || !provider }}
-              description="Select from the list or manually enter a secret name"
-              input={
-                <TextAutocomplete
-                  id="cfg-secretname-ac"
-                  freeSolo
-                  options={secretNames}
-                  value={secretName}
-                  disabled={noProviders || !provider}
-                  placeholder="Select or enter a secret name…"
-                  onChange={(value: string) =>
-                    setValue("secretName", value || "")
-                  }
-                />
-              }
-            />
-          </>
-        )}
-
-        {feedback ? (
-          <p className={feedback.ok ? "gitcfg-ok" : "gitcfg-err"}>
-            {feedback.text}
-          </p>
-        ) : null}
-
+        <p className="gitcfg-hint">
+          {configured
+            ? `${remote?.uri} (${remote?.branch || DEFAULT_BRANCH})`
+            : "No remote yet."}{" "}
+          The remote and its credential are set on the Remote tab, per
+          deployment mode if needed.
+        </p>
         <div className="gitcfg-actions">
-          <Button disabled={testing || !saveEnabled} onClick={doTest}>
-            {testing ? "Testing…" : "Test connection"}
+          <Button
+            colorClass="secondary"
+            onClick={() => {
+              onClose();
+              openTab("remote");
+            }}
+          >
+            Open the Remote tab
           </Button>
-          {configured ? (
-            <Button
-              colorClass="destructive"
-              onClick={() => setConfirmRemoveRemote(true)}
-            >
-              Remove remote…
-            </Button>
-          ) : null}
         </div>
       </Card>
 
@@ -599,7 +284,7 @@ const ConfigDrawer = ({
           Delete versioning
         </Button>
       </Card>
-    </Form>
+    </div>
   );
 
   return (
@@ -616,33 +301,14 @@ const ConfigDrawer = ({
           theme={DrawerTemplateColorTheme.GREY}
           primaryActionText={saving ? "Saving…" : "Save"}
           secondaryActionText="Cancel"
-          primaryDisabled={saving || !saveEnabled}
+          primaryDisabled={saving || !configured}
           onComplete={onSave}
           onCancel={onClose}
           onClose={onClose}
-          headerEndAdornment={<DefinitionMenu {...defs} />}
         >
           {drawerBody}
         </DrawerTemplate>
       </Drawer>
-
-      <Modal
-        open={confirmRemoveRemote}
-        type="confirm"
-        title="Remove remote"
-        modalConfig={{
-          confirmationText:
-            "Remove the configured remote? The local history is kept; only the push destination and its credential link are removed.",
-          primaryText: "Remove",
-          secondaryText: "Cancel",
-          warningGeneral: true,
-        }}
-        onClose={() => setConfirmRemoveRemote(false)}
-        onConfirm={() => {
-          setConfirmRemoveRemote(false);
-          removeRemote();
-        }}
-      />
 
       <Modal
         open={confirmLayout}

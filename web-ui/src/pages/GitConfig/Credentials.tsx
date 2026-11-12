@@ -8,10 +8,8 @@ import {
   useAddCredentialMutation,
   useCheckCredentialMutation,
   useGetCredentialsQuery,
-  useGetRunnerQuery,
   useGetSecretProvidersQuery,
   useRemoveCredentialMutation,
-  useSaveRunnerMutation,
   useGetStatusQuery,
   useGetDefinitionQuery,
 } from "./GitConfig.service";
@@ -35,7 +33,6 @@ type Mode = "inline" | "reference";
 
 const Credentials = () => {
   const { data: status } = useGetStatusQuery();
-  const combined = status?.layout === "combined";
   // Polls only while a check the gateway queued (after an add) has not reported yet.
   const [pending, setPending] = React.useState(false);
   const { data, isFetching } = useGetCredentialsQuery(undefined, {
@@ -48,30 +45,7 @@ const Credentials = () => {
   const { data: providers } = useGetSecretProvidersQuery();
   const [add] = useAddCredentialMutation();
   const [remove] = useRemoveCredentialMutation();
-  const { data: runner } = useGetRunnerQuery();
-  const [saveRunner] = useSaveRunnerMutation();
   const toasts = useToastNotifications();
-
-  // Runner access: the gateway-wide switch and token the runner authenticates with.
-  const [runnerOpen, setRunnerOpen] = React.useState(false);
-  const [accept, setAccept] = React.useState(false);
-  const [newToken, setNewToken] = React.useState(false);
-  // Shown once after it is generated; the gateway cannot return it again.
-  const [issued, setIssued] = React.useState<string | null>(null);
-  const openRunner = () => {
-    setAccept(runner?.enabled ?? false);
-    setNewToken(!runner?.hasToken);
-    setRunnerOpen(true);
-  };
-  const submitRunner = async () => {
-    const res = await saveRunner({
-      enabled: accept,
-      generateToken: newToken,
-      saveTo: saveToParam(modes, runnerEditing),
-    }).unwrap();
-    if (res.token) setIssued(res.token);
-    toasts.notifySuccess("Runner access saved");
-  };
 
   const [open, setOpen] = React.useState(false);
   // Set when the drawer edits an existing credential: same id, so its projects stay linked.
@@ -89,32 +63,18 @@ const Credentials = () => {
   const modes = useModes();
   const [editing, setEditing] = React.useState<CredentialOption | null>(null);
   const [collection, setCollection] = useEditing(open, editing?.from);
-  const [runnerEditing, setRunnerEditing] = useEditing(
-    runnerOpen,
-    runner?.from
-  );
   const credRef = editing
     ? { type: "credential" as const, id: editing.id, credType: editing.type }
     : undefined;
   const { data: def } = useGetDefinitionQuery(
-    { ...(credRef ?? { type: "runner" }), collection },
+    { ...(credRef ?? { type: "policy" }), collection },
     { skip: !open || !credRef || !modes.length }
-  );
-  const { data: runnerDef } = useGetDefinitionQuery(
-    { type: "runner", collection: runnerEditing },
-    { skip: !runnerOpen || !modes.length }
   );
   const credDefs = {
     record: credRef,
     defined: def?.defined ?? editing?.defined ?? [],
     editing: collection,
     onEditing: setCollection,
-  };
-  const runnerDefs = {
-    record: runner?.from ? { type: "runner" as const } : undefined,
-    defined: runnerDef?.defined ?? runner?.defined ?? [],
-    editing: runnerEditing,
-    onEditing: setRunnerEditing,
   };
   // Another definition chosen: its fields replace the form's (the secret stays blank).
   React.useEffect(() => {
@@ -123,12 +83,6 @@ const Credentials = () => {
     if (typeof def.host === "string") setHost(def.host);
     if (typeof def.username === "string") setUsername(def.username);
   }, [open, def, collection]);
-  React.useEffect(() => {
-    if (!runnerOpen || !runnerDef || runnerDef.collection !== runnerEditing)
-      return;
-    setAccept(!!runnerDef.enabled);
-    setNewToken(!runnerDef.hasToken);
-  }, [runnerOpen, runnerDef, runnerEditing]);
 
   const providerList = providers?.providers ?? [];
   const secrets =
@@ -476,66 +430,6 @@ const Credentials = () => {
           </table>
         </ScrollBox>
       )}
-
-      <div className="gitcfg-section-head">
-        <h4>Runner access</h4>
-        <div className="gitcfg-actions">
-          <Button colorClass="secondary" onClick={openRunner}>
-            Edit
-          </Button>
-        </div>
-      </div>
-      <p className="gitcfg-hint">
-        {runner?.enabled ? (
-          <span className="gitcfg-ok">Accepting runner deliveries</span>
-        ) : (
-          <span className="gitcfg-off">Off</span>
-        )}
-        {" · "}
-        {runner?.hasToken ? "token set" : "no token"}
-      </p>
-      {issued ? (
-        <div className="gitcfg-token-once">
-          <strong>Copy this token now — it is not shown again.</strong>
-          <Snippet text={issued} />
-        </div>
-      ) : null}
-
-      <SettingsDrawer
-        open={runnerOpen}
-        title="Runner access"
-        onClose={() => setRunnerOpen(false)}
-        onSave={submitRunner}
-        errorTitle="Could not save runner access"
-        defs={runnerDefs}
-      >
-        <Definitions {...runnerDefs} />
-        <label className="gitcfg-check">
-          <input
-            type="checkbox"
-            checked={accept}
-            onChange={(e) => setAccept(e.target.checked)}
-          />
-          <span>Accept deliveries from a runner</span>
-        </label>
-        <label className="gitcfg-check">
-          <input
-            type="checkbox"
-            checked={newToken}
-            onChange={(e) => setNewToken(e.target.checked)}
-          />
-          <span>
-            {runner?.hasToken
-              ? "Generate a new token — the current one stops working"
-              : "Generate a token"}
-          </span>
-        </label>
-        <p className="gitcfg-hint">
-          {combined
-            ? "Repo updates are the gateway's: set Configure versioning › Delivery to Runner — repo updates. A release still needs the project set to Runner — release on the Projects tab."
-            : "Each project still needs a runner delivery on the Projects tab."}
-        </p>
-      </SettingsDrawer>
     </div>
   );
 };
@@ -639,7 +533,7 @@ function reach(c: CredentialOption) {
 }
 
 /** The token, with a copy button: retyping one is how it breaks. */
-function Snippet({ text }: { text: string }) {
+export function Snippet({ text }: { text: string }) {
   const toasts = useToastNotifications();
   return (
     <div className="gitcfg-snippet">

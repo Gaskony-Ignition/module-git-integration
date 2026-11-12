@@ -5,13 +5,11 @@ import AuditSetting from "./AuditSetting";
 import {
   FormContent,
   RESOURCE,
-  ResourceModeSingletonPage,
   useConfigurationModeContext,
 } from "../../gatewayLib";
-import { OnGatewayStore, OnOwnStore } from "../../store/bridge";
+import SingletonTab from "./SingletonTab";
 import { useFormContext } from "react-hook-form";
 import { DeliveryKind, PolicyFields } from "./GitConfig.service";
-import { useNoBackupMenu, useSingletonSave } from "./singleton";
 import { useSavePolicyMutation } from "./GitConfig.service";
 
 const FLAGS: [keyof PolicyFields, string][] = [
@@ -197,13 +195,11 @@ const PolicyForm = () => {
         </section>
         <section id="git-policy-audit">
           <Card title="AUDIT">
-            <OnOwnStore>
-              <table className="gitcfg-table">
-                <tbody>
-                  <AuditSetting />
-                </tbody>
-              </table>
-            </OnOwnStore>
+            <table className="gitcfg-table">
+              <tbody>
+                <AuditSetting />
+              </tbody>
+            </table>
           </Card>
         </section>
       </div>
@@ -214,30 +210,21 @@ const PolicyForm = () => {
 // The Git policy on the platform's settings page: Save Changes and the Resource Definitions menu
 // (Create Override, Move Definition, Remove Override) as on the gateway's own settings.
 const Policy = () => {
-  useNoBackupMenu();
   const [savePolicy] = useSavePolicyMutation();
-  const save = useSingletonSave("policy", (config, saveTo) =>
-    savePolicy({ ...fromForm(config), saveTo }).unwrap()
-  );
   return (
-    <div className="gitcfg-singleton">
-      <OnGatewayStore>
-        <ResourceModeSingletonPage
-          resourceType={RESOURCE.policy}
-          title="Git Policy"
-          configSchema={schema}
-          categories={CATEGORIES}
-          transformData={(data: any) => ({
-            ...data,
-            config: toForm(data?.config),
-          })}
-          handleSubmit={save.handleSubmit}
-          {...save.callbacks}
-        >
-          <PolicyForm />
-        </ResourceModeSingletonPage>
-      </OnGatewayStore>
-    </div>
+    <SingletonTab
+      type="policy"
+      resourceType={RESOURCE.policy}
+      title="Git Policy"
+      schema={schema}
+      categories={CATEGORIES}
+      transformData={(data: any) => ({ ...data, config: toForm(data?.config) })}
+      send={(config, saveTo) =>
+        savePolicy({ ...fromForm(config), saveTo }).unwrap()
+      }
+    >
+      <PolicyForm />
+    </SingletonTab>
   );
 };
 
