@@ -23,9 +23,10 @@ wrapper.java.additional.20=-Dignition.config.mode=Prod
 
 ## The Git policy
 
-**Versioning › Policy** lists what the module may do on this gateway and, once at the top,
-where the settings come from ("Settings from Prod"). A value is red only when it is the less safe
-choice (Insecure remotes: On).
+**Versioning › Policy** is the gateway's own settings page, like Gateway Settings: the settings,
+a "?" beside each for what it allows, and **Save Changes**. When more than one collection defines
+the policy, the Deployment Modes bar says how many and **Select Definition to Configure** picks
+the one the form shows and Save Changes writes.
 
 | Setting | Off means |
 | --- | --- |
@@ -55,18 +56,29 @@ policy).*
 
 ![The layout switch disabled, with the reason, in deployment mode Prod](images/versioning-policy-refused.png)
 
-## Per-mode remotes and credentials
+## Per-mode policy, remote, runner, deliveries and credentials
 
-The drawers for the policy, the config remote, a credential, a project's delivery and runner
-access work like the platform's own resource pages. The kebab (⋮) in the drawer's header has,
-under **RESOURCE DEFINITIONS**, **Create Override** — pick any mode created on this gateway, not
-only the active one — and **Remove Override** for the definition being edited. Once a record has
-more than one definition, **Select Definition to Configure** picks which one the drawer shows and
-Save writes; the one this gateway runs on is marked "(active)". Lists say which modes override each
-record ("Overridden in Prod"). A record that exists only in a mode (a credential added there) is
-listed too, marked "Only in Prod"; a new record's drawer asks which collection to create it in.
+The **Policy**, **Remote** (the gateway repository's remote and its secret) and **Runner** tabs
+work like the gateway's own settings pages. The ⋮ beside Save Changes has, under **RESOURCE
+DEFINITIONS**:
 
-![The policy drawer on Prod's definition, with the kebab's Create Override and Remove Override](images/versioning-save-to.png)
+- **Create Override** — copies the definition shown into another collection: any mode created on
+  this gateway, not only the active one (or `local`).
+- **Move Definition** — moves the definition shown to another collection. Not offered for the
+  definition the gateway is running on.
+- **Remove Override** — deletes the definition shown, so that mode falls back to core.
+
+These are the platform's own actions, not the module's; the module adds the audit row and
+refreshes its tabs. The menu's *Add Backup Version* (a redundant pair's backup values) is hidden:
+these records have none.
+
+On the **Projects** tab, each project with a delivery has the same ⋮ at the end of its row,
+acting on the definition in use; the project's Edit drawer has it too, with **Select Definition
+to Configure** when there is more than one. Credentials work the same way in their drawer. Lists
+say which modes override a record ("Overridden in Prod"); a record that exists only in a mode is
+marked "Only in Prod", and a new record's drawer asks which collection to create it in.
+
+![The Policy tab on Prod's definition, with the ⋮ menu's Resource Definitions](images/versioning-save-to.png)
 
 The same records can also be overridden from **Platform › Modes** or the
 gateway's `resources/copy` API; the module reads whichever value the active
@@ -90,7 +102,10 @@ other record of this module out:
 
 So a Prod override of the policy written on a Dev gateway reaches Prod in the
 branch it follows (Sync — replace or pull), while remotes, credentials and
-deliveries stay on the gateway they were set on. An older repository
+deliveries stay on the gateway they were set on. Since 4.5.0 the policy is a platform singleton,
+`<collection>/com.operametrix.ignition.git/git-policy/config.json`; start-up moves an older
+gateway's `.../git-policy/policy/` (and the remote's and runner's) there once, in core and every
+mode, and the same two lines cover both places. An older repository
 has its one `**/com.operametrix.ignition.git/` line rewritten into these two
 lines once, at startup, and committed; nothing else in the file is touched, and
 a later edit of those lines is kept (marker `.git-module-policy-versioned` in
@@ -100,15 +115,16 @@ the data directory).
 
 1. On every gateway, create the modes and set the active one in
    `ignition.conf` (above).
-2. On Dev (mode `Dev`): open **Policy**, leave core as it is. Configure the
-   remote with a token that can push, **Save to: core**.
-3. Still on Dev, open **Policy › Edit policy**, ⋮ › **Create Override** › Prod, and set Prod's
-   values: Push off, Commit from the Designer off, branches and layout off, deliveries Sync —
-   replace only, allowed hosts `github.com`. Save. The config repository commits it; push, and the
-   override is in the branch. (The gateway's `resources/copy` API does the same, for scripting.)
-4. On Prod (mode `Prod`): Sync — replace from that branch brings the policy in.
-   Configure the remote with a read-only token, **Save to: Prod**, ideally as a
-   Secret Provider reference.
+2. On Dev (mode `Dev`): open **Policy** and leave core as it is. On **Remote**, set the remote
+   with a token that can push and Save Changes (core's definition).
+3. Still on Dev, **Policy** › ⋮ › **Create Override** › Prod, then with Prod's definition
+   selected set Push off, Commit from the Designer off, branches and layout off, deliveries
+   Sync — replace only, allowed hosts `github.com`, and Save Changes. The config repository
+   commits it; push, and the override is in the branch. (The gateway's `resources/copy` API does
+   the same, for scripting.)
+4. On Prod (mode `Prod`): Sync — replace from that branch brings the policy in. On **Remote**,
+   ⋮ › **Create Override** › Prod, then set a read-only token on Prod's definition, ideally as a
+   Secret Provider reference, and Save Changes.
 
 ## Remotes and credentials go to one host only
 

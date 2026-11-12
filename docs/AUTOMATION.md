@@ -176,8 +176,8 @@ reach alone.
 
 Once per gateway:
 
-1. **Credentials → Runner access → Edit**: tick *Accept deliveries from a
-   runner* and *Generate a token*, Save. Copy the token — it is shown once, and
+1. **Runner** tab: tick *Accept deliveries from a runner* and *Generate a
+   token*, Save Changes. Copy the token — it is shown once, and
    a new one stops the old one working. Save it as an Actions secret in every
    repository that deploys here.
 2. A GitHub self-hosted runner on a machine that can reach the gateway, with a

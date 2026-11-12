@@ -99,6 +99,11 @@ No Vision client scope.
   (`ProjectScope`, `Repo.inProject`/`toProjectPath`); writers hold
   `DataDirGitManager.lock()`. Combined commits use `--only`, never for an
   `rm --cached` (it re-adds from disk).
+- **The Policy, Remote and Runner tabs are gateway-lib's `ResourceModeSingletonPage`**
+  (`@inductiveautomation/ignition-gateway-lib`, a webpack external). It reads the gateway app's
+  Redux store (`gateway`, `permissions`, `userSession` CSRF, its `BaseApi`), so it is rendered under
+  `OnGatewayStore` and its form under `OnOwnStore` (`web-ui/src/store/bridge.tsx`). It only works
+  for `.singleton()` types; Save Changes is routed to the module's own route (`singleton.ts`).
 - **Modes (`docs/MODES.md`):** records go through `ModeStore` (`?saveTo=` any mode);
   credentials only via `GitManager.setAuthentication*` (policy, host checks);
   config remote ops use `authOrigin`, so `origin` follows the mode's record.

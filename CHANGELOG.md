@@ -11,6 +11,23 @@ upstream's; everything below is this fork.
   reference is shown, and a save with it left blank keeps it; a new host still asks for it.
 
 ### Changed
+- Deployment-mode overrides now use the gateway's own Resource Definitions panel. The Policy tab,
+  and the new **Remote** and **Runner** tabs, are the platform's settings page: Save Changes,
+  "Select Definition to Configure", and the ⋮ menu's **Create Override**, **Move Definition** and
+  **Remove Override**, as on Gateway Settings or a historian. Each project with a delivery gets the
+  platform's row ⋮ on the Projects tab, and the project and credential drawers' menus gain Move
+  Definition. The module's own "Save to" and definition picker are gone from those three records.
+- The gateway repository's remote moved from Configure versioning to the **Remote** tab, and Runner
+  access from the Credentials tab to the **Runner** tab. Configure versioning keeps delivery,
+  layout and Delete versioning. Saves still go through the module, so a blank secret keeps the
+  definition's, a new host asks again, and hosts are checked against the policy.
+- The policy, the gateway remote and the runner settings are stored as platform singletons
+  (`<collection>/com.operametrix.ignition.git/git-policy/` instead of `.../git-policy/policy/`).
+  At start-up each one is moved, in core and every mode, then the config is rescanned; the
+  versioned-policy `.gitignore` lines already cover the new place. If the move fails the policy
+  reads as locked until it succeeds.
+- The gateway's audit profile gets a row for an override created, moved or removed from the
+  platform's menu too.
 - The gateway repository's `.gitignore` keeps the module's own lines between
   `# >>> Git Integration` and `# <<< Git Integration` markers, and the never-versioned key and
   certificate lines in a second marked block that is always moved back to the end of the file.

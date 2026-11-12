@@ -25,14 +25,6 @@ export const useModes = (): string[] => {
   return data?.modes ?? [];
 };
 
-/** "from core" / "from Prod": which collection a record's value comes from. */
-export const FromTag = ({ from }: { from?: string | null }) =>
-  from ? (
-    <span className={`gitcfg-from${from === "core" ? "" : " is-mode"}`}>
-      from {from}
-    </span>
-  ) : null;
-
 /**
  * The modes that define a record, for a list row: "Prod, Dev" with the effective one marked.
  * Nothing when only core defines it.

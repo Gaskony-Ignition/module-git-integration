@@ -373,12 +373,6 @@ export interface IgnoreEditReq {
   text?: string;
 }
 
-export interface RunnerConfig {
-  enabled: boolean;
-  hasToken: boolean;
-  from?: string | null;
-  defined?: string[];
-}
 export interface EventLogEntry {
   type: string;
   outcome: string;
@@ -702,10 +696,6 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: (body) => ({ url: `${BASE}/sync-now`, method: "POST", body }),
       invalidatesTags: ["events", "projects"],
     }),
-    getRunner: builder.query<RunnerConfig, void>({
-      query: () => `${BASE}/runner`,
-      providesTags: ["runner"],
-    }),
     // The response carries a new token exactly once, when generateToken is set; nothing reads it
     // back — a lost token is replaced, not recovered.
     saveRunner: builder.mutation<
@@ -958,7 +948,6 @@ export const {
   useClearEventsMutation,
   useSaveDeliveryMutation,
   useSyncNowMutation,
-  useGetRunnerQuery,
   useSaveRunnerMutation,
   useSetProjectCredentialMutation,
   useSavePolicyMutation,

@@ -21,6 +21,7 @@ are the two runner routes — see Delivery below.
 | Delivery & logs | `POST /delivery` (`ignitionUser` only the caller or the owner already set; `keepProjectProperties`, absent = unchanged), `/sync-now` (and `/config-sync-now`: `outcome` ok, warning or failed), `/events-clear`, `/runner`, `/runner-sync`, `/runner-release` |
 | Modes & policy (4.1.0) | `POST /policy`, `/mode-override` (Create Override: `mode`, `from`), `/mode-reset` (Remove Override: `mode`, blank = active); each takes `type` policy, remote, runner, sync + `project`, credential + `id`/`credType`. `GET /definition` (same keys + `collection`) answers one collection's definition in the shape of the record's own GET, plus `defined`. `GET /status` carries `policy` and `modes` |
 | 4.4.0 | `POST /project-add-peek` (branches, default, suggested name), `/project-add` (`name`, `url`, `branch`, credential, `delivery`), `/config-fetch`, `/config-pull`, `/config-join`, `/abort-merge` (4.4.3: undoes a merge left open in the gateway repository; `GET /status` carries `midOperation` while one is); `/deinit` takes `removeRemote`, `/layout` `archiveLeftovers`; `GET /remote` carries `behind` and `unrelated` |
+| Modes (4.5.0) | `POST /override-audit` (`type`, `action` create/move/remove, `from`, `to`): the audit row after the platform's own Create Override / Move Definition / Remove Override, written only when the record's definitions show it happened. `GET /projects` carries `syncId` (the sync record's resource name) |
 | Audit (4.4.0) | `GET /audit` (on/off, profile, `gatewayHasProfile`, the profiles), `POST /audit` (`enabled`, `profile`; blank follows the gateway's) |
 | Branch names (4.2.0) | `POST /branch-rename-master` (`project` or `repo:"config"`); `GET /remote` and `/projects` carry `renameMaster` when it applies |
 
@@ -41,13 +42,20 @@ gateway-side, stored encrypted, and returned exactly once.
 ## Persisted resource types
 
 Ten types on the 8.3 resource/config system; each `*Record` is a mutable
-DTO façade over a `NamedResourceHandler` whose config is a nested Java
-`record`. The config remote, sync, runner, SSH key, HTTPS credential and policy
-metas come from `ModeStore.overridable` (`ResourceActionSet.DEFAULT` plus a route
-delegate), so a deployment mode can override them; saves go through
-`ModeStore.save`, which writes to the route's `saveTo` collection — creating the
-override there, or building the modify itself when the target is overridden
-above it — and `ModeStore.reset` deletes the active mode's copy.
+DTO façade over a resource handler whose config is a nested Java `record`. The sync, SSH key and
+HTTPS credential metas come from `ModeStore.overridable` (`ResourceActionSet.DEFAULT` plus a route
+delegate) over a `NamedResourceHandler`; the policy, config remote and runner (4.5.0) from
+`ModeStore.singleton` (the same plus `.singleton()`) over a `SingletonResourceHandler`, stored at
+`<collection>/com.operametrix.ignition.git/<type>/`, which is what the platform's
+`resources/singleton` route and its Resource Definitions panel need. The remote and runner metas
+carry a default, so the platform writes a blank one to core at start-up (a blank remote URI reads
+as none); the policy's does not, so nothing can be written over one not yet moved
+(`GitPolicyRecord.ensureCore` writes it). Saves go through `ModeStore.save`/`saveSingleton`, which
+write to the route's `saveTo` collection — creating the override there, or building the modify
+itself when the target is overridden above it — and `ModeStore.removeOverride` deletes one mode's
+copy. `records.legacy.SingletonMigration` moves 4.4's named copies (`git-policy/policy/`,
+`git-config-remote/1/`, `git-runner/runner/`) up a level in every collection at start-up, before
+any handler starts, then requests a config scan; a failed move leaves the policy locked.
 
 | Record | Holds |
 | --- | --- |

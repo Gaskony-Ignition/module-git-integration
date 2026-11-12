@@ -99,13 +99,15 @@ changes in; nothing is pushed.
 Release and replace keep the gateway's own project properties (identity provider, default
 database) unless **Keep this gateway's project properties** is unticked for that project.
 
-Runner deliveries need **Credentials → Runner access** switched on and a token.
+Runner deliveries need the **Runner** tab's *Accept deliveries from a runner* on and a token.
 Repo updates and sync need a remote and a credential.
 
 **Deployment modes** — on an 8.3 gateway running in a mode (Dev, Prod), the
 **Policy** tab sets what the module may do there: push, Designer commits,
-branch and layout switches, which deliveries, which remote hosts. Remotes,
-credentials and deliveries can be saved for one mode only. Only the policy is
+branch and layout switches, which deliveries, which remote hosts. The Policy, Remote and
+Runner tabs are the gateway's own settings page, so a mode gets its own definition from the ⋮
+menu's Create Override, Move Definition and Remove Override, as anywhere else on the gateway;
+project deliveries and credentials have the same menu. Only the policy is
 versioned, so a Prod override written on Dev travels with the branch. For a
 stricter site, **Only deliver commits merged on GitHub** makes every delivery
 refuse a branch tip that GitHub did not sign (a pull request merged on GitHub).

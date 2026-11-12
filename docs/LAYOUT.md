@@ -10,7 +10,7 @@ either way at any time.
 | Repositories | One per project at `projects/<name>`, plus the config repository at the data directory | One at the data directory, holding `config/` and `projects/` |
 | Designer commit, diff, history, revert, badges | That project's repository | Limited to `projects/<name>/`; a commit never takes config or another project with it |
 | Branches, checkout, pull, push, fetch | Per project | Gateway-wide: checking out a branch switches config and every project, then reloads them |
-| Remote and credential | Per project, in the Designer's Remotes popup | One, set in Configure versioning; the Designer shows it read-only |
+| Remote and credential | Per project, in the Designer's Remotes popup | One, set on the Remote tab; the Designer shows it read-only |
 | Delivery | Per project on the Projects tab | Pulls set once in Configure versioning › Delivery (Sync — pull, Sync — replace, Runner — repo updates); a project keeps Off or Runner — release |
 
 **Branches.** One gateway has one checked-out branch per project (Combined: one for
