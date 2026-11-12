@@ -5,12 +5,10 @@ resource types, manager classes and Designer popups.
 
 ## Project overview
 
-A Java module for Ignition 8.3 that embeds a Git client into the Designer:
-commit, push, pull with conflict resolution, branches, and snapshotting
-gateway resources (tags/themes/images) into the project. It also versions the
-gateway **data directory** (config-as-code) in a separate repo, via a gateway
-page (Platform → System → "Versioning") with auto-commit, history and restore.
-Built by AXONE-IO and Operametrix; this is Gaskony's fork.
+An Ignition 8.3 module: a Git client in the Designer (commit, push, pull,
+conflicts, branches, tag/theme/image snapshots) and versioning of the gateway
+**data directory** from Platform → System → Versioning (auto-commit, history,
+restore). Gaskony's fork of AXONE-IO and Operametrix's module.
 
 ## Build commands
 
@@ -18,8 +16,7 @@ Built by AXONE-IO and Operametrix; this is Gaskony's fork.
 rm -rf build/moduleContent && ./gradlew build   # -> build/GitIntegration-<ver>.modl
 ```
 
-Clear `build/moduleContent` first: after a version bump it keeps the old
-jars and the `.modl` ships both. Prettier violations fail webpack — run
+Clear `build/moduleContent` first, or the `.modl` ships old jars too. Prettier violations fail webpack — run
 `node_modules/.bin/prettier --write "src/**/*.{ts,tsx}"` in `web-ui/`.
 
 Tests: `./gradlew test` covers the pure branch, layout, Git ignore, policy and
