@@ -256,6 +256,10 @@ async function sep1() {
     const s = await api('POST', '/sync-now', { project: 'Example_A' });
     return pass(ok(d) && ok(s) && fileIn(`projects/Example_A/${CODE}`).includes("'v2'"), `delivery ${d.status} ${d.text.slice(0, 120)} sync ${s.text.slice(0, 200)}`);
   });
+  await check('a delivery cannot authenticate as another user', async () => {
+    const r = await api('POST', '/delivery', { project: 'Example_A', delivery: 'sync-pull', branch: 'main', intervalSeconds: 3600, ignitionUser: 'someone-else' });
+    return pass(r.status === 403 && /someone-else/.test(r.text), `${r.status} ${r.text.slice(0, 150)}`);
+  });
   await check('switch branch refused against the followed branch', async () => {
     remoteCommit('dev', 'example-a', `git checkout -qb feature-1 && printf "def hello():\\n\\treturn 'feature'\\n" > ${CODE} && git commit -qam feature`, 'git push -q origin feature-1');
     const s = await api('POST', '/sync-now', { project: 'Example_A' });

@@ -363,7 +363,9 @@ const Projects = () => {
                           syncNow({ project: p.name })
                             .unwrap()
                             .then((r) =>
-                              toasts.notifySuccess(`${p.name}: ${r.result}`)
+                              r.outcome === "ok"
+                                ? toasts.notifySuccess(`${p.name}: ${r.result}`)
+                                : toasts.notifyError(`${p.name}: ${r.result}`)
                             )
                             .catch(errorToast(toasts, "Sync failed"))
                         }
@@ -539,7 +541,7 @@ const Projects = () => {
                   />
                 ) : null}
                 <TextInput
-                  label="Authenticate as — whose stored credential pulls; empty is you"
+                  label="Authenticate as — whose stored credential pulls; empty is you (only you or the user already set)"
                   value={user}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setUser(e.target.value)

@@ -746,6 +746,13 @@ ul.gitcfg-hint {
   white-space: nowrap;
 }
 
+.gitcfg-cell-oneline {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .gitcfg-proj-remote {
   max-width: 28rem;
   overflow: hidden;

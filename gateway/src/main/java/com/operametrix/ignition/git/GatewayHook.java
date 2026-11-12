@@ -427,6 +427,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleSyncNow).mount();
 
+        routes.newRoute("/abort-merge").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
+                .requirePermission(PermissionType.WRITE)
+                .handler(this::handleAbortMerge).mount();
+
         routes.newRoute("/restore").method(HttpMethod.POST).type(RouteGroup.TYPE_JSON)
                 .requirePermission(PermissionType.WRITE)
                 .handler(this::handleRestore).mount();
@@ -772,7 +776,26 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
             o.addProperty("dirty", dirty);
             o.add("changes", changes);
+            // A merge left open in the gateway repository (a Designer closed mid-conflict) blocks
+            // config commits and pulls until it is completed or aborted.
+            String busy = DataDirGitManager.midOperationNow();
+            if (busy != null) {
+                o.addProperty("midOperation", busy);
+            }
             return o.toString();
+        } catch (Exception e) {
+            return error(resp, e);
+        }
+    }
+
+    private Object handleAbortMerge(RequestContext req, HttpServletResponse resp) {
+        try {
+            DataDirGitManager.abortOpenMerge();
+            String[] hb = DataDirGitManager.headAndBranch();
+            GitEvents.fire(GitEvent.of(GitEvent.PULL).config().user(webUser(req).orElse(req.getActor()))
+                    .branch(hb[1]).commit(hb[0]).message("Aborted the merge left open in the gateway repository")
+                    .success());
+            return ok();
         } catch (Exception e) {
             return error(resp, e);
         }
@@ -798,6 +821,27 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             o.addProperty("projects", r.projects().size());
             o.addProperty("restored", r.restored().size());
             o.addProperty("archived", r.archived().size());
+            if (!"combined".equals(layout)) {
+                // A new repository has no remote, so a Sync delivery kept from before would fail on
+                // every interval until one is set.
+                List<String> noRemote = new ArrayList<>();
+                for (GitSyncRecord sync : GitSyncRecord.listEnabled()) {
+                    try {
+                        String url = GitManager.getRemoteUrl(GitManager.repoFor(sync.getProject()).root(),
+                                sync.getRemoteName());
+                        if (url == null || url.isBlank()) {
+                            noRemote.add(sync.getProject());
+                        }
+                    } catch (Exception e) {
+                        noRemote.add(sync.getProject());
+                    }
+                }
+                if (!noRemote.isEmpty()) {
+                    o.addProperty("warning", "Sync delivery is on for " + String.join(", ", noRemote)
+                            + ", but the repository has no remote now. Add one in the Designer's Remotes,"
+                            + " or set the delivery to Off on the Projects tab.");
+                }
+            }
             return o.toString();
         } catch (Exception e) {
             return error(resp, e);
@@ -984,7 +1028,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 throw new RuntimeException("Nothing to rename: the repository is not on a lone master branch"
                         + " behind a remote with another name.");
             }
-            synchronized (gateway ? DataDirGitManager.lock() : new Object()) {
+            synchronized (gateway ? DataDirGitManager.lock() : GitManager.lockFor(GitManager.repoFor(project.trim()))) {
                 try (org.eclipse.jgit.api.Git git = GitManager.getGit(root)) {
                     MasterRename.rename(git, to, "origin");
                 }
@@ -1038,7 +1082,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
 
             BranchSwitch.Result r;
-            synchronized (gateway ? DataDirGitManager.lock() : new Object()) {
+            // Separate: the project's own lock, which its Designer and sync timer take too.
+            synchronized (gateway ? DataDirGitManager.lock() : GitManager.lockFor(GitManager.repoFor(project.trim()))) {
+                if (gateway) {
+                    DataDirGitManager.refuseMidOperation();
+                }
                 ConfigAutoCommitter.hold(30_000);
                 try (org.eclipse.jgit.api.Git git = GitManager.getGit(root)) {
                     r = BranchSwitch.switchTo(git, branch, followed, where, gateway, DIRTY,
@@ -1359,6 +1407,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             boolean ssh = !uri.trim().toLowerCase().startsWith("http");
             boolean reference = "reference".equalsIgnoreCase(optString(body, "mode"));
             GitConfigRemoteRecord existing = GitConfigRemoteRecord.get();
+            // A stored secret was given for the old host; it is not sent to a new one unasked.
+            boolean newHost = existing != null && existing.getUri() != null
+                    && !hostOf(existing.getUri()).equalsIgnoreCase(hostOf(uri));
+            String again = newHost ? " The host changed from " + hostOf(existing.getUri()) + " to " + hostOf(uri)
+                    + ", so enter it again." : "";
             long sshKeyId = 0, httpsCredentialId = 0;
             if (ssh) {
                 GitUserSshKeyRecord rec = existing != null && existing.getSshKeyId() > 0
@@ -1374,8 +1427,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     String key = optString(body, "key");
                     if (key != null && !key.isBlank()) {
                         rec.setSSHKey(key);
-                    } else if (!rec.hasSecret()) {
-                        throw new RuntimeException("A private key is required.");
+                    } else if (newHost || !rec.hasSecret()) {
+                        throw new RuntimeException("A private key is required." + again);
                     }
                 }
                 rec.save();
@@ -1396,8 +1449,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     String password = optString(body, "password");
                     if (password != null && !password.isBlank()) {
                         rec.setPassword(password);
-                    } else if (!rec.hasSecret()) {
-                        throw new RuntimeException("A password/token is required.");
+                    } else if (newHost || !rec.hasSecret()) {
+                        throw new RuntimeException("A password/token is required." + again);
                     }
                 }
                 rec.save();
@@ -1506,43 +1559,44 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             boolean ssh = uri != null && !uri.trim().toLowerCase().startsWith("http");
             boolean reference = "reference".equalsIgnoreCase(optString(body, "mode"));
             String username = optString(body, "username");
-            SshTransportConfigCallback.lastFingerprint = null;
-            if (reference) {
-                // Resolve the referenced secret to plaintext for the test — only one a stored
-                // credential already uses for this host, never any provider secret at any URL.
-                SecretConfig cfg = referencedSecret(body);
-                if (!referenceInUse(cfg, uri, ssh)) {
-                    throw new PolicyGate.Refused("Only a secret reference a saved credential already uses for"
-                            + " this host can be tested. Save the remote first, or test with the secret typed in.",
-                            "reference not in use");
-                }
-                Secret<?> secret = Secret.create(context, cfg);
-                Plaintext pt = secret.getPlaintext();
-                try {
-                    String plain = pt.getAsString(java.nio.charset.StandardCharsets.UTF_8);
-                    DataDirGitManager.testRemoteRaw(uri, ssh ? plain : null, username, ssh ? null : plain);
-                } finally {
-                    pt.clear();
-                }
-            } else {
-                String key = optString(body, "key");
-                String password = optString(body, "password");
-                String secretVal = ssh ? key : password;
-                if (secretVal == null || secretVal.isBlank()) {
-                    // Editing without re-entering the embedded secret: test the saved credential.
-                    GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
-                    if (remote == null) {
-                        throw new RuntimeException("Enter a secret to test, or save the remote first.");
+            String fingerprint = SshTransportConfigCallback.captureFingerprint(() -> {
+                if (reference) {
+                    // Resolve the referenced secret to plaintext for the test — only one a stored
+                    // credential already uses for this host, never any provider secret at any URL.
+                    SecretConfig cfg = referencedSecret(body);
+                    if (!referenceInUse(cfg, uri, ssh)) {
+                        throw new PolicyGate.Refused("Only a secret reference a saved credential already uses for"
+                                + " this host can be tested. Save the remote first, or test with the secret typed in.",
+                                "reference not in use");
                     }
-                    DataDirGitManager.testRemote(uri, remote.getSshKeyId(), remote.getHttpsCredentialId());
+                    Secret<?> secret = Secret.create(context, cfg);
+                    Plaintext pt = secret.getPlaintext();
+                    try {
+                        String plain = pt.getAsString(java.nio.charset.StandardCharsets.UTF_8);
+                        DataDirGitManager.testRemoteRaw(uri, ssh ? plain : null, username, ssh ? null : plain);
+                    } finally {
+                        pt.clear();
+                    }
                 } else {
-                    DataDirGitManager.testRemoteRaw(uri, ssh ? key : null, username, ssh ? null : password);
+                    String key = optString(body, "key");
+                    String password = optString(body, "password");
+                    String secretVal = ssh ? key : password;
+                    if (secretVal == null || secretVal.isBlank()) {
+                        // Editing without re-entering the embedded secret: test the saved credential.
+                        GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
+                        if (remote == null) {
+                            throw new RuntimeException("Enter a secret to test, or save the remote first.");
+                        }
+                        DataDirGitManager.testRemote(uri, remote.getSshKeyId(), remote.getHttpsCredentialId());
+                    } else {
+                        DataDirGitManager.testRemoteRaw(uri, ssh ? key : null, username, ssh ? null : password);
+                    }
                 }
-            }
+            });
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
-            if (ssh && SshTransportConfigCallback.lastFingerprint != null) {
-                o.addProperty("fingerprint", SshTransportConfigCallback.lastFingerprint);
+            if (ssh && fingerprint != null) {
+                o.addProperty("fingerprint", fingerprint);
             }
             return o.toString();
         } catch (Exception e) {
@@ -2099,11 +2153,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
     private Object handleConfigSyncNow(RequestContext req, HttpServletResponse resp) {
         try {
-            String result = ConfigSync.syncNow();
-            JsonObject o = new JsonObject();
-            o.addProperty("ok", true);
-            o.addProperty("result", result);
-            return o.toString();
+            return syncOutcome(ConfigSync.syncNow());
         } catch (Exception e) {
             return error(resp, e);
         }
@@ -2113,6 +2163,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         if (e instanceof PolicyGate.Refused) {
             // Expected, and already worded for the reader: no stack trace in the gateway log.
             logger.info("Refused by the Git policy: {}", e.getMessage());
+            resp.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        } else if (e instanceof SecurityException) {
+            logger.info("Refused: {}", e.getMessage());
             resp.setStatus(HttpServletResponse.SC_FORBIDDEN);
         } else if (e instanceof IllegalArgumentException) {
             // A request the gateway cannot act on (an unknown mode or record type): the caller's.
@@ -2636,6 +2689,25 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             }
         }
 
+        // Unattended, so it authenticates as a named user's stored credential rather than whoever
+        // is in a Designer: the admin saving it (the default), or the owner already set. Naming
+        // anyone else would let this admin's delivery use that user's credential.
+        String owner = null;
+        if (pulls) {
+            owner = optString(body, "ignitionUser");
+            owner = owner == null || owner.isBlank() ? actor : owner.trim();
+            if (owner == null) {
+                throw new SecurityException("Sign in to set a delivery that pulls.");
+            }
+            GitSyncRecord existing = GitSyncRecord.findByProject(project);
+            String current = existing == null ? null : existing.getIgnitionUser();
+            if (!owner.equalsIgnoreCase(actor) && (current == null || !owner.equalsIgnoreCase(current))) {
+                throw new SecurityException("A delivery can authenticate as you (" + actor + ") or as the user"
+                        + " already set" + (current == null || current.isBlank() ? "" : " (" + current + ")")
+                        + ", not as '" + owner + "'. That user can set it themselves.");
+            }
+        }
+
         GitRunnerRecord runner = GitRunnerRecord.get();
         switch (delivery) {
             case "runner-release" -> runner.setMode(project, GitRunnerRecord.MODE_RELEASE);
@@ -2663,10 +2735,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 if (body.has("remoteName")) {
                     sync.setRemoteName(optString(body, "remoteName"));
                 }
-                // Unattended, so it authenticates as a named user's stored credential rather
-                // than whoever is in a Designer. Default to the admin saving it.
-                String owner = optString(body, "ignitionUser");
-                sync.setIgnitionUser(owner == null || owner.isBlank() ? actor : owner);
+                sync.setIgnitionUser(owner);
             }
             sync.save();
         }
@@ -2728,14 +2797,32 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             if (cfg == null) {
                 throw new RuntimeException("Sync is not configured for '" + project + "'.");
             }
-            String result = SyncScheduler.syncNow(cfg);
-            JsonObject o = new JsonObject();
-            o.addProperty("ok", true);
-            o.addProperty("result", result);
-            return o.toString();
+            // A disabled record is kept only for a runner repo update's branch and credential.
+            if (!cfg.isEnabled()) {
+                throw new RuntimeException("Sync is off for '" + project + "'; set a Sync delivery first.");
+            }
+            return syncOutcome(SyncScheduler.syncNow(cfg));
         } catch (Exception e) {
             return error(resp, e);
         }
+    }
+
+    /**
+     * A Sync now result for the page: {@code outcome} is "ok" (pulled, replaced or up to date),
+     * "failed", or "warning" (it ran but did not pull: local changes, not merged on GitHub, behind,
+     * already running), so a run that changed nothing is not shown as a success.
+     */
+    private static String syncOutcome(String result) {
+        String r = result == null ? "" : result;
+        String outcome = r.startsWith("failed") ? "failed"
+                : r.equals("up to date") || r.startsWith("pulled ") || r.startsWith("replaced, ")
+                        || r.startsWith("Pulled ") || r.startsWith("Replaced config") || r.startsWith("Rolled back")
+                        ? "ok" : "warning";
+        JsonObject o = new JsonObject();
+        o.addProperty("ok", !outcome.equals("failed"));
+        o.addProperty("outcome", outcome);
+        o.addProperty("result", r);
+        return o.toString();
     }
 
     private static boolean optBool(JsonObject body, String key) {

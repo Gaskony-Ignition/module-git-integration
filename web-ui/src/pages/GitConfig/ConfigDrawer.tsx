@@ -503,7 +503,11 @@ const ConfigDrawer = ({
                 onClick={() =>
                   syncNow()
                     .unwrap()
-                    .then((r) => toasts.notifySuccess(`Config: ${r.result}`))
+                    .then((r) =>
+                      r.outcome === "ok"
+                        ? toasts.notifySuccess(`Config: ${r.result}`)
+                        : toasts.notifyError(`Config: ${r.result}`)
+                    )
                     .catch(errorToast(toasts, "Sync failed"))
                 }
               >
@@ -649,14 +653,15 @@ const ConfigDrawer = ({
             archiveLeftovers,
           })
             .unwrap()
-            .then((r) =>
+            .then((r) => {
               toasts.notifySuccess(
                 r.layout === "combined"
                   ? `Combined ${r.projects} project(s) into the gateway repository`
                   : `Separated ${r.projects} project(s)` +
                       (r.restored ? `, ${r.restored} with earlier history` : "")
-              )
-            )
+              );
+              if (r.warning) toasts.notifyError(r.warning);
+            })
             .catch(errorToast(toasts, "Could not switch the layout"));
         }}
       />

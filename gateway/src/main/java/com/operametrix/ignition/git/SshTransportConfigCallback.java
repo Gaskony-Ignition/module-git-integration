@@ -28,15 +28,35 @@ import java.util.List;
 
 public class SshTransportConfigCallback implements TransportConfigCallback {
     /**
-     * SHA256 fingerprint of the key the server last presented, for the remote-test result. Static
-     * because sshd calls the key database from its own I/O thread, not the caller's.
+     * Where the fingerprint of the key the server presents goes, for the remote-test result. sshd
+     * checks the key on its own I/O thread, so the caller's sink is taken when the callback is built
+     * (on the caller's thread) and travels with it: two tests at once each see their own server.
      */
-    public static volatile String lastFingerprint;
+    private static final ThreadLocal<java.util.function.Consumer<String>> SINK = new ThreadLocal<>();
+
+    /** A git call that may connect over SSH. */
+    public interface Call {
+        void run() throws Exception;
+    }
+
+    /** Runs {@code call}; returns the SHA256 fingerprint of the host key presented during it, or null. */
+    public static String captureFingerprint(Call call) throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>();
+        SINK.set(seen::set);
+        try {
+            call.run();
+        } finally {
+            SINK.remove();
+        }
+        return seen.get();
+    }
 
     String sshKey;
+    private final java.util.function.Consumer<String> fingerprintSink;
 
     public SshTransportConfigCallback(String sshKey) {
         this.sshKey = sshKey;
+        this.fingerprintSink = SINK.get();
     }
 
     private SshSessionFactory createSshSessionFactory() {
@@ -52,7 +72,7 @@ public class SshTransportConfigCallback implements TransportConfigCallback {
                         throw new RuntimeException("Failed to load SSH key", e);
                     }
                 })
-                .setServerKeyDatabase((homeDir, sshDir) -> new TrustOnFirstUse())
+                .setServerKeyDatabase((homeDir, sshDir) -> new TrustOnFirstUse(fingerprintSink))
                 .build(null);
     }
 
@@ -74,8 +94,10 @@ public class SshTransportConfigCallback implements TransportConfigCallback {
      */
     static class TrustOnFirstUse implements ServerKeyDatabase {
         private final ServerKeyDatabase known;
+        private final java.util.function.Consumer<String> sink;
 
-        TrustOnFirstUse() {
+        TrustOnFirstUse(java.util.function.Consumer<String> sink) {
+            this.sink = sink;
             try {
                 Files.createDirectories(knownHostsFile().getParent());
             } catch (IOException e) {
@@ -94,7 +116,9 @@ public class SshTransportConfigCallback implements TransportConfigCallback {
         public boolean accept(String connectAddress, InetSocketAddress remoteAddress,
                               PublicKey serverKey, Configuration config, CredentialsProvider provider) {
             String seen = KeyUtils.getFingerPrint(serverKey);
-            lastFingerprint = seen;
+            if (sink != null) {
+                sink.accept(seen);
+            }
             List<PublicKey> recorded = lookup(connectAddress, remoteAddress, config);
             if (recorded.isEmpty()) {
                 // The database asks before adding a host and before creating the file; answer yes.

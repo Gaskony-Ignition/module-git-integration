@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { SettingsGw, Refresh } from "@inductiveautomation/ignition-icons";
 import { Button, Modal, PageHeader, useToastNotifications } from "../../webui";
 import {
+  useAbortMergeMutation,
   useFetchConfigMutation,
   useJoinConfigMutation,
   usePullConfigMutation,
@@ -36,6 +37,8 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
   const [join, { isLoading: joining }] = useJoinConfigMutation();
   const [confirmJoin, setConfirmJoin] = useState(false);
   const pullRefused = status?.policy?.refused?.["delivery:pull"];
+  const [abortMerge, { isLoading: aborting }] = useAbortMergeMutation();
+  const [confirmAbort, setConfirmAbort] = useState(false);
 
   const configured = !!(remote && remote.configured);
   const ahead = remote?.ahead ?? 0;
@@ -43,6 +46,23 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
 
   const headerActions = initialized ? (
     <div className="gitcfg-header-actions">
+      {status?.midOperation ? (
+        <>
+          <span
+            className="gitcfg-sync-status gitcfg-sync-off"
+            title={status.midOperation}
+          >
+            Merge in progress
+          </span>
+          <Button
+            colorClass="secondary"
+            disabled={aborting}
+            onClick={() => setConfirmAbort(true)}
+          >
+            {aborting ? "Aborting…" : "Abort merge…"}
+          </Button>
+        </>
+      ) : null}
       {configured ? (
         <>
           {unsynced ? (
@@ -158,6 +178,26 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
       {initialized ? (
         <ConfigDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
       ) : null}
+      <Modal
+        open={confirmAbort}
+        type="confirm"
+        title="Abort merge"
+        modalConfig={{
+          confirmationText:
+            "A pull stopped on conflicts and its merge is still open in the gateway repository, so config is not being committed. Aborting puts back the files the merge changed, as they were before it, and drops any conflict resolutions made so far. Other uncommitted work is kept. To finish the merge instead, open the project in the Designer and pull again.",
+          primaryText: "Abort merge",
+          secondaryText: "Cancel",
+          warningGeneral: true,
+        }}
+        onClose={() => setConfirmAbort(false)}
+        onConfirm={() => {
+          setConfirmAbort(false);
+          abortMerge()
+            .unwrap()
+            .then(() => toasts.notifySuccess("Merge aborted"))
+            .catch(errorToast(toasts, "Could not abort the merge"));
+        }}
+      />
       <Modal
         open={confirmJoin}
         type="confirm"

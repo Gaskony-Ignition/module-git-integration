@@ -1,12 +1,21 @@
 import baseApi from "../../api/index";
 import { BASE } from "../../config";
 
+/** Sync now's answer: "failed" or "warning" (ran, did not pull) are not shown as success. */
+export interface SyncNowResult {
+  ok: boolean;
+  outcome: "ok" | "warning" | "failed";
+  result: string;
+}
+
 export interface ConfigChange {
   path: string;
   type: string;
 }
 export interface StatusResp {
   initialized: boolean;
+  // Set while a merge is open in the gateway repository (a Designer left a conflict): why.
+  midOperation?: string;
   dirty: boolean;
   changes: ConfigChange[];
   // The installed module's version, e.g. "3.7.0". Shown under the page title.
@@ -443,6 +452,10 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: () => ({ url: `${BASE}/config-pull`, method: "POST", body: {} }),
       invalidatesTags: ["remote", "history", "status", "events"],
     }),
+    abortMerge: builder.mutation<{ ok: boolean }, void>({
+      query: () => ({ url: `${BASE}/abort-merge`, method: "POST", body: {} }),
+      invalidatesTags: ["remote", "history", "status", "events"],
+    }),
     joinConfig: builder.mutation<{ commit: string }, void>({
       query: () => ({ url: `${BASE}/config-join`, method: "POST", body: {} }),
       invalidatesTags: ["remote", "history", "status", "events"],
@@ -611,7 +624,13 @@ export const gitConfigApi = baseApi.injectEndpoints({
     }),
     // Switch the repository layout; refused (nothing changed) while anything is uncommitted.
     saveLayout: builder.mutation<
-      { layout: Layout; projects: number; restored: number; archived: number },
+      {
+        layout: Layout;
+        projects: number;
+        restored: number;
+        archived: number;
+        warning?: string;
+      },
       { layout: Layout; restoreHistory: boolean; archiveLeftovers?: boolean }
     >({
       query: (body) => ({ url: `${BASE}/layout`, method: "POST", body }),
@@ -624,7 +643,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
         "events",
       ],
     }),
-    configSyncNow: builder.mutation<{ result: string }, void>({
+    configSyncNow: builder.mutation<SyncNowResult, void>({
       query: () => ({
         url: `${BASE}/config-sync-now`,
         method: "POST",
@@ -670,7 +689,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ["definition", "projects"],
     }),
-    syncNow: builder.mutation<{ result: string }, { project: string }>({
+    syncNow: builder.mutation<SyncNowResult, { project: string }>({
       query: (body) => ({ url: `${BASE}/sync-now`, method: "POST", body }),
       invalidatesTags: ["events", "projects"],
     }),
@@ -835,6 +854,7 @@ export const {
   useDeinitMutation,
   useUpdateFromRemoteMutation,
   useSaveConfigDeliveryMutation,
+  useAbortMergeMutation,
   useConfigSyncNowMutation,
   useSaveLayoutMutation,
   useGetTreeQuery,

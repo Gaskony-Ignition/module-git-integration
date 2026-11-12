@@ -29,9 +29,16 @@ const HashCell = ({ row, cell }: any) => {
   );
 };
 
+// One line, full name on hover: gateway authors ("Gateway (<system name>)") are long.
+const AuthorCell = ({ cell }: any) => (
+  <span className="gitcfg-cell-oneline" title={cell.getValue()}>
+    {cell.getValue()}
+  </span>
+);
+
 const COLUMNS = [
   { fieldName: "shortHash", header: "Commit", width: 220, cell: HashCell },
-  { fieldName: "author", header: "Author", width: 160 },
+  { fieldName: "author", header: "Author", width: 160, cell: AuthorCell },
   { fieldName: "date", header: "Date", width: 160, sortable: true },
   { fieldName: "message", header: "Message" },
 ];
