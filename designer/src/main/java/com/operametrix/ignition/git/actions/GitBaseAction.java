@@ -425,7 +425,7 @@ public class GitBaseAction {
 
     /**
      * Before an action that reloads the project from the gateway, which drops the Designer's
-     * unsaved edits: true when there are none. Otherwise lists them and asks for a save first;
+     * unsaved edits: true when there are none. Otherwise lists them and says to save first;
      * nothing is done either way, so no edit is lost to the reload.
      */
     public static boolean noUnsavedChanges(String action) {
@@ -442,9 +442,8 @@ public class GitBaseAction {
             m.append("... and ").append(unsaved.size() - 15).append(" more\n");
         }
         m.append("\nSave them first (File > Save), then try again. Nothing was changed.");
-        Object[] options = {"Save first", "Cancel"};
-        JOptionPane.showOptionDialog(context.getFrame(), m.toString(), action, JOptionPane.DEFAULT_OPTION,
-                JOptionPane.WARNING_MESSAGE, null, options, options[0]);
+        // A plain OK: the SDK gives a module no way to save for the user.
+        JOptionPane.showMessageDialog(context.getFrame(), m.toString(), action, JOptionPane.WARNING_MESSAGE);
         return false;
     }
 

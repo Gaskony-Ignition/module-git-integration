@@ -1184,18 +1184,22 @@ public class GitManager {
 
             List<String> trackedPaths = new ArrayList<>();
             Set<String> untrackedPaths = new HashSet<>();
+            org.eclipse.jgit.lib.ObjectId headTree = git.getRepository().resolve("HEAD^{tree}");
 
+            // A resource folder is usually both: tracked files plus one Ignition just wrote (a view's
+            // thumbnail.png). Its tracked files go back to HEAD and only its untracked files are
+            // deleted; deleting the folder as a whole removed the resource itself.
             for (String path : paths) {
-                boolean isUntracked = false;
+                boolean tracked = headTree != null && TreeWalk.forPath(git.getRepository(), path,
+                        headTree) != null;
+                boolean anyUntracked = false;
                 for (String u : untracked) {
                     if (u.equals(path) || u.startsWith(path + "/")) {
-                        isUntracked = true;
-                        break;
+                        untrackedPaths.add(tracked ? u : path);
+                        anyUntracked = true;
                     }
                 }
-                if (isUntracked) {
-                    untrackedPaths.add(path);
-                } else {
+                if (tracked || !anyUntracked) {
                     trackedPaths.add(path);
                 }
             }

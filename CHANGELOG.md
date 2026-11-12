@@ -12,7 +12,14 @@ upstream's; everything below is this fork.
   as the page's branch switch is.
 - A Designer pull, checkout, revert, merge abort or merge completion no longer throws away the
   Designer's unsaved edits: it is refused, listing them, until they are saved. Discarding one
-  resource's changes drops only that resource's Designer edits.
+  resource's changes drops only that resource's Designer edits. An edit still in an open view
+  tab is not seen until the tab hands it to the project (switching tabs or saving does), so save
+  before these actions.
+- Discarding one resource from the commit panel deleted its whole folder when Ignition had
+  written a new file into it (a view's `thumbnail.png`), removing the resource. Its tracked files
+  now go back to the last commit and only its new files are deleted.
+- Scheduled sync checks for uncommitted changes before fetching again, so a project with local
+  work makes no network call every interval.
 - Combined: a config auto-commit (or any config commit) while a Designer's pull was in conflict
   completed that merge as a gateway commit, dropping the remote's changes. No config commit is made
   while a merge, revert or cherry-pick is open; the auto-commit retries every 30 seconds, and page

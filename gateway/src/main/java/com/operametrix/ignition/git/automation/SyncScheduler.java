@@ -159,6 +159,19 @@ public final class SyncScheduler {
         return merge;
     }
 
+    /** The refusal (also logged) when the project has real uncommitted changes, else null. */
+    private static String uncommittedNote(Git git, Repository repo, String project, String user, String branch,
+                                          String remoteName) throws Exception {
+        Set<String> edits = IgnitionReformat.realChanges(repo, git.status().call());
+        if (edits.isEmpty()) {
+            return null;
+        }
+        String note = "local changes present (" + edits.size() + " uncommitted); not pulling";
+        GitEvents.fire(GitEvent.of(GitEvent.SYNC).project(project).user(user)
+                .branch(branch).remote(remoteName).failure(note));
+        return note;
+    }
+
     /** Runs one repository's sync. Safe to call outside the timer (the Sync now button). */
     public static String syncNow(GitSyncRecord cfg) {
         String project = cfg.getProject();
@@ -209,6 +222,14 @@ public final class SyncScheduler {
             String branch = cfg.getBranch().isBlank() ? current : cfg.getBranch();
             boolean replace = cfg.isReplace();
 
+            // Checked before the fetch too, so a project with uncommitted work costs no network call
+            // every interval; checked again under the lock below, as edits can land meanwhile.
+            if (!replace) {
+                String note = uncommittedNote(git, repo, project, user, branch, remoteName);
+                if (note != null) {
+                    return note;
+                }
+            }
             // The fetch only moves remote-tracking refs, so it runs before the project's lock: a slow
             // remote must not hold up that project's Designer commits.
             FetchCommand fetch = git.fetch().setRemote(remoteName).setRemoveDeletedRefs(true);
@@ -224,15 +245,11 @@ public final class SyncScheduler {
                 // discarding or stashing an engineer's changes is worse than not syncing. Replace mode
                 // was chosen to be authoritative, like a release, so it goes ahead and says so.
                 if (!replace) {
-                    Status status = git.status().call();
-                    Set<String> edits = IgnitionReformat.realChanges(repo, status);
-                    if (!edits.isEmpty()) {
-                        String note = "local changes present (" + edits.size()
-                                + " uncommitted); not pulling";
-                        GitEvents.fire(GitEvent.of(GitEvent.SYNC).project(project).user(user)
-                                .branch(branch).remote(remoteName).failure(note));
+                    String note = uncommittedNote(git, repo, project, user, branch, remoteName);
+                    if (note != null) {
                         return note;
                     }
+                    Status status = git.status().call();
                     // What is left is Ignition's rewrite of files it imported, identical in content.
                     // Restore HEAD's bytes so the checkout and merge below see a clean tree.
                     Set<String> reformatted = IgnitionReformat.reformatted(repo, status);
