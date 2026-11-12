@@ -78,7 +78,7 @@ to Configure** when there is more than one. Credentials work the same way in the
 say which modes override a record ("Overridden in Prod"); a record that exists only in a mode is
 marked "Only in Prod", and a new record's drawer asks which collection to create it in.
 
-![The Policy tab on Staging's definition, with the ⋮ menu's Resource Definitions](images/versioning-save-to.png)
+![The Policy tab on Staging's definition, with the ⋮ menu's Resource Definitions](images/versioning-definition-menu.png)
 
 The same records can also be overridden from **Platform › Modes** or the
 gateway's `resources/copy` API; the module reads whichever value the active
