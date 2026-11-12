@@ -228,6 +228,8 @@ export interface ProjectStatus {
   // Where the delivery record comes from: "core" or a mode name; null when none is saved.
   syncFrom?: string | null;
   syncDefined?: string[];
+  // The sync record's resource name (its id), for the platform's resource routes.
+  syncId?: string | null;
   // Set when the project's lone local branch is master and its remote's is this name.
   renameMaster?: string | null;
   // What is wrong with the credential this project pulls with, if anything.
@@ -802,6 +804,72 @@ export const gitConfigApi = baseApi.injectEndpoints({
         "definition",
       ],
     }),
+    // The platform's own resource routes, for a named record's Resource Definitions actions.
+    findResource: builder.mutation<
+      { signature: string; collection: string; collections: string[] },
+      { type: string; name: string; collection: string }
+    >({
+      query: ({ type, name, collection }) =>
+        `/data/api/v1/resources/find/${type}/${encodeURIComponent(
+          name
+        )}?collection=${encodeURIComponent(collection)}`,
+    }),
+    copyResource: builder.mutation<
+      unknown,
+      {
+        type: string;
+        name: string;
+        signature: string;
+        from: string;
+        to: string;
+      }
+    >({
+      query: (a) => ({
+        url:
+          `/data/api/v1/resources/copy?resourceType=${encodeURIComponent(
+            a.type
+          )}&signature=${a.signature}&fromName=${encodeURIComponent(a.name)}` +
+          `&fromCollection=${encodeURIComponent(
+            a.from
+          )}&toCollection=${encodeURIComponent(a.to)}`,
+        method: "POST",
+      }),
+      invalidatesTags: ["projects", "definition"],
+    }),
+    moveResource: builder.mutation<
+      unknown,
+      {
+        type: string;
+        name: string;
+        signature: string;
+        from: string;
+        to: string;
+      }
+    >({
+      query: (a) => ({
+        url:
+          `/data/api/v1/resources/move?resourceType=${encodeURIComponent(
+            a.type
+          )}&signature=${a.signature}&fromName=${encodeURIComponent(a.name)}` +
+          `&fromCollection=${encodeURIComponent(
+            a.from
+          )}&toCollection=${encodeURIComponent(a.to)}`,
+        method: "POST",
+      }),
+      invalidatesTags: ["projects", "definition"],
+    }),
+    deleteResource: builder.mutation<
+      unknown,
+      { type: string; name: string; signature: string; collection: string }
+    >({
+      query: (a) => ({
+        url: `/data/api/v1/resources/${a.type}/${encodeURIComponent(a.name)}/${
+          a.signature
+        }?confirm=false&collection=${encodeURIComponent(a.collection)}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: ["projects", "definition"],
+    }),
     // After the platform's Create Override / Move Definition / Remove Override: the audit row.
     overrideAudit: builder.mutation<
       unknown,
@@ -897,6 +965,10 @@ export const {
   useModeResetMutation,
   useModeOverrideMutation,
   useOverrideAuditMutation,
+  useFindResourceMutation,
+  useCopyResourceMutation,
+  useMoveResourceMutation,
+  useDeleteResourceMutation,
   useRenameMasterMutation,
   useGetDefinitionQuery,
   useGetAuditQuery,

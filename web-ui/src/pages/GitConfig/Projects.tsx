@@ -23,6 +23,7 @@ import { selectValue } from "./selectValue";
 import SettingsDrawer from "./SettingsDrawer";
 import BranchesView from "./BranchesView";
 import Definitions, {
+  DefinitionMenu,
   OverrideTag,
   saveToParam,
   useEditing,
@@ -30,6 +31,7 @@ import Definitions, {
 } from "./ModeScope";
 import ScrollBox, { RowCount } from "./ScrollBox";
 import AddProject from "./AddProject";
+import { RESOURCE } from "../../gatewayLib";
 
 const DELIVERY_LABEL: Record<Delivery, string> = {
   off: "Off",
@@ -108,6 +110,10 @@ const Projects = () => {
     defined: def?.defined ?? target?.syncDefined ?? [],
     editing,
     onEditing: setEditing,
+    resource:
+      target && target.syncId
+        ? { type: RESOURCE.sync, name: target.syncId }
+        : undefined,
   };
   const saveTo = perMode ? saveToParam(modes, editing) : undefined;
   const { data: status } = useGetStatusQuery();
@@ -379,6 +385,17 @@ const Projects = () => {
                       >
                         Sync now
                       </Button>
+                    ) : null}
+                    {perMode && p.syncId ? (
+                      // The platform list's row menu: Resource Definitions of this
+                      // project's delivery, acting on the definition in use.
+                      <DefinitionMenu
+                        record={{ type: "sync", project: p.name }}
+                        defined={p.syncDefined ?? []}
+                        editing={p.syncFrom || "core"}
+                        onEditing={() => undefined}
+                        resource={{ type: RESOURCE.sync, name: p.syncId }}
+                      />
                     ) : null}
                   </td>
                 </tr>

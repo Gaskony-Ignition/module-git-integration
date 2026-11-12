@@ -5,9 +5,12 @@ import { selectValue } from "./selectValue";
 import { errorToast } from "./errors";
 import {
   RecordRef,
+  useFindResourceMutation,
   useGetStatusQuery,
   useModeOverrideMutation,
   useModeResetMutation,
+  useMoveResourceMutation,
+  useOverrideAuditMutation,
 } from "./GitConfig.service";
 
 /** The active deployment mode, or null when the gateway runs on core alone. */
@@ -98,6 +101,8 @@ export interface DefsProps {
   defined: string[];
   editing: string;
   onEditing: (c: string) => void;
+  // The platform's name for the record, for Move Definition (the platform's own move route).
+  resource?: { type: string; name: string };
 }
 
 const useDefs = ({ defined, editing }: DefsProps) => {
@@ -116,23 +121,56 @@ const useDefs = ({ defined, editing }: DefsProps) => {
  * Create Override (into any mode created here, not only the active one) and Remove Override.
  */
 export const DefinitionMenu = (props: DefsProps) => {
-  const { record, defined, editing, onEditing } = props;
+  const { record, defined, editing, onEditing, resource } = props;
   const { modes, label, free } = useDefs(props);
+  const active = useActiveMode() || "core";
   const [create, { isLoading: creating }] = useModeOverrideMutation();
   const [remove] = useModeResetMutation();
+  const [find] = useFindResourceMutation();
+  const [move, { isLoading: moving }] = useMoveResourceMutation();
+  const [audit] = useOverrideAuditMutation();
   const toasts = useToastNotifications();
-  const [asking, setAsking] = React.useState(false);
+  const [asking, setAsking] = React.useState<"create" | "move" | null>(null);
   const [into, setInto] = React.useState("");
   if (!modes.length || !record) {
     return null;
   }
   const isOverride = editing !== "core" && defined.includes(editing);
+  // As on the platform: the definition the gateway runs on is not moved from here.
+  const canMove = !!resource && defined.includes(editing) && editing !== active;
+
+  const doMove = async () => {
+    if (!resource) return;
+    try {
+      const r = await find({ ...resource, collection: editing }).unwrap();
+      await move({
+        ...resource,
+        signature: r.signature,
+        from: editing,
+        to: into,
+      }).unwrap();
+      await audit({
+        ...(record as Record<string, unknown>),
+        type: record.type,
+        action: "move",
+        from: editing,
+        to: into,
+      } as any)
+        .unwrap()
+        .catch(() => undefined);
+      setAsking(null);
+      onEditing(into);
+      toasts.notifySuccess("Resource Definition moved");
+    } catch (e) {
+      errorToast(toasts, "Could not move the definition")(e);
+    }
+  };
 
   const doCreate = () =>
     create({ ...record, mode: into, from: editing })
       .unwrap()
       .then(() => {
-        setAsking(false);
+        setAsking(null);
         onEditing(into);
         toasts.notifySuccess(`Override created in ${into}`);
       })
@@ -152,7 +190,9 @@ export const DefinitionMenu = (props: DefsProps) => {
       <MenuButton
         soloIcon
         buttonColorClass="secondary"
-        buttonId="gitcfg-definition-menu"
+        buttonId={`gitcfg-definition-menu${
+          resource ? `-${resource.name}` : ""
+        }`}
         buttonDataLabel="Resource definitions"
         menuItems={[
           {
@@ -164,9 +204,23 @@ export const DefinitionMenu = (props: DefsProps) => {
                 disabled: !free.length,
                 onClick: () => {
                   setInto(free.find((c) => c !== "core") ?? free[0] ?? "");
-                  setAsking(true);
+                  setAsking("create");
                 },
               },
+              ...(canMove
+                ? [
+                    {
+                      text: "Move Definition",
+                      disabled: !free.length,
+                      onClick: () => {
+                        setInto(
+                          free.find((c) => c !== "core") ?? free[0] ?? ""
+                        );
+                        setAsking("move");
+                      },
+                    },
+                  ]
+                : []),
               {
                 text: "Remove Override",
                 disabled: !isOverride,
@@ -179,17 +233,25 @@ export const DefinitionMenu = (props: DefsProps) => {
         {KEBAB}
       </MenuButton>
       <Modal
-        open={asking}
+        open={!!asking}
         type="confirm"
-        title="Create Resource Override?"
+        title={
+          asking === "move"
+            ? "Move Resource Definition?"
+            : "Create Resource Override?"
+        }
         modalConfig={{
           confirmationText: (
             <div className="gitcfg gitcfg-form">
-              <p>
-                Overriding this resource will create a duplicate version of it
-                on the Gateway.
-              </p>
-              <p>Select a collection for the new definition.</p>
+              {asking === "move" ? null : (
+                <>
+                  <p>
+                    Overriding this resource will create a duplicate version of
+                    it on the Gateway.
+                  </p>
+                  <p>Select a collection for the new definition.</p>
+                </>
+              )}
               <SelectInput
                 label="Collection"
                 value={into}
@@ -197,16 +259,19 @@ export const DefinitionMenu = (props: DefsProps) => {
                 onChange={(e: unknown) => setInto(selectValue(e) || "")}
               />
               <p className="gitcfg-hint">
-                Select a collection for the new resource definition.
+                {asking === "move"
+                  ? "Select a collection for this resource definition."
+                  : "Select a collection for the new resource definition."}
               </p>
             </div>
           ),
-          primaryText: "Create Override",
+          primaryText:
+            asking === "move" ? "Move Definition" : "Create Override",
           secondaryText: "Cancel",
-          primaryDisabled: !into || creating,
+          primaryDisabled: !into || creating || moving,
         }}
-        onClose={() => setAsking(false)}
-        onConfirm={doCreate}
+        onClose={() => setAsking(null)}
+        onConfirm={asking === "move" ? doMove : doCreate}
       />
     </>
   );

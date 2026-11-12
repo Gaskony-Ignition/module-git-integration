@@ -916,6 +916,31 @@ async function modes() {
     return pass(ok(s) && d.pushAllowed === false && eff.pushAllowed === true && ok(rm) && !(d2.defined || []).includes('Prod'),
       `save ${s.status}; prod push=${d.pushAllowed}; core push=${eff.pushAllowed}; reset ${rm.status}; defined=${d2.defined}`);
   });
+  // 4.5.0: the policy, remote and runner are platform singletons, so the gateway's own Resource
+  // Definitions panel (resources/singleton, copy, move, delete) works on them.
+  const PT = 'com.operametrix.ignition.git/git-policy';
+  const single = async (c) => (await plat('GET', `/resources/singleton/${PT}${c ? `?collection=${c}` : ''}`)).json;
+  await check('platform singleton route serves the policy; Create Override, Move, Remove through it', async () => {
+    const core = await single();
+    const cp = await plat('POST', `/resources/copy?resourceType=${q(PT)}&signature=${core.signature}&fromCollection=core&toCollection=Dev`);
+    const aud = await api('POST', '/override-audit', { type: 'policy', action: 'create', from: 'core', to: 'Dev' });
+    const d1 = (await api('GET', '/definition?type=policy&collection=Dev')).json.defined || [];
+    const dev = await single('Dev');
+    const mv = await plat('POST', `/resources/move?resourceType=${q(PT)}&signature=${dev.signature}&fromCollection=Dev&toCollection=Prod`);
+    const d2 = (await api('GET', '/definition?type=policy&collection=Prod')).json.defined || [];
+    const prod = await single('Prod');
+    const del = await plat('DELETE', `/resources/${PT}/${prod.signature}?confirm=false&collection=Prod`);
+    const d3 = (await api('GET', '/definition?type=policy&collection=Prod')).json.defined || [];
+    const bogus = await api('POST', '/override-audit', { type: 'policy', action: 'create', from: 'core', to: 'Prod' });
+    return pass(core.collection === 'core' && core.config && ok(cp) && ok(aud) && d1.includes('Dev') && ok(mv)
+      && d2.includes('Prod') && !d2.includes('Dev') && ok(del) && d3.join() === 'core' && refused(bogus),
+      `core=${core.collection} copy ${cp.status} audit ${aud.status} d1=${d1} move ${mv.status} d2=${d2} delete ${del.status} d3=${d3} bogus ${bogus.status}`);
+  });
+  await check('a named runner left in Dev by 4.4 is moved to the singleton layout at the next start', async () => {
+    const base = `${DATA}/config/resources`;
+    dexec(`mkdir -p ${base}/Dev/com.operametrix.ignition.git/git-runner/runner && cp ${base}/core/com.operametrix.ignition.git/git-runner/config.json ${base}/core/com.operametrix.ignition.git/git-runner/resource.json ${base}/Dev/com.operametrix.ignition.git/git-runner/runner/`);
+    return pass(dexec(`test -f ${base}/Dev/com.operametrix.ignition.git/git-runner/runner/config.json && echo y`) === 'y', 'planted');
+  });
   await check('per-mode remotes saved to Dev and Prod; policy override saved to Prod', async () => {
     const dv = await api('POST', '/remote?saveTo=Dev', { uri: `${SRV.dev}/gateway.git`, branch: 'main', mode: 'inline', username: 'writer', password: E.W_PW });
     const pr = await api('POST', '/remote?saveTo=Prod', { uri: `${SRV.prod}/gateway.git`, branch: 'main', mode: 'inline', username: 'reader', password: E.R_PW });
@@ -931,6 +956,13 @@ async function modes() {
     const s = (await api('GET', '/status')).json;
     const r = (await api('GET', '/remote')).json;
     return pass(s.policy.mode === 'Dev' && s.policy.from === 'core' && r.from === 'Dev' && s.policy.pushAllowed, `mode=${s.policy.mode} policyFrom=${s.policy.from} remoteFrom=${r.from}`);
+  });
+  await check('Dev: the planted named runner was moved and is served as Dev\'s definition', async () => {
+    const base = `${DATA}/config/resources/Dev/com.operametrix.ignition.git/git-runner`;
+    const moved = dexec(`test -f ${base}/config.json && test ! -e ${base}/runner && echo y || echo n`);
+    const r = (await plat('GET', '/resources/singleton/com.operametrix.ignition.git/git-runner?collection=Dev')).json;
+    const del = r.signature ? await plat('DELETE', `/resources/com.operametrix.ignition.git/git-runner/${r.signature}?confirm=false&collection=Dev`) : { status: 0, json: {} };
+    return pass(moved === 'y' && r.collection === 'Dev' && ok(del), `moved=${moved} served=${r.collection} cleanup ${del.status}`);
   });
   await check('Dev: push uses the Dev credential on the dev server only', async () => {
     await configChange();

@@ -2528,6 +2528,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                         ? GitSyncRecord.DEFAULT_INTERVAL_SECONDS : sync.getIntervalSeconds());
                 o.addProperty("syncUser", sync == null ? "" : sync.getIgnitionUser());
                 o.addProperty("syncFrom", sync == null ? null : sync.definedIn());
+                // The sync record's resource name, for the platform's resource routes (row ⋮).
+                o.addProperty("syncId", sync == null ? null : String.valueOf(sync.getId()));
                 o.add("syncDefined", sync == null ? new JsonArray()
                         : definedJson(GitSyncRecord.TYPE, String.valueOf(sync.getId())));
                 arr.add(o);
