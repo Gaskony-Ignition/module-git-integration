@@ -210,6 +210,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
             if (DataDirGitManager.combinedRulesOnce()) {
                 logger.info("Combined layout: config ignore rules now apply under config/ only.");
             }
+            // 4.5.0: after the migrations above, which still read the unmarked file.
+            if (DataDirGitManager.ignoreBlocksOnce()) {
+                logger.info("Config repository: the module's .gitignore lines now sit between markers.");
+            }
         } catch (Exception e) {
             logger.error("Could not version the Git policy; check the Git ignore tab.", e);
         }

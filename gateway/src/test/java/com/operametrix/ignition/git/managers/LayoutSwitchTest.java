@@ -9,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -39,8 +40,8 @@ class LayoutSwitchTest {
 
     @BeforeEach
     void separateGateway() throws Exception {
-        // As a gateway writes it: the deny block last.
-        write(data, ".gitignore", IgnoreRules.withDenyBlock(String.join("\n", "**/db/*", "**/var", "**/*-wal", "/*",
+        // As a gateway writes it: the managed block, then the deny block last.
+        write(data, ".gitignore", IgnoreRules.editManaged("", m -> List.of("**/db/*", "**/var", "**/*-wal", "/*",
                 "!/config/", "!/.gitignore")));
         write(data, "config/resources/core/a.json", "{\"a\":1}");
         write(data, "logs/wrapper.log", "noise");

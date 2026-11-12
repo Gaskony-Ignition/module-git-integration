@@ -173,11 +173,24 @@ async function sep1() {
     const before = (await api('GET', '/ignore')).json.text;
     const r = await api('POST', '/ignore', { text: before + '\n!**/config/local/\n!/ignition.conf\n' });
     const after = (await api('GET', '/ignore')).json.text;
-    const tail = after.trim().split('\n').slice(-12).map((l) => l.trim());
+    const tail = after.trim().split('\n').slice(-13).map((l) => l.trim());
     const loc = ((await api('GET', '/tree?path=config')).json.entries || []).find((e) => e.name === 'local');
     await api('POST', '/ignore', { text: before });
-    return pass(ok(r) && tail[0] === '**/config/local/' && tail[11] === '*.keystore' && (!loc || loc.excluded),
+    return pass(ok(r) && tail[0] === '**/config/local/' && tail[11] === '*.keystore'
+      && tail[12] === '# <<< Git Integration: never versioned' && (!loc || loc.excluded),
       `save ${r.status}; tail=${tail.join(' ')}; config/local excluded=${loc && loc.excluded}`);
+  });
+  await check('Git ignore tab writes only inside the managed block', async () => {
+    const before = (await api('GET', '/ignore')).json.text;
+    await api('POST', '/ignore', { text: '# mine\n*.mine\n' + before + '\n!/mine-after/\n' });
+    const r = await api('POST', '/ignore', { exclude: ['config/zz-regression-tick.txt'] });
+    const lines = (await api('GET', '/ignore')).json.text.split('\n').map((l) => l.trim());
+    await api('POST', '/ignore', { text: before });
+    const end = lines.indexOf('# <<< Git Integration');
+    const tick = lines.indexOf('/config/zz-regression-tick.txt');
+    return pass(ok(r) && lines[0] === '# mine' && lines[1] === '*.mine' && tick > 0 && tick < end
+      && lines.indexOf('!/mine-after/') > end && lines.indexOf('!/mine-after/') < lines.indexOf('*.keystore'),
+      `tick@${tick} end@${end} mine-after@${lines.indexOf('!/mine-after/')}`);
   });
   await check('HTTPS credentials saved (writer, reader)', async () => {
     const w = await api('POST', '/credentials', { type: 'HTTPS', host: BR, username: 'writer', mode: 'inline', password: E.W_PW });

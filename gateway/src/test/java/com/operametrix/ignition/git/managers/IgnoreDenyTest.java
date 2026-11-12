@@ -23,10 +23,12 @@ class IgnoreDenyTest {
     @Test
     void theBlockEndsTheFileOnceHoweverOftenItIsApplied() {
         String once = IgnoreRules.withDenyBlock("a\n" + IgnoreRules.DENY_MARKER + "\n*.jks\n!/x\n");
+        // The pre-4.5.0 block, which had no end marker, is replaced the same way.
+        assertThat(IgnoreRules.withDenyBlock("a\n" + IgnoreRules.OLD_DENY_MARKER + "\n*.jks\n!/x\n")).isEqualTo(once);
         assertThat(IgnoreRules.withDenyBlock(once)).isEqualTo(once);
         assertThat(once.indexOf(IgnoreRules.DENY_MARKER)).isEqualTo(once.lastIndexOf(IgnoreRules.DENY_MARKER));
         assertThat(once).startsWith("a\n!/x\n\n" + IgnoreRules.DENY_MARKER);
-        assertThat(once).endsWith("*.keystore\n");
+        assertThat(once).endsWith("*.keystore\n" + IgnoreRules.DENY_END + "\n");
     }
 
     @Test

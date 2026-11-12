@@ -139,8 +139,19 @@ public final class IgnoreRules {
         return lines.stream().map(l -> back.getOrDefault(l.trim(), l)).toList();
     }
 
-    /** Heads the block {@link #withDenyBlock} keeps at the end of {@code .gitignore}. */
+    /**
+     * Opens the deny block {@link #withDenyBlock} keeps at the end of {@code .gitignore}. Git applies
+     * the last matching pattern, so a person's negation below it could re-include a key; every
+     * module write moves it back to the end.
+     */
     public static final String DENY_MARKER =
+            "# >>> Git Integration: never versioned — keys, certificates, per-gateway secrets"
+                    + " (moved back to the end on every write, so nothing above can re-include them)";
+
+    public static final String DENY_END = "# <<< Git Integration: never versioned";
+
+    /** Headed the deny block before 4.5.0, with no end marker. */
+    static final String OLD_DENY_MARKER =
             "# Never versioned: keys, certificates and per-gateway secrets (kept last by the Git module)";
 
     /**
@@ -166,29 +177,189 @@ public final class IgnoreRules {
 
     /**
      * {@code text} with the {@link #DENY} block moved to (or added at) its end, unchanged. Any line
-     * of the block found under its marker is dropped first, so the result is the same however
-     * often it is applied.
+     * of the block found under its marker (old or new) is dropped first, so the result is the same
+     * however often it is applied. A line someone typed inside the block stays, just above it.
      */
     public static String withDenyBlock(String text) {
-        List<String> lines = new java.util.ArrayList<>(List.of((text == null ? "" : text).split("\n", -1)));
-        int marker = lines.indexOf(DENY_MARKER);
-        while (marker >= 0) {
-            lines.remove(marker);
-            while (marker < lines.size() && DENY.contains(lines.get(marker).trim())) {
-                lines.remove(marker);
-            }
-            marker = lines.indexOf(DENY_MARKER);
-        }
-        while (!lines.isEmpty() && lines.get(lines.size() - 1).isBlank()) {
-            lines.remove(lines.size() - 1);
-        }
+        List<String> lines = withoutDeny(lines(text));
+        trimEnd(lines);
         if (!lines.isEmpty()) {
             lines.add("");
         }
         lines.add(DENY_MARKER);
         lines.addAll(DENY);
+        lines.add(DENY_END);
         return String.join("\n", lines) + "\n";
     }
+
+    private static List<String> lines(String text) {
+        return new java.util.ArrayList<>(List.of((text == null ? "" : text).split("\r?\n", -1)));
+    }
+
+    private static List<String> withoutDeny(List<String> in) {
+        List<String> lines = new java.util.ArrayList<>(in);
+        for (int at = indexOfDeny(lines); at >= 0; at = indexOfDeny(lines)) {
+            lines.remove(at);
+            while (at < lines.size() && DENY.contains(lines.get(at).trim())) {
+                lines.remove(at);
+            }
+            if (at < lines.size() && lines.get(at).trim().equals(DENY_END)) {
+                lines.remove(at);
+            }
+        }
+        return lines;
+    }
+
+    private static int indexOfDeny(List<String> lines) {
+        for (int i = 0; i < lines.size(); i++) {
+            String t = lines.get(i).trim();
+            if (t.equals(DENY_MARKER) || t.equals(OLD_DENY_MARKER)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static void trimEnd(List<String> lines) {
+        while (!lines.isEmpty() && lines.get(lines.size() - 1).isBlank()) {
+            lines.remove(lines.size() - 1);
+        }
+    }
+
+    /**
+     * Opens the block holding every line the module writes (template, root and records rules, the
+     * Combined rules, the Git ignore tab's ticks). Module writes change only what is inside it, so a
+     * line a person or another tool added outside it is never moved, reordered or removed.
+     */
+    public static final String MANAGED_START =
+            "# >>> Git Integration (managed — edit with the Git ignore tab, not by hand)";
+
+    public static final String MANAGED_END = "# <<< Git Integration";
+
+    /** Headed the Git ignore tab's lines before 4.5.0. */
+    public static final String OLD_TAB_MARKER = "# --- managed by the Versioning page below this line ---";
+
+    /** {@code .gitignore} split around the managed block; the deny block is left out. */
+    public record Parts(List<String> before, List<String> managed, List<String> after) {}
+
+    /**
+     * Splits {@code text} around the managed block, first putting the module's own lines into one
+     * ({@link #wrap}) when the file has none yet.
+     */
+    public static Parts split(String text) {
+        List<String> lines = withoutDeny(lines(text));
+        int start = indexOfTrimmed(lines, MANAGED_START, 0);
+        int end = start < 0 ? -1 : indexOfTrimmed(lines, MANAGED_END, start + 1);
+        if (start < 0 || end < 0) {
+            return wrap(lines);
+        }
+        return new Parts(new java.util.ArrayList<>(lines.subList(0, start)),
+                new java.util.ArrayList<>(lines.subList(start + 1, end)),
+                new java.util.ArrayList<>(lines.subList(end + 1, lines.size())));
+    }
+
+    /** The file for {@code parts}: before, the managed block, after, then the deny block. */
+    public static String join(Parts parts) {
+        List<String> out = new java.util.ArrayList<>(parts.before());
+        trimEnd(out);
+        if (!out.isEmpty()) {
+            out.add("");
+        }
+        out.add(MANAGED_START);
+        out.addAll(parts.managed());
+        out.add(MANAGED_END);
+        List<String> after = new java.util.ArrayList<>(parts.after());
+        while (!after.isEmpty() && after.get(0).isBlank()) {
+            after.remove(0);
+        }
+        if (!after.isEmpty()) {
+            out.add("");
+            out.addAll(after);
+        }
+        return withDenyBlock(String.join("\n", out));
+    }
+
+    /**
+     * {@code text} with {@code edit} applied to the managed block only (wrapping the module's lines
+     * first if need be), or null when {@code edit} returns null — nothing to change.
+     */
+    public static String editManaged(String text, java.util.function.UnaryOperator<List<String>> edit) {
+        Parts parts = split(text);
+        List<String> managed = edit.apply(new java.util.ArrayList<>(parts.managed()));
+        return managed == null ? null : join(new Parts(parts.before(), managed, parts.after()));
+    }
+
+    private static int indexOfTrimmed(List<String> lines, String line, int from) {
+        for (int i = from; i < lines.size(); i++) {
+            if (lines.get(i).trim().equals(line)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 4.5.0 upgrade: a file written before the markers. Lines exactly as the module wrote them go into
+     * the managed block, at the first one's place; every other line stays outside in its order —
+     * those between module lines end up after the block, where git's last match lets them win as
+     * their author meant. Below the old tab marker, the tab's anchored path lines count as module
+     * lines too. A file with none gets an empty block at its end.
+     */
+    static Parts wrap(List<String> lines) {
+        java.util.Set<String> module = new java.util.HashSet<>(TEMPLATE);
+        module.addAll(CONFIG_SCOPED.values());
+        module.addAll(RECORDS_RULES);
+        module.add(OLD_RECORDS_RULE);
+        module.add(OLD_TAB_MARKER);
+        module.addAll(LayoutSwitch.BLOCK);
+        module.add(LayoutSwitch.DATA_BIN);
+        module.add(LayoutSwitch.OLD_REINCLUDE);
+        module.remove("");
+        boolean[] ours = new boolean[lines.size()];
+        boolean underTab = false;
+        for (int i = 0; i < lines.size(); i++) {
+            String t = lines.get(i).trim();
+            underTab |= t.equals(OLD_TAB_MARKER);
+            ours[i] = module.contains(t) || underTab && TAB_LINE.matcher(t).matches();
+        }
+        // A blank line between two module lines is the module's spacing.
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).isBlank()) {
+                int p = i - 1;
+                while (p >= 0 && lines.get(p).isBlank()) {
+                    p--;
+                }
+                int n = i + 1;
+                while (n < lines.size() && lines.get(n).isBlank()) {
+                    n++;
+                }
+                ours[i] = p >= 0 && n < lines.size() && ours[p] && ours[n];
+            }
+        }
+        int first = -1;
+        for (int i = 0; i < lines.size() && first < 0; i++) {
+            first = ours[i] && !lines.get(i).isBlank() ? i : -1;
+        }
+        if (first < 0) {
+            return new Parts(new java.util.ArrayList<>(lines), new java.util.ArrayList<>(), new java.util.ArrayList<>());
+        }
+        List<String> managed = new java.util.ArrayList<>();
+        List<String> after = new java.util.ArrayList<>();
+        for (int i = first; i < lines.size(); i++) {
+            if (ours[i] && !(lines.get(i).isBlank() && !managed.isEmpty()
+                    && managed.get(managed.size() - 1).isBlank())) {
+                managed.add(lines.get(i));
+            } else if (!ours[i]) {
+                after.add(lines.get(i));
+            }
+        }
+        trimEnd(managed);
+        return new Parts(new java.util.ArrayList<>(lines.subList(0, first)), managed, after);
+    }
+
+    /** What the Git ignore tab writes: an anchored path or its negation, no glob but a trailing /**. */
+    private static final java.util.regex.Pattern TAB_LINE =
+            java.util.regex.Pattern.compile("!?/[^*?\\[\\]!#]+|!/[^*?\\[\\]!#]+/\\*\\*");
 
     /** Whether the {@link #DENY} block covers {@code path} or one of its folders. */
     public static boolean denied(String path) {

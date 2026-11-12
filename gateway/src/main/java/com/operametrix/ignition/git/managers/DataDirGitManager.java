@@ -138,7 +138,7 @@ public class DataDirGitManager {
     private static void writeGitignore() throws IOException {
         Path gitignore = dataDir().resolve(".gitignore");
         if (!Files.exists(gitignore)) {
-            Files.write(gitignore, IgnoreRules.withDenyBlock(String.join("\n", GITIGNORE_LINES))
+            Files.write(gitignore, IgnoreRules.editManaged("", managed -> GITIGNORE_LINES)
                     .getBytes(StandardCharsets.UTF_8));
         }
     }
@@ -240,19 +240,19 @@ public class DataDirGitManager {
                             kept.add(name);
                         }
                     }
-                    int at = lines.indexOf(MANAGED_MARKER);
-                    if (at < 0) {
-                        at = lines.size();
-                    }
-                    lines.addAll(at, List.of(ROOT_RULES_COMMENT, "/*", "!/config/", "!/.gitignore", ""));
-                    for (String name : kept) {
-                        boolean isDir = Files.isDirectory(dataDir().resolve(name));
-                        appendManaged(lines, "!/" + name + (isDir ? "/" : ""));
-                        if (isDir) {
-                            appendManaged(lines, "!/" + name + "/**");
+                    writeIgnoreFile(IgnoreRules.editManaged(String.join("\n", lines), managed -> {
+                        int at = managed.indexOf(IgnoreRules.OLD_TAB_MARKER);
+                        managed.addAll(at < 0 ? managed.size() : at,
+                                List.of(ROOT_RULES_COMMENT, "/*", "!/config/", "!/.gitignore", ""));
+                        for (String name : kept) {
+                            boolean isDir = Files.isDirectory(dataDir().resolve(name));
+                            managed.add("!/" + name + (isDir ? "/" : ""));
+                            if (isDir) {
+                                managed.add("!/" + name + "/**");
+                            }
                         }
-                    }
-                    writeIgnoreFile(String.join("\n", lines));
+                        return managed;
+                    }));
                 }
 
                 // A .gitignore line has no effect on a tracked file, so the rules alone would leave
@@ -307,10 +307,10 @@ public class DataDirGitManager {
             boolean changed = false;
             try {
                 Path gitignore = dataDir().resolve(".gitignore");
-                List<String> lines = Files.exists(gitignore) ? Files.readAllLines(gitignore) : List.of();
-                List<String> next = LayoutSwitch.migrateCombinedRules(lines);
+                String next = IgnoreRules.editManaged(
+                        Files.exists(gitignore) ? Files.readString(gitignore) : "", LayoutSwitch::migrateCombinedRules);
                 if (next != null) {
-                    writeIgnoreFile(String.join("\n", next));
+                    writeIgnoreFile(next);
                     try (Git git = GitManager.getGit(dataDir())) {
                         git.add().addFilepattern(".gitignore").call();
                         git.commit().setOnly(".gitignore")
@@ -323,6 +323,46 @@ public class DataDirGitManager {
                         "Combined ignore rules scoped to config/ by Git Integration 4.4.0.\n");
             } catch (Exception e) {
                 logger.error("Could not update the Combined ignore rules; check the Git ignore tab.", e);
+            }
+            return changed;
+        }
+    }
+
+    private static final String IGNORE_BLOCKS_MARKER = ".git-module-ignore-blocks";
+
+    /**
+     * 4.5.0, once: the module's own {@code .gitignore} lines go between markers
+     * ({@link IgnoreRules#split}), so later module writes leave every other line where it is.
+     * Commits {@code .gitignore} only.
+     *
+     * @return whether the file was rewritten
+     */
+    public static boolean ignoreBlocksOnce() {
+        synchronized (DATA_DIR_LOCK) {
+            if (!isInitialized() || Files.exists(dataDir().resolve(IGNORE_BLOCKS_MARKER))) {
+                return false;
+            }
+            boolean changed = false;
+            try {
+                Path gitignore = dataDir().resolve(".gitignore");
+                if (Files.exists(gitignore)) {
+                    String before = Files.readString(gitignore, StandardCharsets.UTF_8);
+                    String next = IgnoreRules.editManaged(before, managed -> managed);
+                    if (!next.equals(before)) {
+                        writeIgnoreFile(next);
+                        try (Git git = GitManager.getGit(dataDir())) {
+                            git.add().addFilepattern(".gitignore").call();
+                            git.commit().setOnly(".gitignore")
+                                    .setMessage(PolicyGate.trailer("Mark the Git module's .gitignore lines"))
+                                    .setAuthor(gatewayAuthor(), "").call();
+                        }
+                        changed = true;
+                    }
+                }
+                Files.writeString(dataDir().resolve(IGNORE_BLOCKS_MARKER),
+                        "Module .gitignore lines put between markers by Git Integration 4.5.0.\n");
+            } catch (Exception e) {
+                logger.error("Could not mark the module's .gitignore lines; check the Git ignore tab.", e);
             }
             return changed;
         }
@@ -343,10 +383,10 @@ public class DataDirGitManager {
             boolean changed = false;
             try {
                 Path gitignore = dataDir().resolve(".gitignore");
-                List<String> lines = Files.exists(gitignore) ? Files.readAllLines(gitignore) : List.of();
-                List<String> next = IgnoreRules.versionPolicy(lines);
+                String next = IgnoreRules.editManaged(
+                        Files.exists(gitignore) ? Files.readString(gitignore) : "", IgnoreRules::versionPolicy);
                 if (next != null) {
-                    writeIgnoreFile(String.join("\n", next));
+                    writeIgnoreFile(next);
                     try (Git git = GitManager.getGit(dataDir())) {
                         git.add().addFilepattern(".gitignore").call();
                         git.commit().setOnly(".gitignore")
@@ -1847,7 +1887,6 @@ public class DataDirGitManager {
      * Everything the page appends lives below this marker, so the template above it — and any
      * hand-written rule a user added — is never rewritten, reordered or lost.
      */
-    private static final String MANAGED_MARKER = "# --- managed by the Versioning page below this line ---";
 
     /** How many entries a folder's include/exclude roll-up will visit before giving up. */
     private static final int ROLLUP_BUDGET = 2000;
@@ -2125,7 +2164,8 @@ public class DataDirGitManager {
      * <p>Excluding appends an anchored literal line. Including removes that line if the path owns
      * one, and otherwise appends a negation — never deleting the glob, because deleting
      * {@code **}{@code /logs} to recover one file is how a gateway starts versioning a gigabyte of
-     * logs. Appends land under {@link #MANAGED_MARKER} so the template is left alone.
+     * logs. Lines are added at the end of the managed block; a line outside it is removed only when
+     * it names exactly the path being ticked (otherwise the tick could not take effect), never a glob.
      *
      * <p>Excluding a TRACKED path also removes it from the index. A {@code .gitignore} line has no
      * effect on a file git is already tracking, so without this the page would report an exclusion
@@ -2138,12 +2178,9 @@ public class DataDirGitManager {
             int untracked = 0;
             try (Git git = GitManager.getGit(dataDir())) {
                 Repository repo = git.getRepository();
-                List<String> lines = new ArrayList<>(
-                        List.of(readIgnoreFile().split("\n", -1)));
-                // Drop the trailing empty produced by the split so appends don't drift downwards.
-                if (!lines.isEmpty() && lines.get(lines.size() - 1).isEmpty()) {
-                    lines.remove(lines.size() - 1);
-                }
+                IgnoreRules.Parts parts = IgnoreRules.split(readIgnoreFile());
+                List<String> managed = parts.managed();
+                List<List<String>> all = List.of(parts.before(), managed, parts.after());
 
                 for (String raw : include == null ? List.<String>of() : include) {
                     String path = normalize(raw);
@@ -2151,17 +2188,20 @@ public class DataDirGitManager {
                         continue;
                     }
                     boolean isDir = Files.isDirectory(dataDir().resolve(path));
-                    boolean removed = lines.removeIf(l -> isLiteralFor(l, path, isDir));
+                    boolean removed = false;
+                    for (List<String> lines : all) {
+                        removed |= lines.removeIf(l -> isLiteralFor(l, path, isDir));
+                    }
                     if (!removed) {
                         // An inherited glob excluded it — negate rather than weaken the glob.
-                        appendManaged(lines, "!/" + path + (isDir ? "/" : ""));
+                        managed.add("!/" + path + (isDir ? "/" : ""));
                         if (isDir) {
                             // A rule like `**/certificates/*` excludes the CONTENTS, not the
                             // folder, so negating the folder alone re-includes nothing visible.
                             // Negate the contents too. Safe because the caller only offers the
                             // tick when no ancestor directory is excluded (see `reincludable`),
                             // which is the one case git refuses to re-include.
-                            appendManaged(lines, "!/" + path + "/**");
+                            managed.add("!/" + path + "/**");
                         }
                     }
                 }
@@ -2173,11 +2213,13 @@ public class DataDirGitManager {
                     }
                     boolean isDir = Files.isDirectory(dataDir().resolve(path));
                     // A stale negation would beat the new exclusion, so clear it first.
-                    lines.removeIf(l -> isNegationFor(l, path, isDir)
-                            || (isDir && l.trim().equals("!/" + path + "/**")));
+                    for (List<String> lines : all) {
+                        lines.removeIf(l -> isNegationFor(l, path, isDir)
+                                || (isDir && l.trim().equals("!/" + path + "/**")));
+                    }
                     String literal = "/" + path + (isDir ? "/" : "");
-                    if (lines.stream().noneMatch(l -> l.trim().equals(literal))) {
-                        appendManaged(lines, literal);
+                    if (all.stream().flatMap(List::stream).noneMatch(l -> l.trim().equals(literal))) {
+                        managed.add(literal);
                     }
                     if (isTracked(repo, path, isDir)) {
                         git.rm().setCached(true).addFilepattern(path).call();
@@ -2185,24 +2227,13 @@ public class DataDirGitManager {
                     }
                 }
 
-                writeIgnoreFile(String.join("\n", lines));
+                writeIgnoreFile(IgnoreRules.join(parts));
             } catch (Exception e) {
                 logger.error("Error applying .gitignore edits", e);
                 throw new RuntimeException(e);
             }
             return untracked;
         }
-    }
-
-    private static void appendManaged(List<String> lines, String line) {
-        int marker = lines.indexOf(MANAGED_MARKER);
-        if (marker < 0) {
-            if (!lines.isEmpty() && !lines.get(lines.size() - 1).isBlank()) {
-                lines.add("");
-            }
-            lines.add(MANAGED_MARKER);
-        }
-        lines.add(line);
     }
 
     private static boolean isLiteralFor(String line, String path, boolean isDir) {

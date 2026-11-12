@@ -10,6 +10,14 @@ upstream's; everything below is this fork.
   definition loaded after it, so changing only the branch asked for the secret again. The saved
   reference is shown, and a save with it left blank keeps it; a new host still asks for it.
 
+### Changed
+- The gateway repository's `.gitignore` keeps the module's own lines between
+  `# >>> Git Integration` and `# <<< Git Integration` markers, and the never-versioned key and
+  certificate lines in a second marked block that is always moved back to the end of the file.
+  Module writes (initialise, layout switch, start-up updates, Git ignore tab ticks) change only
+  those blocks, so lines you or another tool add outside them stay where they are. An existing
+  file is converted once at start-up, in one commit of `.gitignore` alone.
+
 ### Added
 - Join remote history lists, in its confirmation, the files on the remote branch outside
   `config/` (and `projects/` in the Combined layout) that this gateway does not have, which the

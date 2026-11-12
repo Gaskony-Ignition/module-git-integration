@@ -118,3 +118,18 @@ excluded directory can be re-included, so that row is read-only. A folder's tick
 is the roll-up of its children, since a rule can exclude a directory's contents
 but not the directory itself. Saving commits.
 
+The module's own `.gitignore` lines (template, root and records rules, the
+Combined rules, the tab's ticks) sit between `# >>> Git Integration (managed …)`
+and `# <<< Git Integration`; every module write (`IgnoreRules.editManaged`/`split`/
+`join`) rewrites only that block, and the tab adds its lines at its end. A line
+outside it is never moved or removed, except that ticking a path removes a line
+naming exactly that path wherever it is (otherwise the tick could not take
+effect); globs outside are never edited. The deny block (`IgnoreRules.DENY`) has
+its own markers and is moved back to the very end on every write, since git's
+last match wins. 4.5.0 wraps an older file once at start-up
+(`ignoreBlocksOnce`, marker `.git-module-ignore-blocks`, commits `.gitignore`
+only): lines exactly as the module wrote them go into the block at the first
+one's place, everything else keeps its order outside, and a file with none gets
+an empty block at its end. Projects' own repositories get no `.gitignore` from
+the module.
+

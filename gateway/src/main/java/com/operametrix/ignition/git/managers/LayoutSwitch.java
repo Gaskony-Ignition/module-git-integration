@@ -79,6 +79,29 @@ public final class LayoutSwitch {
         return out;
     }
 
+    /** The reverse of {@link #withCombinedRules}; null when {@code lines} has no Combined block. */
+    static List<String> withoutCombinedRules(List<String> lines) {
+        int start = lines.indexOf(BLOCK_START);
+        int end = lines.indexOf(BLOCK_END);
+        if (start < 0 || end < start) {
+            return null;
+        }
+        List<String> out = new ArrayList<>(lines);
+        out.subList(start, end + 1).clear();
+        out.remove(DATA_BIN);
+        out = new ArrayList<>(IgnoreRules.unscope(out));
+        // The blank lines that set the block apart no longer separate anything.
+        for (int i = out.size() - 1; i > 0; i--) {
+            if (out.get(i).isBlank() && out.get(i - 1).isBlank()) {
+                out.remove(i);
+            }
+        }
+        while (!out.isEmpty() && out.get(out.size() - 1).isBlank()) {
+            out.remove(out.size() - 1);
+        }
+        return out;
+    }
+
     /**
      * Rewrites a 4.0.0–4.3.x Combined {@code .gitignore} once: scopes the managed config globs, drops
      * the catch-all re-include and moves data.bin out of the block. Only those managed lines change.
@@ -207,11 +230,11 @@ public final class LayoutSwitch {
                 Files.move(from, to);
                 moved.add(new Path[] {from, to});
             }
-            List<String> lines = ignoreBefore == null ? new ArrayList<>() : new ArrayList<>(ignoreBefore.lines().toList());
-            if (!lines.contains(BLOCK_START)) {
-                lines = withCombinedRules(lines);
-                // The deny block stays last: git's last match wins.
-                Files.writeString(gitignore, IgnoreRules.withDenyBlock(String.join("\n", lines)), StandardCharsets.UTF_8);
+            // Only the managed block changes; the deny block stays last (git's last match wins).
+            String next = IgnoreRules.editManaged(ignoreBefore,
+                    managed -> managed.contains(BLOCK_START) ? null : withCombinedRules(managed));
+            if (next != null) {
+                Files.writeString(gitignore, next, StandardCharsets.UTF_8);
             }
             String commit;
             try (Git gw = open(dataDir)) {
@@ -364,23 +387,9 @@ public final class LayoutSwitch {
             try (Git gw = open(dataDir)) {
                 gw.rm().setCached(true).addFilepattern("projects").call();
                 if (ignoreBefore != null) {
-                    List<String> lines = new ArrayList<>(ignoreBefore.lines().toList());
-                    int start = lines.indexOf(BLOCK_START);
-                    int end = lines.indexOf(BLOCK_END);
-                    if (start >= 0 && end >= start) {
-                        lines.subList(start, end + 1).clear();
-                        lines.remove(DATA_BIN);
-                        lines = new ArrayList<>(IgnoreRules.unscope(lines));
-                        // The blank lines that set the block apart no longer separate anything.
-                        for (int i = lines.size() - 1; i > 0; i--) {
-                            if (lines.get(i).isBlank() && lines.get(i - 1).isBlank()) {
-                                lines.remove(i);
-                            }
-                        }
-                        while (!lines.isEmpty() && lines.get(lines.size() - 1).isBlank()) {
-                            lines.remove(lines.size() - 1);
-                        }
-                        Files.writeString(gitignore, String.join("\n", lines) + "\n", StandardCharsets.UTF_8);
+                    String next = IgnoreRules.editManaged(ignoreBefore, LayoutSwitch::withoutCombinedRules);
+                    if (next != null) {
+                        Files.writeString(gitignore, next, StandardCharsets.UTF_8);
                     }
                     gw.add().addFilepattern(".gitignore").call();
                 }
