@@ -26,6 +26,27 @@ there is uncommitted work or while a sync or delivery follows another branch.
 
 ![A project's Branches tab: commit graph and branch list](images/versioning-branches.png)
 
+In Combined, a Designer checkout of a branch or commit moves config and every
+project, so it is refused, naming the files, while anything in the repository is
+uncommitted — config, another project, or this one (its changes cannot be put
+aside per branch, as they are in Separate). Files Ignition only reformatted do
+not count. A Designer pull, checkout, revert or merge abort is refused while that
+Designer has unsaved edits, listing them: save first, then try again.
+
+A pull that stops on a conflict leaves the merge open for the Designer's conflict
+dialog. While it is open the gateway makes no config commits (the auto-commit
+retries every 30 seconds), and page pulls, branch switches, restores, the layout
+switch and Join remote history are refused. A Designer that pulls or checks out
+while one is open offers the conflict dialog again; the Versioning header shows
+**Merge in progress** with **Abort merge…**, which puts back only the files the
+merge changed.
+
+**Any Designer user moves the whole gateway in Combined.** Pull, checkout, push and
+force push from a Designer act on the gateway repository with the gateway's
+credential, for config and every project. On a gateway where that matters, turn
+off **Create, switch and delete branches** and **Force push** (and Push, if
+Designers should not push) in a Prod policy override ([MODES.md](MODES.md)).
+
 In Combined, a revert from the Designer is refused when the commit also changed
 files outside that project, rather than undoing config or another project's
 work from a window that cannot show it. Config's auto-commit and **Restore**
@@ -58,9 +79,14 @@ refused, with nothing changed, while any project has uncommitted work.
   `projects/<name>/.git` left from before blocks the switch until you tick
   *Archive leftover .git folders*, which moves it to `var/git-archive`.
 
-Per-project remotes, credentials and deliveries are kept while Combined and
-work again after switching back; the gateway's Pull and Runner deliveries stop
-while Separate.
+Per-project credentials and deliveries are kept while Combined. A project's
+remotes live in its own `.git`, so they come back only with *Restore each
+project's earlier history*; without it the new repository has no remote, and the
+switch warns when a Sync delivery is still on for such a project (it would fail on
+every interval until a remote is added in the Designer or the delivery is set to
+Off). The archive also keeps what was only in the old repository: its stashes
+(per-branch uncommitted work) and commits never pushed. The gateway's Pull and
+Runner deliveries stop while Separate.
 
 ## Using an existing repository
 

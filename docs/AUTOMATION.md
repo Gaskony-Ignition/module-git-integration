@@ -101,7 +101,19 @@ Separate.
 
 Pull and repo updates refuse rather than stash or force: silently reverting an
 engineer's unsaved work is worse than not syncing. Release and Replace are
-chosen to be authoritative, so they overwrite — and Replace reports the count.
+chosen to be authoritative, so they overwrite — and Replace reports the count
+(in Combined, every uncommitted change in the repository, projects' too). A pull
+that stops on a conflict puts back only the files the merge wrote, never a hard
+reset. A project's sync takes the same per-project lock as its Designer's commit,
+pull and checkout, after its fetch.
+
+**Sync now** runs only an enabled Sync delivery. Its toast is green only when it
+pulled, replaced or found the branch up to date; a failure, or a run that did not
+pull (local changes, not merged on GitHub, behind), shows as an error.
+
+A project delivery that pulls authenticates as one user's stored credential: the
+admin who saves it (the default), or the user already set. Naming anyone else is
+refused (403), so a WRITE user cannot make a delivery use another user's credential.
 
 Ignition rewrites the JSON it imports (no final newline, escaped apostrophes,
 `"parent": ""`, reordered `files`), so git sees those files modified with

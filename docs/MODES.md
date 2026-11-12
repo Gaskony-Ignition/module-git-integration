@@ -124,7 +124,8 @@ credential is refused for a host other than its own:
   from an earlier version whose field was a label was bound at start-up to the
   one host its remotes use, and otherwise is refused until its host is set (the
   gateway log names it);
-- changing a project remote's URL to another host detaches its credential;
+- changing a project remote's URL to another host detaches its credential, and
+  saving the config remote with another host asks for its secret again;
 - testing a saved credential against a URL on another host asks for the secret
   again, and a Secret Provider reference can only be tested when a saved
   credential for that host already uses it.
@@ -143,8 +144,10 @@ see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 ## Production checklist
 
 - The git server's CA in the gateway's truststore, if it is private.
-- In Prod, the policy overridden read-only: push, Designer commit, branches and
-  layout off; only the deliveries Prod uses; insecure remotes off.
+- In Prod, the policy overridden read-only: push, force push, Designer commit, branches and
+  layout off; only the deliveries Prod uses; insecure remotes off. In the Combined layout this
+  matters more: any Designer user's pull, checkout, push or force push acts on the whole gateway
+  (config and every project) with the gateway's credential ([LAYOUT.md](LAYOUT.md)).
 - **Allowed remote hosts** set to your git host.
 - Credentials as Secret Provider references, read-only tokens in Prod.
 - Branch protection on every branch a gateway follows ([AUTOMATION.md](AUTOMATION.md),

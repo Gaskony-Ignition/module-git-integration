@@ -3,6 +3,63 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [4.4.3] - 2026-11-12
+
+### Fixed
+- Combined: a Designer's checkout of a branch or commit stashed the whole gateway repository,
+  other projects' and config's uncommitted work with it. It is now refused, naming the files,
+  while anything in the repository is uncommitted (files Ignition only reformatted do not count),
+  as the page's branch switch is.
+- A Designer pull, checkout, revert, merge abort or merge completion no longer throws away the
+  Designer's unsaved edits: it is refused, listing them, until they are saved. Discarding one
+  resource's changes drops only that resource's Designer edits.
+- Combined: a config auto-commit (or any config commit) while a Designer's pull was in conflict
+  completed that merge as a gateway commit, dropping the remote's changes. No config commit is made
+  while a merge, revert or cherry-pick is open; the auto-commit retries every 30 seconds, and page
+  pulls, branch switches, restores, the layout switch and Join remote history are refused. A
+  conflicted file is never staged.
+- A merge left open (the Designer closed mid-conflict) can be finished again: a Designer pull or
+  checkout offers the conflict dialog, and the Versioning header shows Merge in progress with
+  Abort merge.
+- A pull that stops on a conflict (Designer Abort, the page's Pull, a project sync) puts back only
+  the files the merge wrote instead of hard-resetting the repository, which in Combined took every
+  other project's and config's uncommitted work.
+- A pull after an import no longer fails with a checkout conflict over files Ignition only
+  reformatted, in any project (Combined) as well as the one pulling.
+- A revert that stopped before writing anything no longer undoes files.
+- A project's sync, its Designer's commit, pull, checkout and abort, and the page's branch switch
+  now take the same lock, so a sync cannot merge into a project mid-commit. Fetches run before the
+  lock.
+- Sync now showed a green toast when the sync failed or did not pull; it now shows an error. It
+  also refuses a project whose Sync delivery is off.
+- Sync — replace in Combined reported "discarded 0 uncommitted changes" while it discarded
+  projects' changes; it counts the whole repository.
+- Update from remote on an initialised repository hard-reset over uncommitted changes; it is now
+  refused, naming them.
+- A gateway pull that switched branch before its merge failed said "nothing was changed"; it now
+  says which branch the gateway is on.
+- Combined: Push all branches from the Designer skipped the remote layout check; every branch is
+  checked.
+- The auto-commit hold keeps the later of two deadlines, and the SSH host-key fingerprint in a
+  remote test is per call, not shared between two tests at once.
+- Switching to Separate warns when a project's Sync delivery is on but its new repository has no
+  remote.
+- The History tab's Author column stays on one line.
+
+### Security
+- `POST /delivery` took the credential owner from the request body, so a WRITE user could make a
+  delivery authenticate with another user's stored credential. Only the caller, or the owner
+  already set, is accepted (403 otherwise).
+- Saving the config remote with a different host and no new secret kept the old host's secret;
+  it now asks for the secret again.
+
+### Changed
+- docs/LAYOUT.md and docs/MODES.md say plainly that in Combined any Designer user's pull,
+  checkout, push and force push act on the whole gateway with the gateway's credential, and
+  recommend turning off branches and force push in a Prod policy override. LAYOUT.md no longer
+  says per-project remotes come back after switching to Separate without restoring history, and
+  notes that stashes and unpushed commits stay in the archive.
+
 ## [4.4.2] - 2026-11-12
 
 ### Fixed
