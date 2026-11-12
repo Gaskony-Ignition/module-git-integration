@@ -9,6 +9,8 @@ upstream's; everything below is this fork.
 - Configure versioning showed a remote's saved Secret Provider reference blank when the
   definition loaded after it, so changing only the branch asked for the secret again. The saved
   reference is shown, and a save with it left blank keeps it; a new host still asks for it.
+- A project's drawer showed its Credential as unpicked even when one was attached; it shows the
+  signed-in user's credential for that project's remote.
 
 ### Changed
 - Deployment-mode overrides now use the gateway's own Resource Definitions panel. The Policy tab,

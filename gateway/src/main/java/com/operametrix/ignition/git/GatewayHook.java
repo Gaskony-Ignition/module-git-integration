@@ -2511,6 +2511,17 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.addProperty("error", p.error());
                 o.addProperty("imagePrefix", GitProjectsConfigRecord.imagePrefixFor(p.name()));
                 o.addProperty("credentialIssue", CredentialCheck.issueFor(p.name()));
+                // The signed-in user's credential on this project's remote, so the drawer shows it
+                // instead of an empty pick (credentials are per user, per project remote).
+                String viewer = webUser(req).orElse(null);
+                GitProjectsConfigRecord pr = viewer == null ? null : GitProjectsConfigRecord.findByProjectName(p.name());
+                GitRemoteCredentialsRecord mine = pr == null || p.remoteName() == null ? null
+                        : GitRemoteCredentialsRecord.findByProjectUserRemote(pr.getId(), viewer, p.remoteName());
+                if (mine != null && mine.getHttpsCredentialId() > 0) {
+                    o.addProperty("credentialId", mine.getHttpsCredentialId());
+                } else if (mine != null && mine.getSshKeyId() > 0) {
+                    o.addProperty("credentialId", mine.getSshKeyId());
+                }
                 if (!GitManager.combined() && p.versioned() && p.remoteUrl() != null && !p.remoteUrl().isBlank()) {
                     GitSyncRecord s0 = GitSyncRecord.findByProject(p.name());
                     o.addProperty("renameMaster", autoRenameMaster(GitManager.repoFor(p.name()).root(),

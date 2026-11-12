@@ -234,6 +234,8 @@ export interface ProjectStatus {
   renameMaster?: string | null;
   // What is wrong with the credential this project pulls with, if anything.
   credentialIssue?: string | null;
+  // The signed-in user's credential on this project's remote, to show in the drawer.
+  credentialId?: number;
 }
 export type Delivery =
   | "off"

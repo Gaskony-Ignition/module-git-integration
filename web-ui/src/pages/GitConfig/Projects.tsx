@@ -132,7 +132,7 @@ const Projects = () => {
     setTarget(p);
     setVersion(p.versioned);
     setUrl(p.remoteUrl || "");
-    setCredId("");
+    setCredId(p.credentialId ? String(p.credentialId) : "");
     setImagePrefix(p.imagePrefix || "");
     // A pulling delivery is kept but inactive in Combined; the drawer offers Off or release.
     const shown =

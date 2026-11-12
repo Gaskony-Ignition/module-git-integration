@@ -242,7 +242,8 @@ async function sep1() {
   await check('link Example_A to its remote (Separate)', async () => {
     const r = await api('POST', '/project-init', { project: 'Example_A', url: `${SRV.dev}/example-a.git`, httpsCredentialId: credId.writer, branch: 'main' });
     const p = await project('Example_A');
-    return pass(ok(r) && p && p.versioned && p.branch === 'main' && p.remoteUrl, `${r.status} ${r.text.slice(0, 200)} ${JSON.stringify(p || {}).slice(0, 200)}`);
+    // credentialId: the drawer shows the credential the project was linked with.
+    return pass(ok(r) && p && p.versioned && p.branch === 'main' && p.remoteUrl && p.credentialId === credId.writer, `${r.status} ${r.text.slice(0, 200)} ${JSON.stringify(p || {}).slice(0, 200)}`);
   });
   await check('init Example_B locally, starts on main', async () => {
     const r = await api('POST', '/project-init', { project: 'Example_B' });
