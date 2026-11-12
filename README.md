@@ -60,7 +60,7 @@ than guessing. A project whose credential has expired, is refused, or cannot
 read its remote says so on the Projects tab, as does one expiring within 14
 days.
 
-![The Credentials tab: expiry and reach per credential](docs/images/versioning-credentials.png)
+![The Credentials tab, empty until one is added; each credential then shows expiry and reach](docs/images/versioning-credentials.png)
 
 **Logs** lists every commit, push, pull, sync, checkout and release since the
 gateway started, with the user, including an unattended one that failed, and why.
@@ -116,7 +116,7 @@ credential and override changes each write one row to the gateway's audit profil
 gateway page or a Designer (with the Designer's host).
 [docs/MODES.md](docs/MODES.md) has the setup.
 
-![The Policy tab: the gateway's settings page, on the Staging definition](docs/images/versioning-policy.png)
+![The Policy tab: the gateway's settings page](docs/images/versioning-policy.png)
 
 This build adds the gateway-side Versioning page, change badges, branches and
 delivery on top of upstream 2.1.0 ([CHANGELOG.md](CHANGELOG.md)). The

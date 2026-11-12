@@ -45,7 +45,7 @@ The default allows everything earlier versions allowed, any host, except
 insecure remotes. A URL with a password in it (`https://user:pass@host`) is
 refused whatever the policy; save the password as a credential.
 
-![The Policy tab: the gateway's settings page, on the Staging definition](images/versioning-policy.png)
+![The Policy tab: the gateway's settings page](images/versioning-policy.png)
 
 A refused action stays on screen, disabled, with the reason: on the page as
 text, in the Designer in the menu or button ("Checkout (off in Prod)"). The
