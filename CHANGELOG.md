@@ -3,6 +3,19 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [4.4.5] - 2026-11-12
+
+### Added
+- Policy tab: a "?" beside each setting, on the page and in Edit policy, opens a short
+  explanation of what it allows; the Audit log row's description moved behind one too.
+
+### Changed
+- A repository made before 4.2.0 that still sits on a lone `master` while its remote's branch is
+  `main` is renamed to `main` by itself when the Versioning page first shows it (gateway
+  repository and each project), with a line on the Logs tab. The page no longer reads
+  "Remote sync (master → main)". When the policy turns branch changes off, the Rename button is
+  offered instead; a delivery that follows `master` by name keeps it.
+
 ## [4.4.4] - 2026-11-12
 
 ### Added

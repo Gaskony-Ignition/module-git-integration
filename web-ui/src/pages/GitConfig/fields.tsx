@@ -90,3 +90,25 @@ const labelledText = (Base: React.ComponentType<Record<string, unknown>>) =>
 export const TextInput = labelledText(BaseTextInput);
 export const SelectInput = labelledSelect(BaseSelectInput);
 export const TextArea = labelled(BaseTextArea);
+
+// A "?" after a setting's name: the explanation stays hidden until someone asks for it.
+export const HelpButton = ({
+  label,
+  open,
+  onToggle,
+}: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+}) => (
+  <button
+    type="button"
+    className="gitcfg-help"
+    aria-label={`About ${label}`}
+    aria-expanded={open}
+    title={`About ${label}`}
+    onClick={onToggle}
+  >
+    ?
+  </button>
+);

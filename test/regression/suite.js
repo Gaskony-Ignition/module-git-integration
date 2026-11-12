@@ -218,12 +218,12 @@ async function sep1() {
     return pass(ok(s) && ok2, `save ${s.status} ${s.text.slice(0, 120)}; push ${p.status} ${JSON.stringify(p.json).slice(0, 150)}`);
   });
 
-  await check('gateway repository: a lone master behind a remote main is renamed', async () => {
+  await check('gateway repository: a lone master behind a remote main is renamed by itself', async () => {
     cgit('.', 'branch -m main master');
     const offer = (await api('GET', '/remote')).json.renameMaster;
-    const r = await api('POST', '/branch-rename-master', { repo: 'config' });
     const b = cgit('.', 'rev-parse --abbrev-ref HEAD');
-    return pass(offer === 'main' && ok(r) && b === 'main', `offer=${offer} rename ${r.status} ${r.text.slice(0, 120)} now=${b}`);
+    const logged = (await events()).some((e) => /Renamed local master to main to match the remote/.test(JSON.stringify(e)));
+    return pass(!offer && b === 'main' && logged, `offer=${offer} now=${b} logged=${logged}`);
   });
 
   await check('link Example_A to its remote (Separate)', async () => {
@@ -313,14 +313,13 @@ async function sep1() {
       && /took the project properties from the branch/i.test(e2),
     `sync1 ${s1.text.slice(0, 80)} md5 ${ours}/${kept}; sync2 ${s2.text.slice(0, 80)} md5 ${took}/${theirs}; keep ${keep1}/${keep2}; events ${JSON.stringify(e1).slice(0, 300)} | ${e2.slice(0, 120)}`);
   });
-  await check('Rename local master to main', async () => {
+  await check('a project on a lone master behind a remote main is renamed by itself', async () => {
     cgit('projects/Example_B', 'branch -m main master');
     const rr = await api('POST', '/project-remote', { project: 'Example_B', url: `${SRV.dev}/example-b.git` });
     cgit('projects/Example_B', `fetch -q ${bare('dev', 'example-b')} +refs/heads/*:refs/remotes/origin/*`);
     const p = await project('Example_B');
-    const r = await api('POST', '/branch-rename-master', { project: 'Example_B' });
-    const p2 = await project('Example_B');
-    return pass(ok(rr) && p.renameMaster === 'main' && ok(r) && p2.branch === 'main', `remote ${rr.status}; offer=${p.renameMaster} rename ${r.text.slice(0, 150)} branch=${p2.branch}`);
+    const b = cgit('projects/Example_B', 'rev-parse --abbrev-ref HEAD');
+    return pass(ok(rr) && !p.renameMaster && b === 'main', `remote ${rr.status}; offer=${p.renameMaster} branch=${b}`);
   });
   await check('runner release replaces the project, keeps .git', async () => {
     const t = await api('POST', '/runner', { enabled: true, generateToken: true });

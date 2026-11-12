@@ -181,6 +181,40 @@
 // --- Text ------------------------------------------------------------------------------
 
 // Explanatory text under a heading or a control. One class for the whole page.
+// A "?" after a setting's name, opening its explanation in place.
+.gitcfg-help {
+  margin-left: var(--gitcfg-space-2);
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: var(--gitcfg-border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--neutral-60);
+  font-size: var(--gitcfg-text-sm);
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+
+  &:hover,
+  &[aria-expanded="true"] {
+    color: var(--primary);
+    border-color: var(--primary);
+  }
+}
+
+.gitcfg-help-row td {
+  color: var(--neutral-60);
+  font-size: var(--gitcfg-text-md);
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.gitcfg-check-row {
+  display: flex;
+  align-items: center;
+}
+
 .gitcfg-hint {
   color: var(--neutral-60);
   font-size: var(--gitcfg-text-md);

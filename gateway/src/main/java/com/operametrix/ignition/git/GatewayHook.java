@@ -1002,6 +1002,50 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         }
     }
 
+    /**
+     * A repository made before 4.2.0 sits on a lone {@code master} while its remote's branch is
+     * {@code main}, so the page read "Remote sync (master → main)" as if the module had the branch
+     * wrong. Renamed here, where the page first sees it, with a line on the Logs tab. Returns the
+     * name still to offer on the Rename button: only when the policy forbids branch changes or the
+     * rename failed. MasterRename leaves anything but a lone, checked-out master alone, and a
+     * delivery that follows master by name keeps it.
+     *
+     * @param project the project, or null for the gateway repository
+     */
+    private static String autoRenameMaster(Path root, String wanted, String project) {
+        String to = renameTarget(root, wanted);
+        if (to == null) {
+            return null;
+        }
+        try {
+            PolicyGate.check(PolicyGate.Action.BRANCH_SWITCH);
+        } catch (Exception refused) {
+            return to;
+        }
+        try {
+            synchronized (project == null ? DataDirGitManager.lock() : GitManager.lockFor(GitManager.repoFor(project))) {
+                try (org.eclipse.jgit.api.Git git = GitManager.getGit(root)) {
+                    if (MasterRename.target(git.getRepository(), to) == null) {
+                        return null;
+                    }
+                    MasterRename.rename(git, to, "origin");
+                }
+            }
+            GitEvents.fire(GitEvent.of(GitEvent.CHECKOUT).project(project == null ? "" : project).user("gateway")
+                    .branch(to).message("Renamed local master to " + to + " to match the remote").success());
+            return null;
+        } catch (Exception e) {
+            // The page asks every few seconds: say it once per repository, not on every poll.
+            if (RENAME_WARNED.add(root.toString())) {
+                LoggerFactory.getLogger(GatewayHook.class).warn("Could not rename local master to {}{}: {}", to,
+                        project == null ? "" : " in project " + project, e.getMessage());
+            }
+            return to;
+        }
+    }
+
+    private static final java.util.Set<String> RENAME_WARNED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     /** Rename local master to the remote's branch name: {@code project}, or {@code repo:"config"}. */
     private Object handleRenameMaster(RequestContext req, HttpServletResponse resp) {
         try {
@@ -1281,12 +1325,14 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     delivery.add("last", lr);
                 }
                 o.add("delivery", delivery);
+                // Before the counts below, which a rename changes.
+                String renameMaster = autoRenameMaster(GitManager.getDataFolderPath(), remote.getBranch(), null);
                 // Unsynced-commit count for the header sync indicator.
                 o.addProperty("ahead", DataDirGitManager.aheadCount());
                 DataDirGitManager.Relation rel = DataDirGitManager.relation();
                 o.addProperty("behind", rel.behind());
                 o.addProperty("unrelated", rel.unrelated());
-                o.addProperty("renameMaster", renameTarget(GitManager.getDataFolderPath(), remote.getBranch()));
+                o.addProperty("renameMaster", renameMaster);
                 // What Remote sync pushes: the checked-out branch, and where it goes.
                 String[] target = DataDirGitManager.pushTargetNow(remote);
                 o.addProperty("pushFrom", target[0]);
@@ -2376,8 +2422,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.addProperty("credentialIssue", CredentialCheck.issueFor(p.name()));
                 if (!GitManager.combined() && p.versioned() && p.remoteUrl() != null && !p.remoteUrl().isBlank()) {
                     GitSyncRecord s0 = GitSyncRecord.findByProject(p.name());
-                    o.addProperty("renameMaster", renameTarget(GitManager.repoFor(p.name()).root(),
-                            s0 != null && s0.isEnabled() && !s0.getBranch().isBlank() ? s0.getBranch() : null));
+                    o.addProperty("renameMaster", autoRenameMaster(GitManager.repoFor(p.name()).root(),
+                            s0 != null && s0.isEnabled() && !s0.getBranch().isBlank() ? s0.getBranch() : null,
+                            p.name()));
                 }
 
                 // A runner delivery on a runner nobody switched on delivers nothing; say so.

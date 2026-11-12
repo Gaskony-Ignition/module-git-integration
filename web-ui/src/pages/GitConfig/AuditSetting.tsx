@@ -1,6 +1,6 @@
 import React from "react";
 import { Button, useToastNotifications } from "../../webui";
-import { SelectInput } from "./fields";
+import { HelpButton, SelectInput } from "./fields";
 import SettingsDrawer from "./SettingsDrawer";
 import { selectValue } from "./selectValue";
 import { useGetAuditQuery, useSaveAuditMutation } from "./GitConfig.service";
@@ -17,6 +17,7 @@ const AuditSetting = () => {
   const toasts = useToastNotifications();
   const [open, setOpen] = React.useState(false);
   const [choice, setChoice] = React.useState(GATEWAY);
+  const [help, setHelp] = React.useState(false);
 
   if (!data) return null;
   const current = !data.enabled ? OFF : data.profile || GATEWAY;
@@ -31,55 +32,68 @@ const AuditSetting = () => {
 
   // A row of the Policy table, though not part of the policy: it is this gateway's own setting.
   return (
-    <tr>
-      <td>
-        Audit log
-        <span className="gitcfg-proj-title">
-          One row per push, delivery, branch or layout switch, restore, policy,
-          credential and override change. This gateway only, not versioned.
-        </span>
-      </td>
-      <td>
-        {label(current)}{" "}
-        <Button
-          colorClass="link"
-          onClick={() => {
-            setChoice(current);
-            setOpen(true);
-          }}
-        >
-          Edit
-        </Button>
-        <SettingsDrawer
-          open={open}
-          title="Audit log"
-          onClose={() => setOpen(false)}
-          onSave={async () => {
-            await save({
-              enabled: choice !== OFF,
-              profile: choice === OFF || choice === GATEWAY ? "" : choice,
-            }).unwrap();
-            toasts.notifySuccess("Audit setting saved");
-          }}
-        >
-          <SelectInput
-            label="Audit profile"
-            value={choice}
-            values={[GATEWAY, OFF, ...data.profiles].map((v) => ({
-              label: label(v),
-              value: v,
-            }))}
-            onChange={(e: unknown) => setChoice(selectValue(e) || GATEWAY)}
+    <>
+      <tr>
+        <td>
+          Audit log
+          <HelpButton
+            label="Audit log"
+            open={help}
+            onToggle={() => setHelp(!help)}
           />
-          <p className="gitcfg-hint">
-            The gateway&apos;s audit profile is its Gateway Audit Profile
-            (Security › General Settings). Auditing never holds up a git action;
-            a profile that cannot be written to is logged once in the gateway
-            log.
-          </p>
-        </SettingsDrawer>
-      </td>
-    </tr>
+        </td>
+        <td>
+          {label(current)}{" "}
+          <Button
+            colorClass="link"
+            onClick={() => {
+              setChoice(current);
+              setOpen(true);
+            }}
+          >
+            Edit
+          </Button>
+          <SettingsDrawer
+            open={open}
+            title="Audit log"
+            onClose={() => setOpen(false)}
+            onSave={async () => {
+              await save({
+                enabled: choice !== OFF,
+                profile: choice === OFF || choice === GATEWAY ? "" : choice,
+              }).unwrap();
+              toasts.notifySuccess("Audit setting saved");
+            }}
+          >
+            <SelectInput
+              label="Audit profile"
+              value={choice}
+              values={[GATEWAY, OFF, ...data.profiles].map((v) => ({
+                label: label(v),
+                value: v,
+              }))}
+              onChange={(e: unknown) => setChoice(selectValue(e) || GATEWAY)}
+            />
+            <p className="gitcfg-hint">
+              The gateway&apos;s audit profile is its Gateway Audit Profile
+              (Security › General Settings). Auditing never holds up a git
+              action; a profile that cannot be written to is logged once in the
+              gateway log.
+            </p>
+          </SettingsDrawer>
+        </td>
+      </tr>
+      {help ? (
+        <tr className="gitcfg-help-row">
+          <td colSpan={2}>
+            One row in the audit profile per push, pull, delivery, branch or
+            layout switch, restore, revert, remote, policy, credential and
+            override change, from this page or a Designer. This gateway&apos;s
+            own setting: not part of the policy and not versioned.
+          </td>
+        </tr>
+      ) : null}
+    </>
   );
 };
 

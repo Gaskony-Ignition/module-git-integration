@@ -1,6 +1,6 @@
 import React from "react";
 import { Button, Loading, useToastNotifications } from "../../webui";
-import { TextInput } from "./fields";
+import { HelpButton, TextInput } from "./fields";
 import SettingsDrawer from "./SettingsDrawer";
 import AuditSetting from "./AuditSetting";
 import ScrollBox from "./ScrollBox";
@@ -36,6 +36,28 @@ const RISKY: Partial<Record<keyof PolicyFields, boolean>> = {
   allowInsecureRemotes: true,
 };
 
+// What each setting allows, shown behind its "?" so the table stays short.
+const HELP: Record<string, string> = {
+  pushAllowed:
+    "Sending commits to a remote, from a Designer or this page. Off: commits stay on this gateway.",
+  forcePushAllowed:
+    "When a remote rejects a Designer's push because it has commits this gateway lacks, offers to overwrite the remote branch. Off: pull first. Overwriting removes those newer commits from the remote.",
+  designerCommit:
+    "Committing, reverting and completing a merge from a Designer. Off: Designers can still see changes and history. The gateway's own config commits are not affected.",
+  branchSwitch:
+    "Creating, checking out and deleting branches, and checking out an older commit, from a Designer or this page. Off: each repository stays on its current branch.",
+  layoutSwitch:
+    "Switching between Separate (a repository per project plus one for config) and Combined (one repository for the whole gateway), under Configure versioning.",
+  allowInsecureRemotes:
+    "Remotes with no TLS or on this machine: file://, http://, git:// and localhost. Off: only https:// and SSH to another host.",
+  githubMergedOnly:
+    "A delivery installs a branch tip only when GitHub signed it, as it does for a pull request merged on GitHub, and only from a GitHub host below. A commit pushed straight to the branch is refused and logged.",
+  deliveries:
+    "How projects and the gateway repository may be updated without anyone at a Designer. Sync — pull merges the branch in when it moves and waits while anyone has uncommitted changes. Sync — replace makes the project match the branch exactly, overwriting local edits. Runner takes releases and updates from a GitHub Actions runner. Off is always allowed.",
+  allowedRemoteHosts:
+    "Hosts a remote may point at, checked before the gateway connects and when a remote is saved. *.example.com matches subdomains. Blank allows any host.",
+};
+
 const DELIVERIES: [DeliveryKind, string][] = [
   ["pull", "Sync — pull"],
   ["replace", "Sync — replace"],
@@ -58,6 +80,22 @@ const Policy = () => {
   const policy = data?.policy;
   const mode = policy?.mode ?? null;
   const [open, setOpen] = React.useState(false);
+  // The one setting whose explanation is showing, in the table or the drawer.
+  const [help, setHelp] = React.useState<string | null>(null);
+  const toggle = (key: string) => setHelp(help === key ? null : key);
+  const helpButton = (key: string, label: string) => (
+    <HelpButton
+      label={label}
+      open={help === key}
+      onToggle={() => toggle(key)}
+    />
+  );
+  const helpRow = (key: string) =>
+    help === key ? (
+      <tr className="gitcfg-help-row">
+        <td colSpan={2}>{HELP[key]}</td>
+      </tr>
+    ) : null;
   const [draft, setDraft] = React.useState<PolicyFields | null>(null);
   const [hosts, setHosts] = React.useState("");
   const [ghHosts, setGhHosts] = React.useState("github.com");
@@ -160,27 +198,41 @@ const Policy = () => {
           </thead>
           <tbody>
             {FLAGS.map(([key, label]) => (
-              <tr key={key}>
-                <td>{label}</td>
-                <td>{onOff(key, !!policy[key])}</td>
-              </tr>
+              <React.Fragment key={key}>
+                <tr>
+                  <td>
+                    {label}
+                    {helpButton(key, label)}
+                  </td>
+                  <td>{onOff(key, !!policy[key])}</td>
+                </tr>
+                {helpRow(key)}
+              </React.Fragment>
             ))}
             <tr>
-              <td>Deliveries</td>
+              <td>
+                Deliveries
+                {helpButton("deliveries", "Deliveries")}
+              </td>
               <td>
                 {DELIVERIES.filter(([d]) => policy.deliveryModes.includes(d))
                   .map(([, l]) => l)
                   .join(", ") || "Off only"}
               </td>
             </tr>
+            {helpRow("deliveries")}
             <tr>
-              <td>Allowed remote hosts</td>
+              <td>
+                Allowed remote hosts
+                {helpButton("allowedRemoteHosts", "Allowed remote hosts")}
+              </td>
               <td>
                 {policy.allowedRemoteHosts.length
                   ? policy.allowedRemoteHosts.join(", ")
                   : "Any"}
               </td>
             </tr>
+            {helpRow("allowedRemoteHosts")}
             <AuditSetting />
           </tbody>
         </table>
@@ -198,20 +250,32 @@ const Policy = () => {
           <>
             <Definitions {...defs} />
             {FLAGS.map(([key, label]) => (
-              <label className="gitcfg-check" key={key}>
-                <input
-                  type="checkbox"
-                  checked={draft[key] as boolean}
-                  onChange={(e) =>
-                    setDraft({ ...draft, [key]: e.target.checked })
-                  }
-                />
-                <span>{label}</span>
-              </label>
+              <React.Fragment key={key}>
+                <div className="gitcfg-check-row">
+                  <label className="gitcfg-check">
+                    <input
+                      type="checkbox"
+                      checked={draft[key] as boolean}
+                      onChange={(e) =>
+                        setDraft({ ...draft, [key]: e.target.checked })
+                      }
+                    />
+                    <span>{label}</span>
+                  </label>
+                  {helpButton(key, label)}
+                </div>
+                {help === key ? (
+                  <p className="gitcfg-hint">{HELP[key]}</p>
+                ) : null}
+              </React.Fragment>
             ))}
             <p className="gitcfg-hint">
               Deliveries allowed (Off always is allowed):
+              {helpButton("deliveries", "Deliveries")}
             </p>
+            {help === "deliveries" ? (
+              <p className="gitcfg-hint">{HELP.deliveries}</p>
+            ) : null}
             {DELIVERIES.map(([d, label]) => (
               <label className="gitcfg-check" key={d}>
                 <input
@@ -240,12 +304,6 @@ const Policy = () => {
             <p className="gitcfg-hint">
               Blank allows any host. Checked against a remote&apos;s URL before
               the gateway contacts it, and when a remote is saved.
-            </p>
-            <p className="gitcfg-hint">
-              Only deliver commits merged on GitHub: a delivery installs a
-              branch tip only when GitHub signed it (a pull request merged on
-              GitHub), and only from a GitHub host. Others are refused and
-              logged.
             </p>
             <TextInput
               label="GitHub hosts"
