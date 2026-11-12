@@ -142,6 +142,12 @@ const ConfigDrawer = ({
   const [confirmRemoveRemote, setConfirmRemoveRemote] = useState(false);
   const [confirmDeinit, setConfirmDeinit] = useState(false);
   const [dropRemote, setDropRemote] = useState(false);
+  // The saved reference, fetched separately (WRITE only). Kept here because the definition can
+  // load after it and its prefill would blank the provider and secret name again.
+  const [savedRef, setSavedRef] = useState<{
+    provider: string;
+    secretName: string;
+  } | null>(null);
 
   // Prefill from the saved remote each time the drawer opens (embedded secrets stay blank), and
   // from the selected definition when another one is chosen.
@@ -158,8 +164,8 @@ const ConfigDrawer = ({
       key: "",
       password: "",
       username: d.username || "",
-      provider: d.providerName || "",
-      secretName: d.secretName || "",
+      provider: d.providerName || savedRef?.provider || "",
+      secretName: d.secretName || savedRef?.secretName || "",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, def, editing]);
@@ -175,8 +181,8 @@ const ConfigDrawer = ({
       key: "",
       password: "",
       username: remote.username || "",
-      provider: remote.providerName || "",
-      secretName: remote.secretName || "",
+      provider: remote.providerName || savedRef?.provider || "",
+      secretName: remote.secretName || savedRef?.secretName || "",
     });
     setFeedback(null);
     setDeliveryMode(asMode(remote.delivery?.mode || "off"));
@@ -193,11 +199,16 @@ const ConfigDrawer = ({
     remote?.secretMode;
   useEffect(() => {
     if (!open || shownMode !== "reference") {
+      setSavedRef(null);
       return;
     }
     getSecretRef({ collection: editing })
       .unwrap()
       .then((r) => {
+        setSavedRef({
+          provider: r.providerName || "",
+          secretName: r.secretName || "",
+        });
         setValue("provider", r.providerName || "");
         setValue("secretName", r.secretName || "");
       })
@@ -215,10 +226,11 @@ const ConfigDrawer = ({
   const secretNames = providers.find((p) => p.name === provider)?.secrets || [];
 
   // A secret is available to save when: referencing (provider + name), typing a new embedded
-  // secret, or editing an already-configured remote (blank embedded secret keeps the current one).
+  // secret, or editing an already-configured remote (a blank secret keeps the current one, so a
+  // branch change needs nothing re-entered; the gateway asks again only for a new host).
   const hasSecret =
     mode === "reference"
-      ? !!provider && !!secretName
+      ? (!!provider && !!secretName) || configured
       : (credType === "SSH" ? !!key : !!password) || configured;
   const saveEnabled = !!uri.trim() && hasSecret;
 

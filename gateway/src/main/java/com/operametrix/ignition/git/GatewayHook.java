@@ -1468,7 +1468,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 rec.setIgnitionUser(req.getActor());
                 rec.setKeyName("Config repository (" + hostOf(uri) + ")");
                 if (reference) {
-                    rec.setSSHKeySecret(referencedSecret(body));
+                    SecretConfig kept = keptReference(body, rec.hasSecret() ? rec.getSecret() : null, newHost, again);
+                    rec.setSSHKeySecret(kept);
                 } else {
                     String key = optString(body, "key");
                     if (key != null && !key.isBlank()) {
@@ -1490,7 +1491,8 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 String username = optString(body, "username");
                 rec.setUserName(username == null ? "" : username.trim());
                 if (reference) {
-                    rec.setPasswordSecret(referencedSecret(body));
+                    SecretConfig kept = keptReference(body, rec.hasSecret() ? rec.getSecret() : null, newHost, again);
+                    rec.setPasswordSecret(kept);
                 } else {
                     String password = optString(body, "password");
                     if (password != null && !password.isBlank()) {
@@ -1547,6 +1549,24 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         } catch (Exception e) {
             return error(resp, e);
         }
+    }
+
+    /**
+     * The reference to save: the one named in the request, or with both names blank the stored
+     * reference, so changing the branch or URL path needs nothing re-entered. A new host is asked
+     * for again, as an embedded secret is.
+     */
+    private static SecretConfig keptReference(JsonObject body, SecretConfig stored, boolean newHost, String again) {
+        String p = optString(body, "providerName");
+        String n = optString(body, "secretName");
+        boolean blank = (p == null || p.isBlank()) && (n == null || n.isBlank());
+        if (blank && !newHost && stored != null && stored.isReferenced()) {
+            return stored;
+        }
+        if (blank && newHost) {
+            throw new RuntimeException("A provider and secret name are required." + again);
+        }
+        return referencedSecret(body);
     }
 
     /** Builds a referenced {@link SecretConfig} from the request's providerName/secretName. */
