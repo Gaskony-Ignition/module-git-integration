@@ -49,7 +49,7 @@ project and loads it (Separate layout).
 
 ![The Projects tab: each project's branch, remote, delivery and state](docs/images/versioning-projects.png)
 
-![A project's drawer: repository and delivery](docs/images/versioning-project-drawer.png)
+![A project's drawer: repository, attached credential and delivery](docs/images/versioning-project-drawer.png)
 
 **Credentials** shows, for each repository credential, when its token expires,
 what it is allowed to touch, and which projects it can read or push. The host is
@@ -72,13 +72,19 @@ gateway started, with the user, including an unattended one that failed, and why
 **In the Designer** — clone or initialise a project repository, manage remotes
 and credentials, commit from a dockable panel with per-resource selection, amend
 the last commit, browse history and diffs, switch and clean up branches, and
-push or pull.
+push or pull. A pull, checkout, revert or merge abort is refused while the
+Designer has unsaved edits, listing them; a merge left open (the Designer closed
+mid-conflict) can be finished or aborted later, from the Designer or the page's
+**Merge in progress** header.
 
 **On the gateway** — versions the data directory as code, commits automatically
 when a config resource changes, shows history and per-commit diffs, restores a
 previous commit, and pushes to a remote. **Git ignore** edits `.gitignore`
-directly: unticking a tracked path also untracks it, and rules you wrote by hand
-are never rewritten.
+directly: unticking a tracked path also untracks it. The module's own lines sit
+between `# >>> Git Integration` and `# <<< Git Integration` markers, so lines you
+or another tool add outside them are left where they are. **Join remote history**
+links this gateway to a branch another gateway started, and lists the files its
+commit would delete from that branch before you confirm.
 
 **Repository layout** — one repository per project (default), or the whole
 gateway as one repository. Switch under **Versioning → Configure versioning →

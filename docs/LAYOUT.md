@@ -121,9 +121,11 @@ while anything is uncommitted and when the policy does not allow Sync — pull.
 remote, or a new repository and Join remote history).
 
 New repositories start on the configured remote branch (default `main`). One
-made before 4.2.0 may sit on `master` while the remote's branch is `main`; the
-Versioning header (or the project's Branch column) then offers **Rename local
-master to main** — same commits, upstream kept.
+made before 4.2.0 may sit on a lone `master` while the remote's branch is `main`;
+the Versioning page renames it to `main` the first time it shows that repository
+(gateway or project) — same commits, upstream kept — and says so on the Logs tab.
+When the policy turns branch changes off it offers **Rename local master to main**
+instead, and a delivery that follows `master` by name keeps it.
 
 ## Designer branch list
 
