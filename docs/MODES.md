@@ -45,7 +45,7 @@ The default allows everything earlier versions allowed, any host, except
 insecure remotes. A URL with a password in it (`https://user:pass@host`) is
 refused whatever the policy; save the password as a credential.
 
-![The Policy tab in deployment mode Prod: each setting and its value, and where the settings come from](images/versioning-policy.png)
+![The Policy tab: the gateway's settings page, on the Staging definition](images/versioning-policy.png)
 
 A refused action stays on screen, disabled, with the reason: on the page as
 text, in the Designer in the menu or button ("Checkout (off in Prod)"). The
@@ -78,7 +78,7 @@ to Configure** when there is more than one. Credentials work the same way in the
 say which modes override a record ("Overridden in Prod"); a record that exists only in a mode is
 marked "Only in Prod", and a new record's drawer asks which collection to create it in.
 
-![The Policy tab on Prod's definition, with the ⋮ menu's Resource Definitions](images/versioning-save-to.png)
+![The Policy tab on Staging's definition, with the ⋮ menu's Resource Definitions](images/versioning-save-to.png)
 
 The same records can also be overridden from **Platform › Modes** or the
 gateway's `resources/copy` API; the module reads whichever value the active

@@ -116,7 +116,7 @@ credential and override changes each write one row to the gateway's audit profil
 gateway page or a Designer (with the Designer's host).
 [docs/MODES.md](docs/MODES.md) has the setup.
 
-![The Policy tab in deployment mode Prod](docs/images/versioning-policy.png)
+![The Policy tab: the gateway's settings page, on the Staging definition](docs/images/versioning-policy.png)
 
 This build adds the gateway-side Versioning page, change badges, branches and
 delivery on top of upstream 2.1.0 ([CHANGELOG.md](CHANGELOG.md)). The
