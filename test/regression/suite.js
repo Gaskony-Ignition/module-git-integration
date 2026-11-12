@@ -286,6 +286,33 @@ async function sep1() {
     const b = await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'main' });
     return pass(/deleted there/.test(s.json.result || '') && b.json.ok, `sync: ${s.text.slice(0, 250)}; back to main: ${b.text.slice(0, 100)}`);
   });
+  await check("Sync — replace keeps or takes the project properties", async () => {
+    const PROPS = `projects/Example_A/ignition/global-props/data.bin`;
+    const fx = (n) => fs.readFileSync(path.join(__dirname, '../../gateway/src/test/resources/global-props', n)).toString('base64');
+    const md5 = () => dexec(`md5sum ${DATA}/${PROPS} | cut -c1-32`);
+    // The gateway's names no identity provider; the branch's names 'default', so keeping warns.
+    dexec(`mkdir -p ${DATA}/projects/Example_A/ignition/global-props && echo ${fx('no-idp.bin')} | base64 -d > ${DATA}/${PROPS}`);
+    const ours = md5();
+    remoteCommit('dev', 'example-a', `mkdir -p ignition/global-props && echo ${fx('idp-default.bin')} | base64 -d > ignition/global-props/data.bin && git add -A && git commit -qm "props"`);
+    const d1 = await api('POST', '/delivery', { project: 'Example_A', delivery: 'sync-replace', branch: 'main', intervalSeconds: 3600 });
+    const keep1 = (await project('Example_A')).keepProjectProperties;
+    const s1 = await api('POST', '/sync-now', { project: 'Example_A' });
+    const kept = md5();
+    const e1 = (await events()).slice(0, 4).map((e) => e.message || '');
+    const d2 = await api('POST', '/delivery', { project: 'Example_A', delivery: 'sync-replace', branch: 'main', intervalSeconds: 3600, keepProjectProperties: false });
+    remoteCommit('dev', 'example-a', 'echo again >> NOTES.md && git add NOTES.md && git commit -qm "move branch"');
+    const s2 = await api('POST', '/sync-now', { project: 'Example_A' });
+    const took = md5();
+    const theirs = rsh(`git -C ${D}/dev/example-a.git show main:ignition/global-props/data.bin | md5sum | cut -c1-32`);
+    const e2 = ((await events())[0] || {}).message || '';
+    const keep2 = (await project('Example_A')).keepProjectProperties;
+    await api('POST', '/delivery', { project: 'Example_A', delivery: 'off', keepProjectProperties: true });
+    return pass(ok(d1) && ok(d2) && keep1 === true && keep2 === false && kept === ours && took === theirs && took !== ours
+      && e1.some((m) => /^Kept this gateway's project properties/.test(m))
+      && e1.some((m) => /name no identity provider; the branch's name 'default'/.test(m))
+      && /took the project properties from the branch/i.test(e2),
+    `sync1 ${s1.text.slice(0, 80)} md5 ${ours}/${kept}; sync2 ${s2.text.slice(0, 80)} md5 ${took}/${theirs}; keep ${keep1}/${keep2}; events ${JSON.stringify(e1).slice(0, 300)} | ${e2.slice(0, 120)}`);
+  });
   await check('Rename local master to main', async () => {
     cgit('projects/Example_B', 'branch -m main master');
     const rr = await api('POST', '/project-remote', { project: 'Example_B', url: `${SRV.dev}/example-b.git` });
