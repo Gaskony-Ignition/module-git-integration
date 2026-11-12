@@ -3,6 +3,11 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [Unreleased]
+
+### Fixed
+- Every "?" help button is drawn as a small circle, as the one beside Deliveries allowed was.
+
 ## [4.5.0] - 2026-11-12
 
 ### Fixed

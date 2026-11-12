@@ -182,7 +182,10 @@
 
 // Explanatory text under a heading or a control. One class for the whole page.
 // A "?" after a setting's name, opening its explanation in place.
-.gitcfg-help {
+// The platform's input label styles any button inside it as a bare link; `label button` outranks
+// that, so a "?" in a form label keeps its circle.
+button.gitcfg-help,
+label button.gitcfg-help {
   margin-left: var(--gitcfg-space-2);
   width: 1.25rem;
   height: 1.25rem;
