@@ -238,6 +238,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             synchronized (GitManager.lockFor(repo)) {
                 // Config's own pending changes are committed first, as the auto-committer would
                 // within seconds; what is left outside this project is someone else's work.
+                DataDirGitManager.refuseMidOperation();
                 DataDirGitManager.commitAllIfDirty("Config changes before a pull");
                 try (Git git = getGit(repo.root())) {
                     org.eclipse.jgit.lib.Repository r = git.getRepository();
@@ -263,6 +264,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                                 + (blocking.size() > 20 ? "\n..." : ""));
                     }
                     ConfigAutoCommitter.hold(30_000);
+                    ProjectScope.restoreReformatted(git, tip);
                     MergeResult merge = git.merge().include(tip)
                             .setMessage(PolicyGate.trailer("Merge " + remoteName + "/" + target)).call();
                     if (merge.getMergeStatus() == MergeResult.MergeStatus.CONFLICTING) {
@@ -300,11 +302,22 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             GitSyncRecord sync = GitSyncRecord.findByProject(projectName);
             refuseGoneUpstream(git.getRepository(), sync == null ? null : sync.getBranch());
 
+            org.eclipse.jgit.lib.BranchTrackingStatus tracking = org.eclipse.jgit.lib.BranchTrackingStatus.of(
+                    git.getRepository(), git.getRepository().getBranch());
+            if (tracking != null) {
+                ProjectScope.restoreReformatted(git,
+                        git.getRepository().resolve(tracking.getRemoteTrackingBranch()));
+            }
             PullCommand pull = git.pull();
             pull.setRemote(remoteName);
             setAuthentication(pull, projectName, userName, remoteName);
 
-            PullResult result = pull.call();
+            // The project's own lock, shared with its sync timer and page routes. The pull's second
+            // fetch runs under it, but the fetch above has already brought everything in.
+            PullResult result;
+            synchronized (GitManager.lockFor(GitManager.repoFor(projectName))) {
+                result = pull.call();
+            }
             if (!result.isSuccessful()) {
                 // Check specifically for merge conflicts
                 if (result.getMergeResult() != null
@@ -418,6 +431,21 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                 if (layout != null) {
                     throw new RuntimeException(layout);
                 }
+            } else if (GitManager.combined()) {
+                // Push all sends every local branch of the gateway repository: each one gets the
+                // same check against the remote branch of its name.
+                FetchCommand probe = git.fetch().setRemote(remoteName).setRemoveDeletedRefs(true);
+                setAuthentication(probe, projectName, userName, remoteName);
+                probe.call();
+                org.eclipse.jgit.lib.Repository r = git.getRepository();
+                for (org.eclipse.jgit.lib.Ref b : r.getRefDatabase().getRefsByPrefix("refs/heads/")) {
+                    String name = org.eclipse.jgit.lib.Repository.shortenRefName(b.getName());
+                    String layout = LayoutCheck.problem(r, r.resolve("refs/remotes/" + remoteName + "/" + name),
+                            b.getObjectId(), remoteName + "/" + name, true);
+                    if (layout != null) {
+                        throw new RuntimeException(layout);
+                    }
+                }
             }
 
             if (pushAllBranches) {
@@ -499,17 +527,19 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             return true;
         }
         try (Git git = getGit(getProjectFolderPath(projectName))) {
-            for (String change : changes) {
-                git.add().addFilepattern(change).call();
-                git.add().setUpdate(true).addFilepattern(change).call();
-            }
+            synchronized (GitManager.lockFor(repo)) {
+                for (String change : changes) {
+                    git.add().addFilepattern(change).call();
+                    git.add().setUpdate(true).addFilepattern(change).call();
+                }
 
-            CommitCommand commit = git.commit().setMessage(PolicyGate.trailer(message));
-            if (amend) {
-                commit.setAmend(true);
+                CommitCommand commit = git.commit().setMessage(PolicyGate.trailer(message));
+                if (amend) {
+                    commit.setAmend(true);
+                }
+                setCommitAuthor(commit, projectName, userName);
+                commit.call();
             }
-            setCommitAuthor(commit, projectName, userName);
-            commit.call();
         } catch (GitAPIException e) {
             logger.error(e.toString(), e);
             throw new RuntimeException(e);
@@ -972,13 +1002,17 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             boolean result;
             synchronized (GitManager.lockFor(repo)) {
                 ConfigAutoCommitter.hold(30_000);
-                result = GitManager.checkoutBranch(repo.root(), branchName);
+                result = GitManager.checkoutBranch(repo, branchName);
             }
             afterGatewayWide(projectName, before);
             auditCheckout(projectName, repo.root(), branchName);
             return result;
         }
-        boolean result = GitManager.checkoutBranch(getProjectFolderPath(projectName), branchName);
+        boolean result;
+        // Separate: the project's own lock, which its sync timer and page routes take too.
+        synchronized (GitManager.lockFor(repo)) {
+            result = GitManager.checkoutBranch(getProjectFolderPath(projectName), branchName);
+        }
         GitProjectManager.importProject(projectName);
         auditCheckout(projectName, getProjectFolderPath(projectName), branchName);
         return result;
@@ -1148,13 +1182,16 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             boolean result;
             synchronized (GitManager.lockFor(repo)) {
                 ConfigAutoCommitter.hold(30_000);
-                result = GitManager.checkoutCommit(repo.root(), commitHash);
+                result = GitManager.checkoutCommit(repo, commitHash);
             }
             afterGatewayWide(projectName, before);
             auditRestore(projectName, commitHash);
             return result;
         }
-        boolean result = GitManager.checkoutCommit(getProjectFolderPath(projectName), commitHash);
+        boolean result;
+        synchronized (GitManager.lockFor(repo)) {
+            result = GitManager.checkoutCommit(getProjectFolderPath(projectName), commitHash);
+        }
         GitProjectManager.importProject(projectName);
         auditRestore(projectName, commitHash);
         return result;
@@ -1456,7 +1493,10 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             afterGatewayWide(projectName, null);
             return result;
         }
-        boolean result = GitManager.abortMerge(getProjectFolderPath(projectName));
+        boolean result;
+        synchronized (GitManager.lockFor(repo)) {
+            result = GitManager.abortMerge(getProjectFolderPath(projectName));
+        }
         if (result) {
             GitProjectManager.importProject(projectName);
         }
@@ -1477,7 +1517,10 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             afterGatewayWide(projectName, null);
             return result;
         }
-        boolean result = GitManager.completeMergeCommit(getProjectFolderPath(projectName), projectName, userName);
+        boolean result;
+        synchronized (GitManager.lockFor(repo)) {
+            result = GitManager.completeMergeCommit(getProjectFolderPath(projectName), projectName, userName);
+        }
         if (result) {
             GitProjectManager.importProject(projectName);
         }

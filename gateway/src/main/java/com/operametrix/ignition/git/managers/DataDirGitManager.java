@@ -31,6 +31,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -378,30 +379,12 @@ public class DataDirGitManager {
             }
             List<String> changed = getStatus().stream().map(ConfigChange::path).toList();
             try (Git git = GitManager.getGit(dataDir())) {
-                CommitCommand cc = git.commit().setMessage(PolicyGate.trailer(message)).setAuthor(gatewayAuthor(), "");
-                if (GitManager.combined()) {
-                    // The same repository holds every project; stage exactly the config changes,
-                    // so a Designer's uncommitted work is never swept into an auto-commit. A staged
-                    // project file that is not a removal (a Git ignore exclusion's rm --cached) is
-                    // unstaged rather than committed. Not `commit --only`: that takes each path's
-                    // working-tree file, which would put an excluded file straight back.
-                    for (String path : changed) {
-                        git.add().addFilepattern(path).call();
-                        git.add().setUpdate(true).addFilepattern(path).call();
-                    }
-                    Status staged = git.status().call();
-                    for (Set<String> set : List.of(staged.getAdded(), staged.getChanged())) {
-                        for (String path : set) {
-                            if (!isConfigPath(path)) {
-                                git.reset().addPath(path).call();
-                            }
-                        }
-                    }
-                } else {
-                    stageScope(git, false);
-                    stageScope(git, true);
+                var commit = commitConfig(git, changed, message, gatewayAuthor(), GitManager.combined());
+                if (commit == null) {
+                    // Left for the auto-committer's retry, or the next change, once the operation ends.
+                    logger.info("Config changes not committed: " + midOperation(git.getRepository()));
+                    return false;
                 }
-                var commit = cc.call();
                 GitEvents.fire(GitEvent.of(GitEvent.AUTOCOMMIT).config()
                         .user(gatewayAuthor()).commit(commit.getName())
                         .message(message).files(changed).success());
@@ -413,6 +396,117 @@ public class DataDirGitManager {
             }
             return true;
         }
+    }
+
+    /**
+     * Why the gateway repository cannot take a commit of its own now, or null when it can. A
+     * Designer's pull that stopped on conflicts (Combined) leaves MERGE_HEAD here: a config commit
+     * would complete that merge as the gateway's, recording the remote as merged while dropping
+     * its changes.
+     */
+    public static String midOperation(Repository r) {
+        org.eclipse.jgit.lib.RepositoryState state = r.getRepositoryState();
+        return switch (state) {
+            case SAFE, BARE -> null;
+            case MERGING, MERGING_RESOLVED -> "a merge is in progress in the gateway repository (a pull stopped"
+                    + " on conflicts). Resolve it in the Designer, or Abort the merge on the Versioning page,"
+                    + " first.";
+            default -> "the gateway repository is in the middle of an operation (" + state.getDescription()
+                    + "). Finish or abort it first.";
+        };
+    }
+
+    /** {@link #midOperation} for the page's status, or null; never throws. */
+    public static String midOperationNow() {
+        if (!isInitialized()) {
+            return null;
+        }
+        try (Git git = GitManager.getGit(dataDir())) {
+            return midOperation(git.getRepository());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * The page's Abort for a merge left open in the gateway repository — a Designer closed while
+     * its pull was in conflict. Undoes only the files the merge wrote ({@link ProjectScope#abortMerge}),
+     * then reloads config and projects from disk.
+     */
+    public static void abortOpenMerge() {
+        synchronized (DATA_DIR_LOCK) {
+            ConfigAutoCommitter.hold(30_000);
+            try (Git git = GitManager.getGit(dataDir())) {
+                org.eclipse.jgit.lib.RepositoryState state = git.getRepository().getRepositoryState();
+                if (state != org.eclipse.jgit.lib.RepositoryState.MERGING
+                        && state != org.eclipse.jgit.lib.RepositoryState.MERGING_RESOLVED) {
+                    throw new RuntimeException("No merge is in progress in the gateway repository.");
+                }
+                ProjectScope.abortMerge(git, null, Set.of());
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+            } finally {
+                ConfigAutoCommitter.hold(6_000);
+            }
+            applyConfigToRunningGateway();
+            if (GitManager.combined()) {
+                applyProjects(null);
+            }
+        }
+    }
+
+    /** Throws when {@link #midOperation} has a reason; for actions a person asked for. */
+    public static void refuseMidOperation() {
+        try (Git git = GitManager.getGit(dataDir())) {
+            String why = midOperation(git.getRepository());
+            if (why != null) {
+                throw new IllegalStateException("Refused: " + why);
+            }
+        }
+    }
+
+    /**
+     * Stages and commits config's changes; null, with nothing staged, while the repository is
+     * mid-merge, revert or cherry-pick (see {@link #midOperation}).
+     */
+    static org.eclipse.jgit.revwalk.RevCommit commitConfig(Git git, List<String> changed, String message,
+                                                         String author, boolean combined) throws Exception {
+        if (midOperation(git.getRepository()) != null) {
+            return null;
+        }
+        CommitCommand cc = git.commit().setMessage(PolicyGate.trailer(message)).setAuthor(author, "");
+        Set<String> conflicting = git.status().call().getConflicting();
+        if (combined) {
+            // The same repository holds every project; stage exactly the config changes,
+            // so a Designer's uncommitted work is never swept into an auto-commit. A staged
+            // project file that is not a removal (a Git ignore exclusion's rm --cached) is
+            // unstaged rather than committed. Not `commit --only`: that takes each path's
+            // working-tree file, which would put an excluded file straight back.
+            for (String path : changed) {
+                if (conflicting.contains(path)) {
+                    continue;
+                }
+                git.add().addFilepattern(path).call();
+                git.add().setUpdate(true).addFilepattern(path).call();
+            }
+            Status staged = git.status().call();
+            for (Set<String> set : List.of(staged.getAdded(), staged.getChanged())) {
+                for (String path : set) {
+                    if (path.equals("projects") || path.startsWith("projects/")) {
+                        git.reset().addPath(path).call();
+                    }
+                }
+            }
+        } else {
+            if (!conflicting.isEmpty()) {
+                return null;
+            }
+            stageScope(git, false);
+            stageScope(git, true);
+        }
+        return cc.call();
     }
 
     /** Paginated commit history for the config repo. */
@@ -927,6 +1021,7 @@ public class DataDirGitManager {
             if (!isInitialized()) {
                 throw new RuntimeException("Config versioning is not initialised.");
             }
+            refuseMidOperation();
             ConfigAutoCommitter.hold(30_000);
             try (Git git = GitManager.getGit(dataDir())) {
                 commitAllIfDirty("Config changes before joining the remote history");
@@ -1098,6 +1193,21 @@ public class DataDirGitManager {
                 }
                 try (Git git = GitManager.getGit(dataDir())) {
                     Repository repo = git.getRepository();
+                    if (!fresh) {
+                        // The hard reset below would take them, in Combined every project's too.
+                        String busy = midOperation(repo);
+                        if (busy != null) {
+                            throw new RuntimeException("Refused: " + busy);
+                        }
+                        List<String> edits = IgnitionReformat.realChanges(repo, git.status().call()).stream()
+                                .filter(p -> !isNestedRepo(p)).sorted().toList();
+                        if (!edits.isEmpty()) {
+                            throw new RuntimeException("Update from remote would discard " + edits.size()
+                                    + " uncommitted change(s); commit or discard them first: "
+                                    + String.join(", ", edits.subList(0, Math.min(10, edits.size())))
+                                    + (edits.size() > 10 ? ", …" : ""));
+                        }
+                    }
 
                     FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
                             .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
@@ -1253,7 +1363,9 @@ public class DataDirGitManager {
                             discardedCommits++;
                         }
                     }
-                    int discardedChanges = getStatus().size();
+                    // The hard reset below takes every uncommitted change, projects' too in Combined.
+                    int discardedChanges = (int) IgnitionReformat.realChanges(repo, git.status().call()).stream()
+                            .filter(p -> !isNestedRepo(p)).count();
                     List<String> files = changedBetween(repo, head, tip);
 
                     // Hold the auto-committer first: it must not commit the rescan's own events, or
@@ -1358,6 +1470,7 @@ public class DataDirGitManager {
             throw new RuntimeException("Config versioning is not initialised; initialise it first.");
         }
         synchronized (DATA_DIR_LOCK) {
+            refuseMidOperation();
             ConfigAutoCommitter.hold(30_000);
             try {
                 commitAllIfDirty("Config changes before switching the repository layout");
@@ -1422,9 +1535,26 @@ public class DataDirGitManager {
         if (branch == null || branch.isBlank()) {
             throw new RuntimeException("No branch is set to follow.");
         }
+        // The fetch only moves the remote-tracking ref, so it runs outside the lock: a slow remote
+        // must not hold up config auto-commits and every Designer in Combined.
+        try (Git git = GitManager.getGit(dataDir())) {
+            FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
+                    .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
+            authOrigin(git, fetch, remote);
+            fetchBranch(fetch, branch);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+        }
         synchronized (DATA_DIR_LOCK) {
             try (Git git = GitManager.getGit(dataDir())) {
                 Repository repo = git.getRepository();
+                String busy = midOperation(repo);
+                if (busy != null) {
+                    return new PullResult(false, "", List.of(), busy.substring(0, 1).toUpperCase()
+                            + busy.substring(1) + " Not pulling.");
+                }
                 Status status = git.status().call();
                 Set<String> edits = IgnitionReformat.realChanges(repo, status);
                 if (!edits.isEmpty()) {
@@ -1437,10 +1567,6 @@ public class DataDirGitManager {
                     git.checkout().addPaths(new ArrayList<>(reformatted)).call();
                 }
 
-                FetchCommand fetch = git.fetch().setRemote(ORIGIN).setRemoveDeletedRefs(true)
-                        .setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + trackingRef(branch)));
-                authOrigin(git, fetch, remote);
-                fetchBranch(fetch, branch);
                 ObjectId tip = repo.resolve(trackingRef(branch));
                 if (tip == null) {
                     throw new RuntimeException(PullGuard.missingBranch(branch, ORIGIN));
@@ -1459,8 +1585,10 @@ public class DataDirGitManager {
                     }
                 }
                 ConfigAutoCommitter.hold(30_000);
+                String switchedFrom = null;
                 try {
                     if (!branch.equals(repo.getBranch())) {
+                        switchedFrom = repo.getBranch();
                         boolean exists = repo.findRef("refs/heads/" + branch) != null;
                         git.checkout().setName(branch).setCreateBranch(!exists)
                                 .setUpstreamMode(org.eclipse.jgit.api.CreateBranchCommand.SetupUpstreamMode.TRACK)
@@ -1474,11 +1602,18 @@ public class DataDirGitManager {
                                         + " gateway; not applied (Sync — replace follows it)");
                             }
                         }
+                        Set<String> untracked = new HashSet<>(git.status().call().getUntracked());
                         var merge = git.merge().include(tip).setMessage(PolicyGate.trailer("Merge " + ORIGIN + "/" + branch)).call();
                         if (!merge.getMergeStatus().isSuccessful()) {
-                            git.reset().setMode(ResetCommand.ResetType.HARD).call();
-                            throw new RuntimeException("Pull failed: merge " + merge.getMergeStatus()
-                                    + "; nothing was changed.");
+                            // A merge that failed outright wrote nothing; only a conflict left files to undo.
+                            if (merge.getMergeStatus() == org.eclipse.jgit.api.MergeResult.MergeStatus.CONFLICTING) {
+                                ProjectScope.abortMerge(git, tip, untracked);
+                            }
+                            // The checkout above already happened; say so rather than "nothing changed".
+                            throw new RuntimeException("Pull failed: merge " + merge.getMergeStatus() + (switchedFrom == null
+                                    ? "; nothing was changed."
+                                    : "; the merge was undone, but the gateway is now on '" + branch
+                                            + "' (it was on '" + switchedFrom + "')."));
                         }
                     }
                     ObjectId after = repo.resolve(Constants.HEAD);
@@ -1531,6 +1666,7 @@ public class DataDirGitManager {
      */
     public static void restoreToCommit(String commitHash, String actingUser) {
         synchronized (DATA_DIR_LOCK) {
+            refuseMidOperation();
             String shortHash;
             try (Git git = GitManager.getGit(dataDir())) {
                 ObjectId id = git.getRepository().resolve(commitHash);

@@ -134,4 +134,46 @@ class RevertSafetyTest {
     void sameFileCombined() throws Exception {
         uncommittedEditsToTheSameFileAreRefusedAndKept(RepoLocator.Layout.COMBINED);
     }
+
+    /** A conflicted pull in Combined, then Abort: other projects' and config's edits survive. */
+    @Test
+    void abortMergeTouchesOnlyWhatTheMergeWrote() throws Exception {
+        setUp(RepoLocator.Layout.COMBINED);
+        String config = "config/x.json";
+        write(config, "{\"c\":1}");
+        RevCommit base = commit("config");
+        write(view, "{\"v\":2}");
+        RevCommit theirs = commit("theirs");
+        git.reset().setMode(org.eclipse.jgit.api.ResetCommand.ResetType.HARD).setRef(base.getName()).call();
+        write(view, "{\"v\":3}");
+        commit("ours");
+        write(other, "{\"o\":9}");
+        write(config, "{\"c\":9}");
+
+        assertThat(git.merge().include(theirs).call().getMergeStatus())
+                .isEqualTo(org.eclipse.jgit.api.MergeResult.MergeStatus.CONFLICTING);
+        ProjectScope.abortMerge(git, null, java.util.Set.of());
+
+        assertThat(read(view)).isEqualTo("{\"v\":3}");
+        assertThat(read(other)).isEqualTo("{\"o\":9}");
+        assertThat(read(config)).isEqualTo("{\"c\":9}");
+        assertThat(git.getRepository().readMergeHeads()).isNull();
+        assertThat(git.status().call().getConflicting()).isEmpty();
+    }
+
+    /** After an import, a reformatted file the next pull changes no longer refuses the merge. */
+    @Test
+    void reformattedFilesDoNotBlockTheNextMerge() throws Exception {
+        setUp(RepoLocator.Layout.COMBINED);
+        RevCommit base = git.log().call().iterator().next();
+        write(view, "{\"v\":2}");
+        RevCommit theirs = commit("theirs");
+        git.reset().setMode(org.eclipse.jgit.api.ResetCommand.ResetType.HARD).setRef(base.getName()).call();
+        write(view, "{\n  \"v\": 1\n}");
+
+        ProjectScope.restoreReformatted(git, theirs);
+
+        assertThat(git.merge().include(theirs).call().getMergeStatus().isSuccessful()).isTrue();
+        assertThat(read(view)).isEqualTo("{\"v\":2}");
+    }
 }

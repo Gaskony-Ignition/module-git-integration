@@ -3,6 +3,7 @@ package com.operametrix.ignition.git.automation;
 import com.operametrix.ignition.git.GatewayHook;
 import com.operametrix.ignition.git.managers.GitHubMerged;
 import com.operametrix.ignition.git.managers.GitManager;
+import com.operametrix.ignition.git.managers.ProjectScope;
 import com.operametrix.ignition.git.managers.PullGuard;
 import com.operametrix.ignition.git.managers.GitProjectManager;
 import com.operametrix.ignition.git.managers.IgnitionReformat;
@@ -143,6 +144,21 @@ public final class SyncScheduler {
 
     private static final ThreadLocal<String> VIA = new ThreadLocal<>();
 
+    /**
+     * Merges {@code tracked}. A conflicted merge would leave markers in the project's files and the
+     * repository mid-merge, refusing every later sync, so it is undone — only the files it could
+     * have written ({@link ProjectScope#abortMerge}), never by a hard reset, which would also take
+     * an edit a Designer saved since the clean-tree check. A merge that failed outright wrote nothing.
+     */
+    static MergeResult mergeOrUndo(Git git, ObjectId tracked, String message) throws Exception {
+        Set<String> untracked = new java.util.HashSet<>(git.status().call().getUntracked());
+        MergeResult merge = git.merge().include(tracked).setMessage(message).call();
+        if (merge.getMergeStatus() == MergeResult.MergeStatus.CONFLICTING) {
+            ProjectScope.abortMerge(git, tracked, untracked);
+        }
+        return merge;
+    }
+
     /** Runs one repository's sync. Safe to call outside the timer (the Sync now button). */
     public static String syncNow(GitSyncRecord cfg) {
         String project = cfg.getProject();
@@ -193,100 +209,102 @@ public final class SyncScheduler {
             String branch = cfg.getBranch().isBlank() ? current : cfg.getBranch();
             boolean replace = cfg.isReplace();
 
-            // Someone has a Designer open with unsaved work. Pull mode refuses: silently
-            // discarding or stashing an engineer's changes is worse than not syncing. Replace mode
-            // was chosen to be authoritative, like a release, so it goes ahead and says so.
-            if (!replace) {
-                Status status = git.status().call();
-                Set<String> edits = IgnitionReformat.realChanges(repo, status);
-                if (!edits.isEmpty()) {
-                    String note = "local changes present (" + edits.size()
-                            + " uncommitted); not pulling";
-                    GitEvents.fire(GitEvent.of(GitEvent.SYNC).project(project).user(user)
-                            .branch(branch).remote(remoteName).failure(note));
-                    return note;
-                }
-                // What is left is Ignition's rewrite of files it imported, identical in content.
-                // Restore HEAD's bytes so the checkout and merge below see a clean tree.
-                Set<String> reformatted = IgnitionReformat.reformatted(repo, status);
-                if (!reformatted.isEmpty()) {
-                    git.checkout().addPaths(new ArrayList<>(reformatted)).call();
-                }
-            }
-
+            // The fetch only moves remote-tracking refs, so it runs before the project's lock: a slow
+            // remote must not hold up that project's Designer commits.
             FetchCommand fetch = git.fetch().setRemote(remoteName).setRemoveDeletedRefs(true);
             GitManager.setAuthentication(fetch, project, user, remoteName);
             fetch.call();
 
-            ObjectId tracked = repo.resolve("refs/remotes/" + remoteName + "/" + branch);
-            if (tracked == null) {
-                // Unattended: say so and stay put; switching branches is a person's decision.
-                throw new IllegalStateException(PullGuard.missingBranch(branch, remoteName));
-            }
-
-            ObjectId before = repo.resolve("HEAD");
-            boolean switched = !branch.equals(current);
+            ObjectId before;
+            boolean switched;
             String message;
-
-            if (switched || !tracked.equals(before)) {
-                String notMerged = GitHubMerged.refusal(repo, tracked,
-                        GitManager.getRemoteUrl(repo.getWorkTree().toPath(), remoteName));
-                if (notMerged != null) {
-                    if (GitHubMerged.firstRefusal("project:" + project, tracked)) {
-                        logger.warn("Project '{}': {}", project, notMerged);
-                        GitEvents.fire(GitEvent.of(GitEvent.SYNC).project(project).user(user).branch(branch)
-                                .remote(remoteName).commit(tracked.getName()).warning(notMerged));
+            // The lock a Designer's commit, pull and checkout on this project take too.
+            synchronized (GitManager.lockFor(GitManager.repoFor(project))) {
+                // Someone has a Designer open with unsaved work. Pull mode refuses: silently
+                // discarding or stashing an engineer's changes is worse than not syncing. Replace mode
+                // was chosen to be authoritative, like a release, so it goes ahead and says so.
+                if (!replace) {
+                    Status status = git.status().call();
+                    Set<String> edits = IgnitionReformat.realChanges(repo, status);
+                    if (!edits.isEmpty()) {
+                        String note = "local changes present (" + edits.size()
+                                + " uncommitted); not pulling";
+                        GitEvents.fire(GitEvent.of(GitEvent.SYNC).project(project).user(user)
+                                .branch(branch).remote(remoteName).failure(note));
+                        return note;
                     }
-                    return notMerged;
-                }
-            }
-
-            if (replace) {
-                // Compared with HEAD, not the working tree: a replace runs when the branch moves,
-                // as a release runs when one is published, not whenever someone edits.
-                if (!switched && tracked.equals(before)) {
-                    return "up to date";
-                }
-                message = replace(git, repo, branch, current, remoteName, tracked, before, switched);
-            } else {
-                // Sync set to follow a branch that is not the one checked out: switch to it.
-                // Pulling it into whatever IS checked out merges the wrong branch, and because the
-                // local ref never exists the comparison below never matches, so it re-pulled and
-                // rescanned the project on every interval. The tree is clean (refused above).
-                if (switched) {
-                    checkout(git, repo, branch, remoteName);
+                    // What is left is Ignition's rewrite of files it imported, identical in content.
+                    // Restore HEAD's bytes so the checkout and merge below see a clean tree.
+                    Set<String> reformatted = IgnitionReformat.reformatted(repo, status);
+                    if (!reformatted.isEmpty()) {
+                        git.checkout().addPaths(new ArrayList<>(reformatted)).call();
+                    }
                 }
 
-                ObjectId local = repo.resolve(branch);
-                if (!switched && tracked.equals(local)) {
-                    return "up to date";
+                ObjectId tracked = repo.resolve("refs/remotes/" + remoteName + "/" + branch);
+                if (tracked == null) {
+                    // Unattended: say so and stay put; switching branches is a person's decision.
+                    throw new IllegalStateException(PullGuard.missingBranch(branch, remoteName));
                 }
 
-                // The remote branch moved BACKWARDS (a force-push, e.g. a promotion rolled back).
-                // A pull changes nothing, and reporting it as a sync would re-import and rescan
-                // every interval. Following it is what Replace mode is for.
-                if (!switched && local != null && isAncestor(repo, tracked, local)) {
-                    return "remote branch is behind this gateway; not applied (Replace mode follows it)";
-                }
+                before = repo.resolve("HEAD");
+                switched = !branch.equals(current);
 
-                if (!tracked.equals(local)) {
-                    // Merge the very commit fetched and checked above, never a second fetch's tip:
-                    // a push in between would otherwise be installed unchecked.
-                    MergeResult merge = git.merge().include(tracked)
-                            .setMessage(com.operametrix.ignition.git.managers.PolicyGate.trailer(
-                                    "Merge " + remoteName + "/" + branch))
-                            .call();
-                    if (!merge.getMergeStatus().isSuccessful()) {
-                        // A conflicted merge leaves markers in the project's files and the
-                        // repository mid-merge, refusing every later sync; the tree was clean, so
-                        // put it back as it was.
-                        if (local != null) {
-                            git.reset().setMode(ResetCommand.ResetType.HARD).setRef(local.getName()).call();
+                if (switched || !tracked.equals(before)) {
+                    String notMerged = GitHubMerged.refusal(repo, tracked,
+                            GitManager.getRemoteUrl(repo.getWorkTree().toPath(), remoteName));
+                    if (notMerged != null) {
+                        if (GitHubMerged.firstRefusal("project:" + project, tracked)) {
+                            logger.warn("Project '{}': {}", project, notMerged);
+                            GitEvents.fire(GitEvent.of(GitEvent.SYNC).project(project).user(user).branch(branch)
+                                    .remote(remoteName).commit(tracked.getName()).warning(notMerged));
                         }
-                        throw new IllegalStateException("merge " + merge.getMergeStatus());
+                        return notMerged;
                     }
                 }
-                message = switched ? "Switched from " + current + " to " + branch + "; pulled" : "Pulled";
+
+                if (replace) {
+                    // Compared with HEAD, not the working tree: a replace runs when the branch moves,
+                    // as a release runs when one is published, not whenever someone edits.
+                    if (!switched && tracked.equals(before)) {
+                        return "up to date";
+                    }
+                    message = replace(git, repo, branch, current, remoteName, tracked, before, switched);
+                } else {
+                    // Sync set to follow a branch that is not the one checked out: switch to it.
+                    // Pulling it into whatever IS checked out merges the wrong branch, and because the
+                    // local ref never exists the comparison below never matches, so it re-pulled and
+                    // rescanned the project on every interval. The tree is clean (refused above).
+                    if (switched) {
+                        checkout(git, repo, branch, remoteName);
+                    }
+
+                    ObjectId local = repo.resolve(branch);
+                    if (!switched && tracked.equals(local)) {
+                        return "up to date";
+                    }
+
+                    // The remote branch moved BACKWARDS (a force-push, e.g. a promotion rolled back).
+                    // A pull changes nothing, and reporting it as a sync would re-import and rescan
+                    // every interval. Following it is what Replace mode is for.
+                    if (!switched && local != null && isAncestor(repo, tracked, local)) {
+                        return "remote branch is behind this gateway; not applied (Replace mode follows it)";
+                    }
+
+                    if (!tracked.equals(local)) {
+                        // Merge the very commit fetched and checked above, never a second fetch's tip:
+                        // a push in between would otherwise be installed unchecked.
+                        MergeResult merge = mergeOrUndo(git, tracked,
+                                com.operametrix.ignition.git.managers.PolicyGate.trailer(
+                                        "Merge " + remoteName + "/" + branch));
+                        if (!merge.getMergeStatus().isSuccessful()) {
+                            throw new IllegalStateException("merge " + merge.getMergeStatus()
+                                    + (switched ? "; switched from " + current + " to " + branch + ", nothing merged"
+                                            : "; nothing was changed"));
+                        }
+                    }
+                    message = switched ? "Switched from " + current + " to " + branch + "; pulled" : "Pulled";
+                }
             }
 
             ObjectId after = repo.resolve(branch);

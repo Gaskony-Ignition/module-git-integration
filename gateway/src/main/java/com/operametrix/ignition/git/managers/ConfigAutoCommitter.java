@@ -37,6 +37,9 @@ public class ConfigAutoCommitter implements ResourceCollectionListener {
     /** Follow-up resources of one logical operation arrive within well under this window. */
     private static final long QUIESCE_MS = 2000;
 
+    /** How soon to try again while the repository is mid-merge and cannot take a commit. */
+    private static final long RETRY_MS = 30_000;
+
     /** Startup sweep delay — lets boot-time config writes settle into the same commit. */
     private static final long STARTUP_SWEEP_MS = 10_000;
 
@@ -53,8 +56,9 @@ public class ConfigAutoCommitter implements ResourceCollectionListener {
     private static volatile long holdUntil;
 
     /** Keeps the auto-commit away from files being replaced until {@code ms} from now . */
-    public static void hold(long ms) {
-        holdUntil = System.currentTimeMillis() + ms;
+    public static synchronized void hold(long ms) {
+        // The later deadline wins: a short hold must not cut short a longer one still running.
+        holdUntil = Math.max(holdUntil, System.currentTimeMillis() + ms);
     }
 
     private final Object scheduleLock = new Object();
@@ -123,7 +127,10 @@ public class ConfigAutoCommitter implements ResourceCollectionListener {
             if (status.isEmpty()) {
                 return;
             }
-            DataDirGitManager.commitAllIfDirty(buildMessage(status));
+            if (!DataDirGitManager.commitAllIfDirty(buildMessage(status))) {
+                // Not committed with changes pending: a merge or revert is open in the repository.
+                schedule(RETRY_MS);
+            }
         } catch (Exception e) {
             logger.error("Auto-commit of config changes failed; the changes stay uncommitted.", e);
         }

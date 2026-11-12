@@ -263,9 +263,22 @@ public final class ProjectScope {
      */
     public static List<String> blockingChanges(Repository r, RepoLocator.Repo project, ObjectId tip,
                                                Set<String> dirty) throws IOException {
+        Set<String> incoming = incoming(r, tip);
+        List<String> out = new ArrayList<>();
+        for (String p : dirty) {
+            if (!project.contains(p) && incoming.contains(p)) {
+                out.add(p);
+            }
+        }
+        java.util.Collections.sort(out);
+        return out;
+    }
+
+    /** Files a merge of {@code tip} into HEAD may write: those changed on its side since the merge base. */
+    public static Set<String> incoming(Repository r, ObjectId tip) throws IOException {
         ObjectId head = r.resolve(Constants.HEAD);
         if (head == null || tip == null) {
-            return List.of();
+            return Set.of();
         }
         ObjectId base;
         try (RevWalk walk = new RevWalk(r)) {
@@ -275,16 +288,48 @@ public final class ProjectScope {
             RevCommit b = walk.next();
             base = b == null ? null : b.getId();
         }
-        Set<String> incoming = new HashSet<>(base == null
-                ? changedFiles(r, tip) : changedBetween(r, base, tip));
-        List<String> out = new ArrayList<>();
-        for (String p : dirty) {
-            if (!project.contains(p) && incoming.contains(p)) {
-                out.add(p);
-            }
+        return new HashSet<>(base == null ? changedFiles(r, tip) : changedBetween(r, base, tip));
+    }
+
+    /**
+     * Ignition rewrites the JSON it imports, so after one pull the next can find files that differ
+     * from HEAD only in formatting; where the merge would change them, HEAD's bytes go back first
+     * or JGit refuses the whole merge with a checkout conflict. The whole repository's status, not
+     * the project's: in Combined the merge writes config and other projects too, and their
+     * reformatted files hold nothing HEAD does not.
+     */
+    public static void restoreReformatted(Git git, ObjectId tip) throws Exception {
+        Repository r = git.getRepository();
+        Set<String> files = new java.util.TreeSet<>(IgnitionReformat.reformatted(r, git.status().call()));
+        files.retainAll(incoming(r, tip));
+        if (!files.isEmpty()) {
+            org.eclipse.jgit.api.CheckoutCommand co = git.checkout().setStartPoint(Constants.HEAD);
+            files.forEach(co::addPath);
+            co.call();
         }
-        java.util.Collections.sort(out);
-        return out;
+    }
+
+    /**
+     * Undoes a merge that stopped part way, touching only the files it could have written. A pull
+     * starts only when none of those has uncommitted edits, so restoring them from HEAD loses
+     * nothing; a hard reset would also take every other uncommitted change in the repository,
+     * which in the Combined layout is other projects' and config's.
+     *
+     * @param theirs the commit being merged, or null to read it from MERGE_HEAD
+     * @param untrackedBefore untracked paths before the merge started (left alone)
+     */
+    public static void abortMerge(Git git, ObjectId theirs, Set<String> untrackedBefore) throws Exception {
+        Repository r = git.getRepository();
+        if (theirs == null) {
+            List<ObjectId> heads = r.readMergeHeads();
+            theirs = heads == null || heads.isEmpty() ? null : heads.get(0);
+        }
+        Set<String> paths = new java.util.TreeSet<>(git.status().call().getConflicting());
+        if (theirs != null) {
+            paths.addAll(incoming(r, theirs));
+        }
+        undo(git, new ArrayList<>(paths), untrackedBefore);
+        r.writeMergeHeads(null);
     }
 
     /**
@@ -406,9 +451,14 @@ public final class ProjectScope {
         org.eclipse.jgit.api.RevertCommand cmd = git.revert().include(id);
         RevCommit result = cmd.call();
         if (result == null) {
-            undo(git, touched, before.getUntracked());
             List<String> unmerged = cmd.getUnmergedPaths();
-            // No unmerged path means JGit stopped on a file that changed under it, not a conflict.
+            // With no unmerged path JGit stopped before writing anything; only a conflict needs undoing.
+            if (unmerged != null && !unmerged.isEmpty()) {
+                undo(git, touched, before.getUntracked());
+            } else {
+                r.writeRevertHead(null);
+                r.writeMergeCommitMsg(null);
+            }
             throw new IllegalStateException(unmerged == null || unmerged.isEmpty()
                     ? "Revert stopped: a file it needs was being written on the gateway. Nothing was"
                         + " changed; try again."

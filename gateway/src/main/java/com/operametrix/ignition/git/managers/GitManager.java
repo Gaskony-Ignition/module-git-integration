@@ -688,16 +688,82 @@ public class GitManager {
     private static final String STASH_PREFIX = "auto-stash: ";
 
     public static boolean checkoutBranch(Path projectFolderPath, String branchName) throws Exception {
+        return checkoutBranch(projectFolderPath, branchName, true);
+    }
+
+    /** A Designer checkout: per-branch stash in Separate, refused while anything is uncommitted in Combined. */
+    public static boolean checkoutBranch(RepoLocator.Repo repo, String branchName) throws Exception {
+        if (!repo.scoped()) {
+            return checkoutBranch(repo.root(), branchName, true);
+        }
+        try (Git git = getGit(repo.root())) {
+            refuseUncommittedGatewayWide(git, repo);
+        }
+        // No stash either way: an older one saved here would hold the whole gateway's work.
+        return checkoutBranch(repo.root(), branchName, false);
+    }
+
+    public static boolean checkoutCommit(RepoLocator.Repo repo, String commitHash) throws Exception {
+        if (repo.scoped()) {
+            try (Git git = getGit(repo.root())) {
+                refuseUncommittedGatewayWide(git, repo);
+            }
+        }
+        return checkoutCommit(repo.root(), commitHash);
+    }
+
+    /**
+     * In Combined a checkout moves config and every project, and JGit's stash cannot be limited to
+     * one project's paths: stashing would put other projects' and config's uncommitted work aside
+     * where nobody looks for it. So any real change refuses, as the page's branch switch does. A
+     * file Ignition only reformatted goes back to HEAD instead, or it would block the checkout.
+     */
+    static void refuseUncommittedGatewayWide(Git git, RepoLocator.Repo repo) throws Exception {
+        Repository r = git.getRepository();
+        Status status = git.status().call();
+        Set<String> real = IgnitionReformat.realChanges(r, status);
+        if (!real.isEmpty()) {
+            List<String> elsewhere = real.stream().filter(p -> !repo.contains(p)).sorted().toList();
+            List<String> own = real.stream().filter(repo::contains).map(repo::toProjectPath).sorted().toList();
+            StringBuilder m = new StringBuilder("This gateway keeps config and every project in one repository,"
+                    + " so a checkout needs no uncommitted work anywhere in it. Nothing was changed.");
+            if (!elsewhere.isEmpty()) {
+                m.append("\n\nUncommitted outside this project (config auto-commits within a few seconds;"
+                        + " other projects are committed from their own Designer):\n").append(listOf(elsewhere));
+            }
+            if (!own.isEmpty()) {
+                m.append("\n\nUncommitted in this project (commit or discard them first; they cannot be"
+                        + " put aside per branch here):\n").append(listOf(own));
+            }
+            throw new IllegalStateException(m.toString());
+        }
+        Set<String> rewritten = IgnitionReformat.reformatted(r, status);
+        if (!rewritten.isEmpty()) {
+            git.checkout().addPaths(new ArrayList<>(rewritten)).call();
+        }
+    }
+
+    private static String listOf(List<String> files) {
+        return String.join("\n", files.subList(0, Math.min(20, files.size())))
+                + (files.size() > 20 ? "\n... and " + (files.size() - 20) + " more" : "");
+    }
+
+    private static boolean checkoutBranch(Path projectFolderPath, String branchName, boolean stash)
+            throws Exception {
         try (Git git = getGit(projectFolderPath)) {
             String currentBranch = git.getRepository().getBranch();
 
             // Stash uncommitted changes on the current branch
-            stashChanges(git, currentBranch);
+            if (stash) {
+                stashChanges(git, currentBranch);
+            }
 
             // If a local branch with this name already exists, just switch to it.
             if (localBranchExists(git, branchName)) {
                 git.checkout().setName(branchName).call();
-                applyStash(git, branchName);
+                if (stash) {
+                    applyStash(git, branchName);
+                }
                 return true;
             }
 
@@ -727,7 +793,9 @@ public class GitManager {
             }
 
             // Apply stashed changes for the target branch if any exist
-            applyStash(git, localName);
+            if (stash) {
+                applyStash(git, localName);
+            }
 
             return true;
         }
@@ -1389,7 +1457,7 @@ public class GitManager {
      */
     public static boolean abortMerge(Path projectFolderPath) {
         try (Git git = getGit(projectFolderPath)) {
-            git.reset().setMode(ResetCommand.ResetType.HARD).call();
+            ProjectScope.abortMerge(git, null, Set.of());
             return true;
         } catch (Exception e) {
             logger.error("Error aborting merge", e);
