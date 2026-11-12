@@ -31,7 +31,8 @@ project, so it is refused, naming the files, while anything in the repository is
 uncommitted — config, another project, or this one (its changes cannot be put
 aside per branch, as they are in Separate). Files Ignition only reformatted do
 not count. A Designer pull, checkout, revert or merge abort is refused while that
-Designer has unsaved edits, listing them: save first, then try again.
+Designer has unsaved edits, including one still open in an editor tab, listing
+them: save first, then try again.
 
 A pull that stops on a conflict leaves the merge open for the Designer's conflict
 dialog. While it is open the gateway makes no config commits (the auto-commit
@@ -54,9 +55,9 @@ leave `projects/` alone. A runner release and a deleted project are each
 committed for that project's folder only. An open Designer follows a layout or
 branch switch within ten seconds, without reopening.
 
-![The Repository layout setting](images/versioning-layout.png)
+![Configure versioning, Layout tab](images/versioning-layout.png)
 
-To switch: **Versioning → Configure versioning → Repository layout**. It is
+To switch: **Versioning → Configure versioning → Layout**. It is
 refused, with nothing changed, while any project has uncommitted work.
 
 - **Separate → Combined** moves each project's `.git` to

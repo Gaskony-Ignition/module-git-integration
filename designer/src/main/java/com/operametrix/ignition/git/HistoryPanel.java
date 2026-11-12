@@ -329,6 +329,7 @@ public class HistoryPanel extends JPanel {
 
     private JButton createToolbarButton(Icon icon, String tooltip, Runnable action) {
         JButton button = new JButton(icon);
+        button.setDisabledIcon(faded(icon));
         button.setToolTipText(tooltip);
         button.setContentAreaFilled(false);
         button.setBorderPainted(false);
@@ -350,6 +351,38 @@ public class HistoryPanel extends JPanel {
         });
         button.addActionListener(e -> action.run());
         return button;
+    }
+
+    /**
+     * The icon at a third of its opacity, for a disabled button. The look and feel's own disabled
+     * icon is a grey filter, and these icons are grey already, so a disabled Push looked enabled.
+     */
+    private static Icon faded(Icon icon) {
+        if (icon == null) {
+            return null;
+        }
+        return new Icon() {
+            @Override
+            public void paintIcon(Component c, Graphics g, int x, int y) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                try {
+                    g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.35f));
+                    icon.paintIcon(c, g2, x, y);
+                } finally {
+                    g2.dispose();
+                }
+            }
+
+            @Override
+            public int getIconWidth() {
+                return icon.getIconWidth();
+            }
+
+            @Override
+            public int getIconHeight() {
+                return icon.getIconHeight();
+            }
+        };
     }
 
     // --- Callback setters ---

@@ -1103,3 +1103,12 @@ body.gitcfg-no-backup [data-label="Add Backup Version"] + hr {
 .gitcfg-form > .gitcfg-tabs {
   margin-bottom: 0;
 }
+
+// The gateway delivery's last run in Configure versioning: a long failure stops at three lines
+// (the whole text is its tooltip), so the Delivery tab never scrolls at 1366x640.
+.gitcfg-last-run {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}

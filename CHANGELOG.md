@@ -3,6 +3,26 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [4.5.2] - 2026-11-13
+
+### Fixed
+- The Designer did not see an edit still open in an editor tab (a Perspective view changed in the
+  Property Editor, for one) as unsaved, so pull, checkout, revert and merge abort went ahead and
+  the reload threw it away. Open tabs are committed to the project before the check, as File >
+  Save does, and the refusal lists them.
+- Configure versioning scrolled inside itself at 1366x640. It now has three tabs, Delivery,
+  Layout and Delete; Branch and Every sit side by side; what each delivery does is a tooltip on
+  the "?" beside "How changes reach this gateway"; Sync — replace says "(overwrites local edits)"
+  in the list; a long last-run message stops at three lines, the full text in its tooltip.
+- The Designer History panel's Push button did not look disabled when the Git policy turns
+  pushing off; it is now drawn faded.
+- In the Combined layout, the Designer's checkout confirmations ran on one line wider than the
+  screen; they wrap.
+
+### Added
+- Unit tests for the deployment-mode singleton record paths (read, save to a mode, Create and
+  Remove Override).
+
 ## [4.5.1] - 2026-11-12
 
 ### Fixed

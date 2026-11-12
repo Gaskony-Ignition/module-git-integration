@@ -73,7 +73,7 @@ gateway started, with the user, including an unattended one that failed, and why
 and credentials, commit from a dockable panel with per-resource selection, amend
 the last commit, browse history and diffs, switch and clean up branches, and
 push or pull. A pull, checkout, revert or merge abort is refused while the
-Designer has unsaved edits, listing them; a merge left open (the Designer closed
+Designer has unsaved edits, including one still open in an editor tab, listing them; a merge left open (the Designer closed
 mid-conflict) can be finished or aborted later, from the Designer or the page's
 **Merge in progress** header.
 
@@ -88,7 +88,7 @@ commit would delete from that branch before you confirm.
 
 **Repository layout** — one repository per project (default), or the whole
 gateway as one repository. Switch under **Versioning → Configure versioning →
-Repository layout**. [docs/LAYOUT.md](docs/LAYOUT.md) has the differences,
+Layout**. [docs/LAYOUT.md](docs/LAYOUT.md) has the differences,
 branch handling and what a switch does.
 
 **Delivery** — each project has one, chosen on the Projects tab. It only brings

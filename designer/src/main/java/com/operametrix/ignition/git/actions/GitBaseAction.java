@@ -343,10 +343,11 @@ public class GitBaseAction {
         }
         if (gatewayWide()) {
             int choice = JOptionPane.showConfirmDialog(context.getFrame(),
+                    // Line breaks of our own: a JOptionPane never wraps, and one line was 1468 px wide.
                     "Check out " + branchName + "?\n\nThis gateway keeps every project and its config in one"
-                            + " repository, so this switches the gateway config and every project on it,"
-                            + " not only this one. It is refused while anything in that repository is"
-                            + " uncommitted: commit or discard this project's changes first.",
+                            + " repository,\nso this switches the gateway config and every project on it,"
+                            + " not only this one.\nIt is refused while anything in that repository is"
+                            + " uncommitted:\ncommit or discard this project's changes first.",
                     "Checkout Branch", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
             if (choice != JOptionPane.YES_OPTION) {
                 return;
@@ -411,8 +412,9 @@ public class GitBaseAction {
         }
     }
 
-    /** Unsaved Designer edits, as resource paths. */
+    /** Unsaved Designer edits, as resource paths, including those still held in an open editor tab. */
     static List<ResourcePath> unsavedChanges() {
+        commitOpenEditors();
         List<ResourcePath> out = new ArrayList<>();
         for (ChangeOperation op : context.getProject().getChanges()) {
             ResourceId rid = ChangeOperation.getResourceIdFromChange(op);
@@ -421,6 +423,38 @@ public class GitBaseAction {
             }
         }
         return out;
+    }
+
+    /**
+     * An edit in an open editor tab (a Perspective view, a script, a named query) reaches the
+     * project's change list only when its editor commits it: on File > Save, or when the tab is
+     * left. Until then getChanges() does not list it, so the unsaved-edit check missed it. This
+     * commits every open tab of every tabbed workspace (TabbedResourceWorkspace.commitAll, which
+     * Save runs too); an editor with nothing changed adds nothing. Not the Designer's whole
+     * pre-save step: that also runs each module's notifyProjectSaveStart, which creates Vision's
+     * and Perspective's default project resources and so reported edits nobody made.
+     */
+    private static void commitOpenEditors() {
+        try {
+            Class<?> tabbed = Class.forName(
+                    "com.inductiveautomation.ignition.designer.tabbedworkspace.TabbedResourceWorkspace");
+            Method commitAll = tabbed.getMethod("commitAll");
+            Object manager = context.getFrame().getClass().getMethod("getWorkspace").invoke(context.getFrame());
+            Method getWs = manager.getClass().getMethod("getWorkspace", int.class);
+            int count = (int) manager.getClass().getMethod("getWorkspaceCount").invoke(manager);
+            for (int i = 0; i < count; i++) {
+                Object ws = getWs.invoke(manager, i);
+                if (tabbed.isInstance(ws)) {
+                    try {
+                        commitAll.invoke(ws);
+                    } catch (Exception e) {
+                        logger.warn("Could not commit the open tabs of {}", ws.getClass().getSimpleName(), e);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Could not commit open editors before checking for unsaved edits", e);
+        }
     }
 
     /**
@@ -653,7 +687,7 @@ public class GitBaseAction {
                         + "To keep changes, create a new branch first."
                         + (gatewayWide()
                                 ? "\n\nThis gateway keeps every project and its config in one repository,"
-                                + " so this switches the gateway config and every project on it. It is"
+                                + "\nso this switches the gateway config and every project on it.\nIt is"
                                 + " refused while anything in that repository is uncommitted."
                                 : ""),
                 "Checkout Commit", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);

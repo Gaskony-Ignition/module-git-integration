@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import { DeleteGw } from "@inductiveautomation/ignition-icons";
 import {
   Button,
-  Card,
   Checkbox,
   Drawer,
   DrawerTemplate,
@@ -11,7 +10,7 @@ import {
   Modal,
   useToastNotifications,
 } from "../../webui";
-import { SelectInput, TextInput as LabelledTextInput } from "./fields";
+import { HelpTip, SelectInput, TextInput as LabelledTextInput } from "./fields";
 import { selectValue } from "./selectValue";
 import { errorToast } from "./errors";
 import { useOpenTab } from "./tabs";
@@ -72,9 +71,15 @@ const ConfigDrawer = ({
   const refused = status?.policy?.refused ?? {};
   const [confirmDeinit, setConfirmDeinit] = useState(false);
   const [dropRemote, setDropRemote] = useState(false);
+  // Three tabs, so no part of the drawer scrolls inside it at 1366x640.
+  const [tab, setTab] = useState<"delivery" | "layout" | "delete">("delivery");
 
   useEffect(() => {
-    if (!open || !remote) {
+    if (!open) {
+      return;
+    }
+    setTab("delivery");
+    if (!remote) {
       return;
     }
     setDeliveryMode(asMode(remote.delivery?.mode || "off"));
@@ -100,190 +105,229 @@ const ConfigDrawer = ({
     }
   };
 
+  const deliveryHelp =
+    deliveryMode === "replace"
+      ? `Replace makes the gateway ${
+          combined ? "" : "config "
+        }match the branch exactly. Local commits and uncommitted changes are discarded, and a branch moved backwards is followed.`
+      : deliveryMode === "pull"
+      ? "Pull merges the branch in, and refuses while anything on the gateway is uncommitted."
+      : deliveryMode === "runner"
+      ? "A runner workflow calls the gateway to pull the branch; no timer."
+      : "Off: nothing reaches this gateway from the remote by itself.";
+
   const drawerBody = (
     <div className="gitcfg gitcfg-form">
-      <Card title="Remote">
-        <p className="gitcfg-hint">
-          {configured
-            ? `${remote?.uri} (${remote?.branch || DEFAULT_BRANCH})`
-            : "No remote yet."}{" "}
-          The remote and its credential are set on the Remote tab, per
-          deployment mode if needed.
-        </p>
-        <div className="gitcfg-actions">
-          <Button
-            colorClass="secondary"
-            onClick={() => {
-              onClose();
-              openTab("remote");
-            }}
+      <div className="gitcfg-tabs" role="tablist">
+        {(
+          [
+            ["delivery", "Delivery"],
+            ["layout", "Layout"],
+            ["delete", "Delete"],
+          ] as const
+        ).map(([key, text]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            className={tab === key ? "is-active" : ""}
+            onClick={() => setTab(key)}
           >
-            Open the Remote tab
-          </Button>
-        </div>
-      </Card>
+            {text}
+          </button>
+        ))}
+      </div>
 
-      {configured ? (
-        <Card title="Delivery">
-          <SelectInput
-            label="How changes reach this gateway"
-            value={deliveryMode}
-            values={DELIVERY_OPTIONS.filter(
-              (o) => combined || !o.combinedOnly || o.value === deliveryMode
-            ).map((o) => {
-              // Refused by the Git policy: listed, disabled, and saying why.
-              const off =
-                o.value !== "off" && o.value !== deliveryMode
-                  ? refused[`delivery:${o.value}`]
-                  : undefined;
-              return {
-                label: off ? `${o.label} (not allowed by policy)` : o.label,
-                value: o.value,
-                disabled: (o.combinedOnly && !combined) || !!off,
-              };
-            })}
-            onChange={(e: unknown) => setDeliveryMode(asMode(selectValue(e)))}
-          />
-          {combined ? (
-            <p className="gitcfg-hint">
-              Combined layout: this delivery moves config and every project.
-            </p>
-          ) : null}
-          {deliveryMode !== "off" ? (
+      {tab === "delivery" ? (
+        <>
+          <p className="gitcfg-hint">
+            {configured
+              ? `Remote: ${remote?.uri} (${remote?.branch || DEFAULT_BRANCH}),`
+              : "No remote yet. It is"}{" "}
+            set with its credential on the Remote tab.
+          </p>
+          <div className="gitcfg-actions">
+            <Button
+              colorClass="secondary"
+              onClick={() => {
+                onClose();
+                openTab("remote");
+              }}
+            >
+              Open the Remote tab
+            </Button>
+          </div>
+          {configured ? (
             <>
-              {deliveryMode === "replace" ? (
-                <p className="gitcfg-hint">
-                  Replace makes the gateway {combined ? "" : "config "}match the
-                  branch exactly. Local commits and uncommitted changes are
-                  discarded, and a branch moved backwards is followed.
-                </p>
-              ) : deliveryMode === "pull" ? (
-                <p className="gitcfg-hint">
-                  Pull merges the branch in, and refuses while anything on the
-                  gateway is uncommitted.
-                </p>
-              ) : (
-                <p className="gitcfg-hint">
-                  A runner workflow calls the gateway to pull the branch; no
-                  timer.
-                </p>
-              )}
-              <LabelledTextInput
-                label="Branch"
-                value={deliveryBranch}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setDeliveryBranch(e.target.value)
+              <SelectInput
+                label={
+                  <>
+                    How changes reach this gateway
+                    <HelpTip label="How changes reach this gateway">
+                      {deliveryHelp}
+                      {combined
+                        ? " Combined layout: this delivery moves config and every project."
+                        : ""}
+                    </HelpTip>
+                  </>
+                }
+                inputProps={{ "aria-label": "How changes reach this gateway" }}
+                value={deliveryMode}
+                values={DELIVERY_OPTIONS.filter(
+                  (o) => combined || !o.combinedOnly || o.value === deliveryMode
+                ).map((o) => {
+                  // Refused by the Git policy: listed, disabled, and saying why.
+                  const off =
+                    o.value !== "off" && o.value !== deliveryMode
+                      ? refused[`delivery:${o.value}`]
+                      : undefined;
+                  return {
+                    label: off
+                      ? `${o.label} (not allowed by policy)`
+                      : o.value === "replace"
+                      ? `${o.label} (overwrites local edits)`
+                      : o.label,
+                    value: o.value,
+                    disabled: (o.combinedOnly && !combined) || !!off,
+                  };
+                })}
+                onChange={(e: unknown) =>
+                  setDeliveryMode(asMode(selectValue(e)))
                 }
               />
-              {deliveryMode !== "runner" ? (
-                <LabelledTextInput
-                  label="Check every (seconds, minimum 30)"
-                  value={deliveryEvery}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    setDeliveryEvery(e.target.value)
-                  }
-                />
+              {deliveryMode !== "off" ? (
+                <div className="gitcfg-field-row">
+                  <LabelledTextInput
+                    label="Branch"
+                    value={deliveryBranch}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setDeliveryBranch(e.target.value)
+                    }
+                  />
+                  {deliveryMode !== "runner" ? (
+                    <LabelledTextInput
+                      label="Every (seconds, minimum 30)"
+                      value={deliveryEvery}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setDeliveryEvery(e.target.value)
+                      }
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+              {remote?.delivery?.last ? (
+                <p
+                  className={`gitcfg-last-run ${
+                    remote.delivery.last.ok ? "gitcfg-ok" : "gitcfg-err"
+                  }`}
+                  title={remote.delivery.last.message}
+                >
+                  Last run{" "}
+                  {new Date(remote.delivery.last.time).toLocaleString()}:{" "}
+                  {remote.delivery.last.message}
+                </p>
+              ) : null}
+              {remote?.delivery?.mode && remote.delivery.mode !== "off" ? (
+                <div className="gitcfg-actions">
+                  <Button
+                    colorClass="secondary"
+                    disabled={syncing}
+                    onClick={() =>
+                      syncNow()
+                        .unwrap()
+                        .then((r) =>
+                          r.outcome === "ok"
+                            ? toasts.notifySuccess(`Config: ${r.result}`)
+                            : toasts.notifyError(`Config: ${r.result}`)
+                        )
+                        .catch(errorToast(toasts, "Sync failed"))
+                    }
+                  >
+                    {syncing ? "Syncing…" : "Sync now"}
+                  </Button>
+                </div>
               ) : null}
             </>
           ) : null}
-          {remote?.delivery?.last ? (
-            <p className={remote.delivery.last.ok ? "gitcfg-ok" : "gitcfg-err"}>
-              Last run {new Date(remote.delivery.last.time).toLocaleString()}:{" "}
-              {remote.delivery.last.message}
-            </p>
-          ) : null}
-          {remote?.delivery?.mode && remote.delivery.mode !== "off" ? (
-            <div className="gitcfg-actions">
-              <Button
-                colorClass="secondary"
-                disabled={syncing}
-                onClick={() =>
-                  syncNow()
-                    .unwrap()
-                    .then((r) =>
-                      r.outcome === "ok"
-                        ? toasts.notifySuccess(`Config: ${r.result}`)
-                        : toasts.notifyError(`Config: ${r.result}`)
-                    )
-                    .catch(errorToast(toasts, "Sync failed"))
-                }
-              >
-                {syncing ? "Syncing…" : "Sync now"}
-              </Button>
-            </div>
-          ) : null}
-        </Card>
+        </>
       ) : null}
 
-      <Card title="Repository layout">
-        <p className="gitcfg-hint">
-          {combined
-            ? "Combined: one repository holds config/ and projects/. Branches, the remote and pulls are gateway-wide — checking out a branch switches config and every project."
-            : "Separate: each project is its own repository with its own remote, branches and delivery; this repository holds config only."}
-        </p>
-        {combined ? (
-          <div className="gitcfg-layout-opt">
-            <Checkbox
-              defaultValue={restoreHistory}
-              disabled={!!refused.LAYOUT_SWITCH}
-              onChange={(_e: unknown, checked: boolean) =>
-                setRestoreHistory(checked)
-              }
-              label="Restore each project's earlier history, where one was kept"
-            />
-            <Checkbox
-              defaultValue={archiveLeftovers}
-              disabled={!!refused.LAYOUT_SWITCH}
-              onChange={(_e: unknown, checked: boolean) =>
-                setArchiveLeftovers(checked)
-              }
-              label="Archive leftover .git folders in project folders (to var/git-archive)"
-            />
+      {tab === "layout" ? (
+        <>
+          <p className="gitcfg-hint">
+            {combined
+              ? "Combined: one repository holds config/ and projects/. Branches, the remote and pulls are gateway-wide — checking out a branch switches config and every project."
+              : "Separate: each project is its own repository with its own remote, branches and delivery; this repository holds config only."}
+          </p>
+          {combined ? (
+            <div className="gitcfg-layout-opt">
+              <Checkbox
+                defaultValue={restoreHistory}
+                disabled={!!refused.LAYOUT_SWITCH}
+                onChange={(_e: unknown, checked: boolean) =>
+                  setRestoreHistory(checked)
+                }
+                label="Restore each project's earlier history, where one was kept"
+              />
+              <Checkbox
+                defaultValue={archiveLeftovers}
+                disabled={!!refused.LAYOUT_SWITCH}
+                onChange={(_e: unknown, checked: boolean) =>
+                  setArchiveLeftovers(checked)
+                }
+                label="Archive leftover .git folders in project folders (to var/git-archive)"
+              />
+            </div>
+          ) : null}
+          {refused.LAYOUT_SWITCH ? (
+            <p className="gitcfg-hint">{refused.LAYOUT_SWITCH}</p>
+          ) : null}
+          <div className="gitcfg-actions">
+            <Button
+              colorClass="secondary"
+              disabled={switching || !!refused.LAYOUT_SWITCH}
+              onClick={() => setConfirmLayout(true)}
+            >
+              {switching
+                ? "Switching…"
+                : combined
+                ? "Switch to Separate…"
+                : "Switch to Combined…"}
+            </Button>
           </div>
-        ) : null}
-        {refused.LAYOUT_SWITCH ? (
-          <p className="gitcfg-hint">{refused.LAYOUT_SWITCH}</p>
-        ) : null}
-        <div className="gitcfg-actions">
-          <Button
-            colorClass="secondary"
-            disabled={switching || !!refused.LAYOUT_SWITCH}
-            onClick={() => setConfirmLayout(true)}
-          >
-            {switching
-              ? "Switching…"
-              : combined
-              ? "Switch to Separate…"
-              : "Switch to Combined…"}
-          </Button>
-        </div>
-      </Card>
+        </>
+      ) : null}
 
-      <Card title="Danger zone" className="gitcfg-danger-card">
-        <p className="gitcfg-off">
-          {combined
-            ? "Switch the layout to Separate before deleting versioning: this repository holds every project too."
-            : "This action will permanently delete the gateway's versioning"}
-        </p>
-        <label className="gitcfg-check">
-          <input
-            type="checkbox"
-            checked={dropRemote}
-            onChange={(e) => setDropRemote(e.target.checked)}
-          />
-          <span>
-            Also remove the saved remote (kept otherwise, so initialising again
-            reconnects)
-          </span>
-        </label>
-        <Button
-          colorClass="destructive"
-          startIcon={<DeleteGw width={16} height={16} />}
-          onClick={() => setConfirmDeinit(true)}
-        >
-          Delete versioning
-        </Button>
-      </Card>
+      {tab === "delete" ? (
+        <>
+          <p className="gitcfg-hint">
+            {combined
+              ? "Switch the layout to Separate before deleting versioning: this repository holds every project too."
+              : "This permanently deletes the gateway's versioning history."}
+          </p>
+          <label className="gitcfg-check">
+            <input
+              type="checkbox"
+              checked={dropRemote}
+              onChange={(e) => setDropRemote(e.target.checked)}
+            />
+            <span>
+              Also remove the saved remote (kept otherwise, so initialising
+              again reconnects)
+            </span>
+          </label>
+          <div className="gitcfg-actions">
+            <Button
+              colorClass="destructive"
+              startIcon={<DeleteGw width={16} height={16} />}
+              onClick={() => setConfirmDeinit(true)}
+            >
+              Delete versioning
+            </Button>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 
