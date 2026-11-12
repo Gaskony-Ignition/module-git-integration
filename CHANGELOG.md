@@ -3,6 +3,18 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [4.5.0] - Unreleased
+
+### Fixed
+- Configure versioning showed a remote's saved Secret Provider reference blank when the
+  definition loaded after it, so changing only the branch asked for the secret again. The saved
+  reference is shown, and a save with it left blank keeps it; a new host still asks for it.
+
+### Added
+- Join remote history lists, in its confirmation, the files on the remote branch outside
+  `config/` (and `projects/` in the Combined layout) that this gateway does not have, which the
+  join commit deletes from the branch.
+
 ## [4.4.5] - 2026-11-12
 
 ### Added
