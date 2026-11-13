@@ -84,7 +84,9 @@ directly: unticking a tracked path also untracks it. The module's own lines sit
 between `# >>> Git Integration` and `# <<< Git Integration` markers, so lines you
 or another tool add outside them are left where they are. **Join remote history**
 links this gateway to a branch another gateway started, and lists the files its
-commit would delete from that branch before you confirm.
+commit would delete from that branch before you confirm: those not on this
+gateway, and those it has but does not version. Changing the remote's URL drops
+the old repository's branches, so nothing is compared with them until a Fetch.
 
 **Repository layout** — one repository per project (default), or the whole
 gateway as one repository. Switch under **Versioning → Configure versioning →
