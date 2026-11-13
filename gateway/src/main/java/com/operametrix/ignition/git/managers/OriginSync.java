@@ -2,9 +2,13 @@ package com.operametrix.ignition.git.managers;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
+import org.eclipse.jgit.lib.Ref;
+import org.eclipse.jgit.lib.RefUpdate;
+import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.lib.StoredConfig;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Points the gateway repository's {@code [remote "origin"]} at the config remote record. No
@@ -25,7 +29,7 @@ public final class OriginSync {
     /**
      * Sets origin's URL to {@code uri} and removes any push URL, so the URL contacted is the one the
      * credential was saved with. When {@code branch} differs from the branch last applied, branches
-     * that pushed to the old one are moved to it.
+     * that pushed to the old one are moved to it. A changed URL drops origin's remote-tracking refs.
      *
      * @return whether {@code .git/config} changed
      */
@@ -33,8 +37,12 @@ public final class OriginSync {
         StoredConfig c = git.getRepository().getConfig();
         boolean changed = false;
         String u = uri == null ? "" : uri.trim();
-        if (!u.equals(c.getString("remote", ORIGIN, "url"))) {
+        String was = c.getString("remote", ORIGIN, "url");
+        if (!u.equals(was)) {
             c.setString("remote", ORIGIN, "url", u);
+            if (was != null) {
+                dropTracking(git.getRepository(), ORIGIN);
+            }
             if (c.getStringList("remote", ORIGIN, "fetch").length == 0) {
                 c.setString("remote", ORIGIN, "fetch", "+refs/heads/*:refs/remotes/" + ORIGIN + "/*");
             }
@@ -61,6 +69,23 @@ public final class OriginSync {
             c.save();
         }
         return changed;
+    }
+
+    /**
+     * Deletes {@code refs/remotes/<remote>/*}. Run when a remote's URL changes: those refs are the
+     * old repository's branches, and until the next fetch the page would compare this gateway with
+     * them (and offer Join remote history for a repository it no longer points at).
+     */
+    public static void dropTracking(Repository repo, String remote) throws IOException {
+        List<Ref> refs = repo.getRefDatabase().getRefsByPrefix(Constants.R_REMOTES + remote + "/");
+        for (Ref r : refs) {
+            RefUpdate u = repo.updateRef(r.getName());
+            u.setForceUpdate(true);
+            RefUpdate.Result res = u.delete();
+            if (res != RefUpdate.Result.FORCED && res != RefUpdate.Result.NO_CHANGE) {
+                throw new IOException("Could not delete " + r.getName() + ": " + res);
+            }
+        }
     }
 
     /**

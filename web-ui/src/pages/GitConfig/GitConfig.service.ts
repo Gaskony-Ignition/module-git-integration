@@ -152,9 +152,12 @@ export interface RemoteResp {
   // Commits on the fetched remote branch not here; whether it shares no history (4.4.0).
   behind?: number;
   unrelated?: boolean;
-  // With unrelated: remote files outside config/ (and projects/ in Combined) a join would delete.
+  // With unrelated: remote files outside config/ (and projects/ in Combined) a join would delete,
+  // and remote files this gateway has but does not version, which it would delete too.
   joinDeletes?: string[];
   joinDeletesCount?: number;
+  joinUnversioned?: string[];
+  joinUnversionedCount?: number;
   // Set when the repository's lone local branch is master and the remote's is this name.
   renameMaster?: string | null;
   from?: string | null;

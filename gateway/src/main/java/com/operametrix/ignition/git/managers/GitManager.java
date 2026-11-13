@@ -1401,7 +1401,12 @@ public class GitManager {
 
     public static void setRemoteUrl(Path projectFolderPath, String name, String newUrl) throws Exception {
         try (Git git = getGit(projectFolderPath)) {
-            git.remoteSetUrl().setRemoteName(name).setRemoteUri(new URIish(newUrl)).call();
+            URIish uri = new URIish(newUrl);
+            String was = git.getRepository().getConfig().getString("remote", name, "url");
+            git.remoteSetUrl().setRemoteName(name).setRemoteUri(uri).call();
+            if (!uri.toString().equals(was)) {
+                OriginSync.dropTracking(git.getRepository(), name);
+            }
         }
     }
 

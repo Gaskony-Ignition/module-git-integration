@@ -3,6 +3,21 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [4.5.4] - 2026-11-13
+
+### Fixed
+- Join remote history's confirmation headed its list "files the remote branch has outside
+  config/ that this gateway does not", though the list also held files this gateway has but does
+  not version, and ran every file together in one paragraph. It now says the commit also deletes
+  these files from the remote branch, in two groups (not on this gateway; on this gateway but not
+  versioned), one file per line, in a box that scrolls on its own so the dialog fits a 1366x640
+  window.
+- After the remote's URL changed (the Configure versioning drawer, a mode override created or
+  removed, or a project's remote URL set from the Designer), the old repository's
+  remote-tracking branches stayed until the next Fetch, so for a moment the page compared this
+  gateway with them and could offer Join remote history. A changed URL now drops that remote's
+  tracking branches, and the page points origin at the remote record before it counts anything.
+
 ## [4.5.3] - 2026-11-13
 
 ### Fixed

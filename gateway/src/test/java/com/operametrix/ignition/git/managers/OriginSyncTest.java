@@ -77,4 +77,49 @@ class OriginSyncTest {
             assertThat(c.getString("gitmodule", "origin", "branch")).isEqualTo("prod");
         }
     }
+
+    /** A tracking ref for {@code branch} at HEAD, as a fetch from the old repository left it. */
+    private static void fetched(Git git, String branch) throws Exception {
+        org.eclipse.jgit.lib.RefUpdate u = git.getRepository().updateRef("refs/remotes/origin/" + branch);
+        u.setNewObjectId(git.getRepository().resolve("HEAD"));
+        u.update();
+    }
+
+    @Test
+    void aNewUrlDropsTheOldRepositorysTrackingRefs() throws Exception {
+        try (Git git = Git.init().setDirectory(dir.toFile()).setInitialBranch("main").call()) {
+            git.commit().setMessage("first").setAllowEmpty(true).call();
+            OriginSync.apply(git, "https://git.example/acme/old.git", "main");
+            fetched(git, "main");
+            fetched(git, "dev");
+
+            // The same URL again keeps them.
+            OriginSync.apply(git, "https://git.example/acme/old.git", "main");
+            assertThat(git.getRepository().resolve("refs/remotes/origin/main")).isNotNull();
+
+            // Another repository: its branches are unknown until a fetch, so nothing is left to compare.
+            assertThat(OriginSync.apply(git, "https://git.example/acme/new.git", "main")).isTrue();
+            assertThat(git.getRepository().getRefDatabase().getRefsByPrefix("refs/remotes/origin/")).isEmpty();
+            assertThat(git.getRepository().resolve("refs/heads/main")).isNotNull();
+        }
+    }
+
+    @Test
+    void setRemoteUrlDropsTrackingRefsOnlyWhenTheUrlChanges() throws Exception {
+        try (Git git = Git.init().setDirectory(dir.toFile()).setInitialBranch("main").call()) {
+            git.commit().setMessage("first").setAllowEmpty(true).call();
+            git.remoteAdd().setName("origin").setUri(new URIish("https://git.example/acme/old.git")).call();
+            fetched(git, "main");
+        }
+        GitManager.setRemoteUrl(dir, "origin", "https://git.example/acme/old.git");
+        try (Git git = Git.open(dir.toFile())) {
+            assertThat(git.getRepository().resolve("refs/remotes/origin/main")).isNotNull();
+        }
+        GitManager.setRemoteUrl(dir, "origin", "https://git.example/acme/new.git");
+        try (Git git = Git.open(dir.toFile())) {
+            assertThat(git.getRepository().resolve("refs/remotes/origin/main")).isNull();
+            assertThat(origin(git).getURIs()).extracting(URIish::toString)
+                    .containsExactly("https://git.example/acme/new.git");
+        }
+    }
 }

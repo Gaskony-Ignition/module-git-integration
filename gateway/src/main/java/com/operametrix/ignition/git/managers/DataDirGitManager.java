@@ -990,12 +990,17 @@ public class DataDirGitManager {
      * {@code config/} (and {@code projects/} in Combined), that this gateway does not have, and
      * files anywhere that this gateway has but does not version ({@code .gitignore} or never
      * versioned: {@code ignition.conf}, {@code users.json}). The join commits this gateway's files
-     * as they are, so each of these goes from the branch.
+     * as they are, so each of these goes from the branch. {@code missing} holds the first kind,
+     * {@code unversioned} the second.
      */
-    public static List<String> joinDeletions() {
+    public record JoinDeletions(List<String> missing, List<String> unversioned) {
+        static final JoinDeletions NONE = new JoinDeletions(List.of(), List.of());
+    }
+
+    public static JoinDeletions joinDeletions() {
         GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
         if (remote == null || !isInitialized()) {
-            return List.of();
+            return JoinDeletions.NONE;
         }
         boolean combined = GitManager.combined();
         synchronized (DATA_DIR_LOCK) {
@@ -1003,9 +1008,10 @@ public class DataDirGitManager {
                 Repository repo = git.getRepository();
                 ObjectId tip = repo.resolve(trackingRef(pushBranch(repo, remote)) + "^{tree}");
                 if (tip == null) {
-                    return List.of();
+                    return JoinDeletions.NONE;
                 }
-                List<String> out = new ArrayList<>();
+                List<String> missing = new ArrayList<>();
+                List<String> unversioned = new ArrayList<>();
                 List<FastIgnoreRule> rules = ignoreRules();
                 try (org.eclipse.jgit.treewalk.TreeWalk tw = new org.eclipse.jgit.treewalk.TreeWalk(repo)) {
                     tw.addTree(tip);
@@ -1021,13 +1027,13 @@ public class DataDirGitManager {
                         // copy goes too, though a file of that name is here (another gateway's
                         // ignition.conf or password hashes).
                         if (here ? unversioned(rules, p) : !inside) {
-                            out.add(here ? p + " (this gateway has one but does not version it)" : p);
+                            (here ? unversioned : missing).add(p);
                         }
                     }
                 }
-                return out;
+                return new JoinDeletions(missing, unversioned);
             } catch (Exception e) {
-                return List.of();
+                return JoinDeletions.NONE;
             }
         }
     }

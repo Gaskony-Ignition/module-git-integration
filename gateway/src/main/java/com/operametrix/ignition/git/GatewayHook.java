@@ -1351,6 +1351,13 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     delivery.add("last", lr);
                 }
                 o.add("delivery", delivery);
+                // A saved URL or a mode change resolves the record to another repository: point
+                // origin at it, dropping the old one's tracking refs, before anything compares with them.
+                try {
+                    DataDirGitManager.resyncOrigin();
+                } catch (RuntimeException e) {
+                    logger.warn("Could not point origin at the config remote", e);
+                }
                 // Before the counts below, which a rename changes.
                 String renameMaster = autoRenameMaster(GitManager.getDataFolderPath(), remote.getBranch(), null);
                 // Unsynced-commit count for the header sync indicator.
@@ -1360,11 +1367,15 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 o.addProperty("unrelated", rel.unrelated());
                 if (rel.unrelated()) {
                     // Shown in the Join confirmation, so nobody deletes another gateway's files unawares.
-                    List<String> gone = DataDirGitManager.joinDeletions();
-                    JsonArray list = new JsonArray();
-                    gone.stream().limit(20).forEach(list::add);
-                    o.add("joinDeletes", list);
-                    o.addProperty("joinDeletesCount", gone.size());
+                    DataDirGitManager.JoinDeletions gone = DataDirGitManager.joinDeletions();
+                    JsonArray missing = new JsonArray();
+                    gone.missing().stream().limit(20).forEach(missing::add);
+                    o.add("joinDeletes", missing);
+                    o.addProperty("joinDeletesCount", gone.missing().size());
+                    JsonArray unversioned = new JsonArray();
+                    gone.unversioned().stream().limit(20).forEach(unversioned::add);
+                    o.add("joinUnversioned", unversioned);
+                    o.addProperty("joinUnversionedCount", gone.unversioned().size());
                 }
                 o.addProperty("renameMaster", renameMaster);
                 // What Remote sync pushes: the checked-out branch, and where it goes.

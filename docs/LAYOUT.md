@@ -113,9 +113,14 @@ gateway's config on top of origin/main"). Push and Pull work from then on. It
 is refused when the remote's layout does not match, and needs the policy's
 branch changes. The commit drops what this gateway does not version from the
 branch too (another gateway's `ignition.conf` or `users.json`, say), never
-replacing it with this gateway's copy; the confirmation lists those files. This
+replacing it with this gateway's copy; the confirmation lists those files in two
+groups, files not on this gateway and files here but not versioned. This
 gateway's earlier commits leave the branch and the History tab, and are kept at
 `refs/git-module/before-join` (`git log refs/git-module/before-join`).
+
+When the remote's URL changes, the old repository's remote-tracking branches are
+dropped, so nothing is compared with a repository the gateway no longer points
+at until the next Fetch.
 
 **Fetch** and **Pull** sit beside Remote sync: Fetch updates how far the remote
 is ahead, Pull merges it in (fast-forward or merge), refused with the file list

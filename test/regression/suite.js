@@ -714,6 +714,16 @@ async function auditRows(t0, settle = 2500) {
   const r = await plat('GET', `/audit/log/${AUDIT}?startTime=${t0 - 1000}&actionFilter=git%25&limit=1000`);
   return (r.json.items || []).filter((i) => i.action.startsWith('git '));
 }
+// The rows `fn` adds: a baseline taken once queued writes have drained, then what is new since it.
+// Matching rows, not a time window, so the earlier checks' rows never count even when the
+// gateway's clock runs at a different rate from this machine's.
+async function newRows(fn) {
+  const since = gwNow() - 60000;
+  const key = (i) => JSON.stringify(i);
+  const seen = new Set((await auditRows(since)).map(key));
+  await fn();
+  return (await auditRows(since)).filter((i) => !seen.has(key(i)));
+}
 // Exactly one row of `action` since t0, with `match` (a regexp) in its target + value.
 async function oneRow(t0, action, fn, match) {
   const before = gwNow();
@@ -784,11 +794,12 @@ async function audit() {
   });
   await check('a busy sync loop with nothing to install writes no rows', async () => {
     const t0 = gwNow();
-    // Each sync-now fetches; with nothing new it installs nothing.
-    for (let i = 0; i < 12; i++) await api('POST', '/sync-now', { project: 'Example_A' });
-    await configChange(); // an auto-commit
-    await configChange();
-    const rows = await auditRows(t0);
+    const rows = await newRows(async () => {
+      // Each sync-now fetches; with nothing new it installs nothing.
+      for (let i = 0; i < 12; i++) await api('POST', '/sync-now', { project: 'Example_A' });
+      await configChange(); // an auto-commit
+      await configChange();
+    });
     // Nor any of the platform's own rows for this module's records (none was saved).
     const ours = (await plat('GET', `/audit/log/${AUDIT}?startTime=${t0}&targetFilter=%25com.operametrix%25&limit=1000`)).json.items || [];
     await api('POST', '/delivery', { project: 'Example_A', delivery: 'off' });
@@ -824,10 +835,11 @@ async function audit() {
       && rows.some((i) => /to separate/.test(i.actionValue)), `${a.status} ${b.status} ${rows.map((i) => i.actionValue).join(' | ')}`);
   });
   await check('audit set to Off writes the change, then nothing', async () => {
-    const t0 = gwNow();
-    const off = await api('POST', '/audit', { enabled: false, profile: '' });
-    await api('POST', '/push', {});
-    const rows = await auditRows(t0);
+    let off;
+    const rows = await newRows(async () => {
+      off = await api('POST', '/audit', { enabled: false, profile: '' });
+      await api('POST', '/push', {});
+    });
     await api('POST', '/audit', { enabled: true, profile: '' });
     return pass(ok(off) && rows.length === 1 && rows[0].action === 'git audit setting change', rows.map((i) => i.action).join(','));
   });
@@ -1008,8 +1020,9 @@ async function modes() {
     const u = await api('POST', '/update-from-remote', {});
     const lines = logLines().slice(n);
     // Local config commits made since the seed are not on prod, so the update itself may refuse;
-    // what matters here is which credential reached which server.
-    return pass((ok(u) || /not on the remote/.test(u.text)) && lines.some((l) => /-prod reader .* 200$/.test(l)) && !lines.some((l) => /-dev /.test(l)), `${u.status} ${u.text.slice(0, 150)} ${lines.map((l) => l.split(' ').slice(0, 2).join(' ')).join('|')}`);
+    // what matters here is which credential reached which server. Only the config repository counts:
+    // the daily credential check runs 30 s after the restart and probes Example_A on dev.
+    return pass((ok(u) || /not on the remote/.test(u.text)) && lines.some((l) => /-prod reader .* 200$/.test(l)) && !lines.some((l) => /-dev .*\/gateway\.git/.test(l)), `${u.status} ${u.text.slice(0, 150)} ${lines.map((l) => l.split(' ').slice(0, 2).join(' ')).join('|')}`);
   });
   await check('Prod: commits carry the Gateway-Mode: Prod trailer', async () => {
     await configChange();

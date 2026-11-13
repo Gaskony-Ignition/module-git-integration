@@ -204,26 +204,34 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
         type="confirm"
         title="Join remote history"
         modalConfig={{
-          confirmationText: `The remote branch ${
-            remote?.pushTo ?? ""
-          } started from another gateway, so it shares no history with this one and push and pull refuse it. Joining moves this gateway's branch onto the remote's latest commit and records this gateway's config, exactly as it is now, as one commit on top. Nothing on this gateway changes; the next push sends that commit. Refused if the remote's layout does not match.${
-            remote?.joinDeletesCount
-              ? `\n\nThis commit also deletes ${
-                  remote.joinDeletesCount
-                } file(s) the remote branch has outside config/${
-                  layoutCombined ? " and projects/" : ""
-                } that this gateway does not:\n${(
-                  remote.joinDeletes ?? []
-                ).join("\n")}${
-                  remote.joinDeletesCount > (remote.joinDeletes ?? []).length
-                    ? `\n… and ${
-                        remote.joinDeletesCount -
-                        (remote.joinDeletes ?? []).length
-                      } more`
-                    : ""
-                }`
-              : ""
-          }`,
+          confirmationText: (
+            <div className="gitcfg">
+              {`The remote branch ${
+                remote?.pushTo ?? ""
+              } started from another gateway, so it shares no history with this one and push and pull refuse it. Joining moves this gateway's branch onto the remote's latest commit and records this gateway's config, exactly as it is now, as one commit on top. Nothing on this gateway changes; the next push sends that commit. Refused if the remote's layout does not match.`}
+              {remote?.joinDeletesCount || remote?.joinUnversionedCount ? (
+                <>
+                  <p className="gitcfg-join-head">
+                    The commit also deletes these files from the remote branch:
+                  </p>
+                  <div className="gitcfg-join-list">
+                    <JoinGroup
+                      title={`Not on this gateway (outside config/${
+                        layoutCombined ? " and projects/" : ""
+                      })`}
+                      files={remote.joinDeletes}
+                      count={remote.joinDeletesCount}
+                    />
+                    <JoinGroup
+                      title="On this gateway but not versioned"
+                      files={remote.joinUnversioned}
+                      count={remote.joinUnversionedCount}
+                    />
+                  </div>
+                </>
+              ) : null}
+            </div>
+          ),
           primaryText: joining ? "Joining…" : "Join",
           secondaryText: "Cancel",
           warningGeneral: true,
@@ -244,3 +252,34 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
 };
 
 export default RemoteSync;
+
+// One group of files in the Join confirmation; the gateway sends at most 20 of each.
+function JoinGroup({
+  title,
+  files,
+  count,
+}: {
+  title: string;
+  files?: string[];
+  count?: number;
+}) {
+  const shown = files ?? [];
+  if (!count) {
+    return null;
+  }
+  return (
+    <>
+      <div className="gitcfg-join-title">{title}</div>
+      <ul>
+        {shown.map((f) => (
+          <li key={f} className="gitcfg-mono">
+            {f}
+          </li>
+        ))}
+        {count > shown.length ? (
+          <li>… and {count - shown.length} more</li>
+        ) : null}
+      </ul>
+    </>
+  );
+}
