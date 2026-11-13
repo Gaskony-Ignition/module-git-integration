@@ -73,7 +73,7 @@ gateway started, with the user, including an unattended one that failed, and why
 and credentials, commit from a dockable panel with per-resource selection, amend
 the last commit, browse history and diffs, switch and clean up branches, and
 push or pull. A pull, checkout, revert or merge abort is refused while the
-Designer has unsaved edits, including one still open in an editor tab, listing them; a merge left open (the Designer closed
+Designer has unsaved edits, even one open in an editor tab, listing them; a merge left open (the Designer closed
 mid-conflict) can be finished or aborted later, from the Designer or the page's
 **Merge in progress** header.
 
@@ -84,9 +84,7 @@ directly: unticking a tracked path also untracks it. The module's own lines sit
 between `# >>> Git Integration` and `# <<< Git Integration` markers, so lines you
 or another tool add outside them are left where they are. **Join remote history**
 links this gateway to a branch another gateway started, and lists the files its
-commit would delete from that branch before you confirm: those not on this
-gateway, and those it has but does not version. Changing the remote's URL drops
-the old repository's branches, so nothing is compared with them until a Fetch.
+commit would delete from that branch (missing here, or not versioned here).
 
 **Repository layout** — one repository per project (default), or the whole
 gateway as one repository. Switch under **Versioning → Configure versioning →
