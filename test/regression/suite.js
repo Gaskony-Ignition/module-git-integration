@@ -141,12 +141,17 @@ async function restart(mode) {
 }
 const credId = {};
 // Times compared with the gateway's own timestamps (Logs events, audit rows) come from the
-// gateway's clock: a rig VM's clock can drift minutes from this machine's.
+// gateway's clock: a rig VM's clock can drift minutes from this machine's. The reading is taken
+// over SSH, so it is placed mid-way through the call and ignored below a few seconds, where the
+// call's own latency would matter more than the drift.
 let skew = 0;
 const gwNow = () => Date.now() + skew;
 function measureSkew() {
+  const before = Date.now();
   const t = +dexec('date +%s%3N');
-  if (t) skew = t - Date.now();
+  const s = t ? t - (before + Date.now()) / 2 : 0;
+  skew = Math.abs(s) > 5000 ? Math.round(s) : 0;
+  if (skew) console.log(`gateway clock is ${Math.round(skew / 1000)} s from this machine's; times follow the gateway`);
 }
 
 // ── phases ─────────────────────────────────────────────────────────────────────────────────────
