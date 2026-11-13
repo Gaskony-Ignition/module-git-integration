@@ -128,7 +128,7 @@ if [ -n "$fresh" ] || [ ! -f "$ST/env" ]; then
   out=$({ printf 'NAME=%q PORT=%q LANIP=%q W_PW=%q R_PW=%q\n' "$NAME" "$PORT" "$LANIP" "$W_PW" "$R_PW"
           printf 'FIXTURES=%q\n' "$(tar -C "$HERE/fixtures" -cf - Example_A Example_B | base64 -w0)"
           printf 'GITSERVER=%q\n' "$(base64 -w0 < "$HERE/gitserver.py")"
-          cat "$HERE/rig-servers.sh"; } | hsh)
+          cat "$HERE/rig-servers.sh"; } | hsh) || { echo "git servers failed: $out" >&2; exit 1; }
   sed -n '/^CA-BEGIN$/,/^CA-END$/p' <<<"$out" | sed '1d;$d' > "$ST/ca.crt"
   [ -s "$ST/ca.crt" ] || { echo "git servers failed: $out" >&2; exit 1; }
   # The test CA goes into the gateway JVM's truststore; the module install's restart loads it.
