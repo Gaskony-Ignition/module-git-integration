@@ -3,6 +3,21 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [4.5.3] - 2026-11-13
+
+### Fixed
+- When renaming a local master branch failed, the toast showed JGit's own text ("Unexpected
+  rename result LOCK_FAILURE"). Each rename failure now says what happened and what to do: the
+  branch is locked by another git operation or a stale .lock file in .git, a branch with that
+  name already exists, the name is not valid, master is gone or not checked out, or the
+  repository folder cannot be written. JGit's text stays in the browser console and the log.
+- Join remote history's confirmation did not list files the join removes from the remote branch
+  although this gateway has them, because it does not version them (another gateway's
+  `ignition.conf` or `users.json`): the commit dropped them, correctly, without saying so. They
+  are listed now, marked as not versioned here.
+- Join remote history moved this gateway's earlier commits off the branch with only the reflog
+  holding them. They are kept at `refs/git-module/before-join`, and the Logs entry says so.
+
 ## [4.5.2] - 2026-11-13
 
 ### Fixed

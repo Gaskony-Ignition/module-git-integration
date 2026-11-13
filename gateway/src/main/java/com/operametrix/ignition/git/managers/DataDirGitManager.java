@@ -987,8 +987,10 @@ public class DataDirGitManager {
 
     /**
      * What Join remote history would delete: files on the fetched remote branch, outside
-     * {@code config/} (and {@code projects/} in Combined), that this gateway does not have. The
-     * join commits this gateway's files as they are, so each of these goes from the branch.
+     * {@code config/} (and {@code projects/} in Combined), that this gateway does not have, and
+     * files anywhere that this gateway has but does not version ({@code .gitignore} or never
+     * versioned: {@code ignition.conf}, {@code users.json}). The join commits this gateway's files
+     * as they are, so each of these goes from the branch.
      */
     public static List<String> joinDeletions() {
         GitConfigRemoteRecord remote = GitConfigRemoteRecord.get();
@@ -1004,17 +1006,22 @@ public class DataDirGitManager {
                     return List.of();
                 }
                 List<String> out = new ArrayList<>();
+                List<FastIgnoreRule> rules = ignoreRules();
                 try (org.eclipse.jgit.treewalk.TreeWalk tw = new org.eclipse.jgit.treewalk.TreeWalk(repo)) {
                     tw.addTree(tip);
                     tw.setRecursive(true);
                     while (tw.next()) {
                         String p = tw.getPathString();
-                        if (p.startsWith("config/") || (combined && p.startsWith("projects/"))
-                                || p.equals(".gitignore")) {
+                        if (p.equals(".gitignore")) {
                             continue;
                         }
-                        if (!Files.exists(dataDir().resolve(p))) {
-                            out.add(p);
+                        boolean here = Files.exists(dataDir().resolve(p));
+                        boolean inside = p.startsWith("config/") || (combined && p.startsWith("projects/"));
+                        // The join's add skips what this gateway does not version, so the remote's
+                        // copy goes too, though a file of that name is here (another gateway's
+                        // ignition.conf or password hashes).
+                        if (here ? unversioned(rules, p) : !inside) {
+                            out.add(here ? p + " (this gateway has one but does not version it)" : p);
                         }
                     }
                 }
@@ -1023,6 +1030,19 @@ public class DataDirGitManager {
                 return List.of();
             }
         }
+    }
+
+    /** Excluded by the never-versioned block or by {@code .gitignore}, itself or a folder above it. */
+    static boolean unversioned(List<FastIgnoreRule> rules, String path) {
+        if (IgnoreRules.denied(path)) {
+            return true;
+        }
+        for (int i = path.indexOf('/'); i >= 0; i = path.indexOf('/', i + 1)) {
+            if (decide(rules, path.substring(0, i), true).excluded()) {
+                return true;
+            }
+        }
+        return decide(rules, path, false).excluded();
     }
 
     public static Relation relation() {
@@ -1083,6 +1103,9 @@ public class DataDirGitManager {
         return pullFromBranch(branch, false);
     }
 
+    /** Where Join remote history leaves the branch's previous tip (this gateway's own history). */
+    public static final String BEFORE_JOIN_REF = "refs/git-module/before-join";
+
     /**
      * Join remote history: for a remote branch with no commit in common with this gateway's
      * repository (each gateway's repository starts with its own first commit), move this branch to
@@ -1123,6 +1146,12 @@ public class DataDirGitManager {
                     throw new RuntimeException(ORIGIN + "/" + branch + " already shares history with this gateway's"
                             + " repository; use Pull instead. Nothing was changed.");
                 }
+                // This gateway's own history leaves the branch: keep it under a ref, so it can be
+                // found and is never garbage-collected.
+                RefUpdate keep = repo.updateRef(BEFORE_JOIN_REF);
+                keep.setNewObjectId(repo.resolve("HEAD"));
+                keep.setForceUpdate(true);
+                keep.update();
                 git.reset().setMode(ResetCommand.ResetType.SOFT).setRef(tip.name()).call();
                 git.add().addFilepattern(".").call();
                 git.add().setUpdate(true).addFilepattern(".").call();
@@ -1135,7 +1164,8 @@ public class DataDirGitManager {
                 cfg.setString("branch", repo.getBranch(), "merge", "refs/heads/" + branch);
                 cfg.save();
                 GitEvents.fire(GitEvent.of(GitEvent.PULL).config().user(who).branch(branch).commit(commit)
-                        .message("Joined " + ORIGIN + "/" + branch + ": this gateway's config committed on top").success());
+                        .message("Joined " + ORIGIN + "/" + branch + ": this gateway's config committed on top; its earlier"
+                                + " history is kept at " + BEFORE_JOIN_REF).success());
                 return commit;
             } catch (RuntimeException e) {
                 throw e;

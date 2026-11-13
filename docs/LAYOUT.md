@@ -111,7 +111,11 @@ It moves this gateway's branch onto the remote's latest commit, keeping every fi
 on the gateway as it is, and commits the differences as one commit ("This
 gateway's config on top of origin/main"). Push and Pull work from then on. It
 is refused when the remote's layout does not match, and needs the policy's
-branch changes.
+branch changes. The commit drops what this gateway does not version from the
+branch too (another gateway's `ignition.conf` or `users.json`, say), never
+replacing it with this gateway's copy; the confirmation lists those files. This
+gateway's earlier commits leave the branch and the History tab, and are kept at
+`refs/git-module/before-join` (`git log refs/git-module/before-join`).
 
 **Fetch** and **Pull** sit beside Remote sync: Fetch updates how far the remote
 is ahead, Pull merges it in (fast-forward or merge), refused with the file list
@@ -125,8 +129,11 @@ New repositories start on the configured remote branch (default `main`). One
 made before 4.2.0 may sit on a lone `master` while the remote's branch is `main`;
 the Versioning page renames it to `main` the first time it shows that repository
 (gateway or project) — same commits, upstream kept — and says so on the Logs tab.
-When the policy turns branch changes off it offers **Rename local master to main**
-instead, and a delivery that follows `master` by name keeps it.
+When the policy turns branch changes off, or the rename failed, it offers **Rename
+local master to main** instead, and a delivery that follows `master` by name keeps it.
+A failed rename says why: most often another git operation holds the branch, or one
+that stopped left a `.lock` file in `.git` (`refs/heads/master.lock`,
+`refs/heads/main.lock` or `HEAD.lock`) to delete before trying again.
 
 ## Designer branch list
 

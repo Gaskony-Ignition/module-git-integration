@@ -140,6 +140,14 @@ async function restart(mode) {
   await login();
 }
 const credId = {};
+// Times compared with the gateway's own timestamps (Logs events, audit rows) come from the
+// gateway's clock: a rig VM's clock can drift minutes from this machine's.
+let skew = 0;
+const gwNow = () => Date.now() + skew;
+function measureSkew() {
+  const t = +dexec('date +%s%3N');
+  if (t) skew = t - Date.now();
+}
 
 // ── phases ─────────────────────────────────────────────────────────────────────────────────────
 async function sep1() {
@@ -356,7 +364,7 @@ async function sep1() {
   await check('delivery blocked by policy answers 403; loosening it logs a warning', async () => {
     const lock = await api('POST', '/policy', { ...OPEN_POLICY, deliveryModes: ['replace'] });
     const r = await api('POST', '/delivery', { project: 'Example_A', delivery: 'sync-pull', branch: 'main' });
-    const t0 = Date.now();
+    const t0 = gwNow();
     await api('POST', '/policy', OPEN_POLICY);
     const w = await until(async () => (await events()).find((e) => e.type === 'policy' && e.outcome === 'warning' && Date.parse(e.timestamp) >= t0 - 5000), 20000);
     return pass(ok(lock) && r.status === 403 && w, `lock ${lock.status}; delivery ${r.status} ${r.text.slice(0, 150)}; warn=${w ? w.message.slice(0, 120) : 'none'}`);
@@ -524,7 +532,7 @@ async function comb() {
     dexec(`cp -r ${DATA}/projects/Example_B ${DATA}/projects/Example_C && sed -i 's/"Example_B"/"Example_C"/' ${DATA}/projects/Example_C/project.json`);
     await scanProjects();
     remoteCommit('dev', 'gateway', 'echo replaced > projects/Example_A/NOTES-replace.md && git add -A && git commit -qm "replace me"');
-    const t0 = Date.now();
+    const t0 = gwNow();
     const d = await api('POST', '/config-delivery', { mode: 'replace', branch: 'main', intervalSeconds: 3600 });
     const s = await api('POST', '/config-sync-now', {});
     const kept = dexec(`test -f ${DATA}/projects/Example_C/project.json && echo yes || echo no`);
@@ -703,7 +711,7 @@ async function auditRows(t0, settle = 2500) {
 }
 // Exactly one row of `action` since t0, with `match` (a regexp) in its target + value.
 async function oneRow(t0, action, fn, match) {
-  const before = Date.now();
+  const before = gwNow();
   const out = await fn();
   const rows = (await auditRows(Math.min(t0, before))).filter((i) => i.action === action);
   const text = rows.map((i) => `${i.actor} ${i.actionTarget} ${i.actionValue}`).join(' | ');
@@ -720,10 +728,10 @@ async function audit() {
   });
   await check('push writes one row (user, branch, commit)', async () => {
     await configChange();
-    return oneRow(Date.now(), 'git push', async () => ok(await api('POST', '/push', {})), /branch=main; commit=[0-9a-f]{40}/);
+    return oneRow(gwNow(), 'git push', async () => ok(await api('POST', '/push', {})), /branch=main; commit=[0-9a-f]{40}/);
   });
   await check('credential added and removed write one row each', async () => {
-    const t0 = Date.now();
+    const t0 = gwNow();
     const c = await api('POST', '/credentials', { type: 'HTTPS', host: 'audit.example.com', username: 'auditor', mode: 'inline', password: 'x' });
     await api('POST', '/credential-remove', { type: 'HTTPS', id: c.json.id });
     const rows = await auditRows(t0);
@@ -733,11 +741,11 @@ async function audit() {
       rows.map((i) => `${i.action}: ${i.actionValue}`).join(' | '));
   });
   await check('policy change writes one row with the settings', async () =>
-    oneRow(Date.now(), 'git policy change', async () => ok(await api('POST', '/policy', OPEN_POLICY)), /push on, .*GitHub-merged only off/));
+    oneRow(gwNow(), 'git policy change', async () => ok(await api('POST', '/policy', OPEN_POLICY)), /push on, .*GitHub-merged only off/));
   await check('branch switch writes one row', async () => {
     remoteCommit('dev', 'example-a', 'git checkout -qb audit-branch && git commit -q --allow-empty -m audit', 'git push -q origin audit-branch');
     cgit('projects/Example_A', `fetch -q ${bare('dev', 'example-a')} +refs/heads/*:refs/remotes/origin/*`);
-    const r = await oneRow(Date.now(), 'git branch switch',
+    const r = await oneRow(gwNow(), 'git branch switch',
       async () => (await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'origin/audit-branch' })).json.ok,
       /^Example_A branch=audit-branch; commit=[0-9a-f]{40}/);
     await api('POST', '/branch-checkout', { project: 'Example_A', branch: 'main' });
@@ -746,13 +754,13 @@ async function audit() {
   await check('delivery installed (Sync — pull) writes one row', async () => {
     await api('POST', '/delivery', { project: 'Example_A', delivery: 'sync-pull', branch: 'main', intervalSeconds: 3600 });
     remoteCommit('dev', 'example-a', `printf "def hello():\\n\\treturn 'audit'\\n" > ${CODE} && git commit -qam audit`);
-    return oneRow(Date.now(), 'git delivery installed', async () => /pulled/.test((await api('POST', '/sync-now', { project: 'Example_A' })).json.result || ''),
+    return oneRow(gwNow(), 'git delivery installed', async () => /pulled/.test((await api('POST', '/sync-now', { project: 'Example_A' })).json.result || ''),
       /^Example_A branch=main; commit=[0-9a-f]{40}; Sync — pull/);
   });
   await check('Pull writes one row when commits come in, none when up to date', async () => {
     await api('POST', '/push', {});
     remoteCommit('dev', 'gateway', 'echo audit > config/regtest-audit-pull.md && git add -A && git commit -qm "audit pull"');
-    const t0 = Date.now();
+    const t0 = gwNow();
     await api('POST', '/config-fetch', {});
     const a = await api('POST', '/config-pull', {});
     const b = await api('POST', '/config-pull', {});
@@ -761,7 +769,7 @@ async function audit() {
       `pull1 ${a.text.slice(0, 80)} pull2 ${b.text.slice(0, 60)} rows=${rows.length}`);
   });
   await check('project added from repository writes one row', async () => {
-    const r = await oneRow(Date.now(), 'git project added from repository', async () =>
+    const r = await oneRow(gwNow(), 'git project added from repository', async () =>
       ok(await api('POST', '/project-add', { name: 'Example_D', url: `${SRV.dev}/example-b.git`, httpsCredentialId: credId.writer })),
     /^Example_D branch=main; commit=[0-9a-f]{40}/);
     await plat('DELETE', '/projects/Example_D');
@@ -770,7 +778,7 @@ async function audit() {
     return r;
   });
   await check('a busy sync loop with nothing to install writes no rows', async () => {
-    const t0 = Date.now();
+    const t0 = gwNow();
     // Each sync-now fetches; with nothing new it installs nothing.
     for (let i = 0; i < 12; i++) await api('POST', '/sync-now', { project: 'Example_A' });
     await configChange(); // an auto-commit
@@ -783,16 +791,16 @@ async function audit() {
   });
   await check('runner release writes one row', async () => {
     await api('POST', '/delivery', { project: 'Example_B', delivery: 'runner-release' });
-    return oneRow(Date.now(), 'git delivery installed', async () => ok(await call('POST', `${GW}/data/git-config/runner-release?project=Example_B&version=9.9.9`,
+    return oneRow(gwNow(), 'git delivery installed', async () => ok(await call('POST', `${GW}/data/git-config/runner-release?project=Example_B&version=9.9.9`,
       makeZip('Example_B', 'Example_B audit release'), { Authorization: 'Bearer ' + E.RUNNER_TOKEN, 'Content-Type': 'application/zip' })), /^Example_B .*Runner — release 9\.9\.9/);
   });
   await check('restore writes one row', async () => {
     const h = (await api('GET', '/history?skip=0&limit=3')).json.commits[1];
-    return oneRow(Date.now(), 'git restore', async () => ok(await api('POST', '/restore', { hash: h.hash })), new RegExp(`commit=${h.hash}`));
+    return oneRow(gwNow(), 'git restore', async () => ok(await api('POST', '/restore', { hash: h.hash })), new RegExp(`commit=${h.hash}`));
   });
   await check('mode override created and removed write one row each', async () => {
     await plat('POST', '/mode', { name: 'Dev', title: 'Dev', description: 'regression suite' });
-    const t0 = Date.now();
+    const t0 = gwNow();
     const c = await api('POST', '/mode-override', { type: 'policy', mode: 'Dev' });
     const r = await api('POST', '/mode-reset', { type: 'policy', mode: 'Dev' });
     const rows = await auditRows(t0);
@@ -803,7 +811,7 @@ async function audit() {
   });
   await check('layout switch writes one row each way', async () => {
     for (const p of ['Example_A', 'Example_B']) { cgit(`projects/${p}`, 'add -A'); cgit(`projects/${p}`, 'commit -q -m "Designer commit" --allow-empty'); }
-    const t0 = Date.now();
+    const t0 = gwNow();
     const a = await api('POST', '/layout', { layout: 'combined', restoreHistory: false });
     const b = await api('POST', '/layout', { layout: 'separate', restoreHistory: true });
     const rows = (await auditRows(t0)).filter((i) => i.action === 'git layout switch');
@@ -811,7 +819,7 @@ async function audit() {
       && rows.some((i) => /to separate/.test(i.actionValue)), `${a.status} ${b.status} ${rows.map((i) => i.actionValue).join(' | ')}`);
   });
   await check('audit set to Off writes the change, then nothing', async () => {
-    const t0 = Date.now();
+    const t0 = gwNow();
     const off = await api('POST', '/audit', { enabled: false, profile: '' });
     await api('POST', '/push', {});
     const rows = await auditRows(t0);
@@ -835,7 +843,7 @@ async function merged() {
     return pass(before === false && ok(r) && after === true, `before=${before} save ${r.status} after=${after}`);
   });
   await check('Sync — pull refuses an unsigned tip, warns once, leaves the project as it was', async () => {
-    const t0 = Date.now();
+    const t0 = gwNow();
     const d = await api('POST', '/delivery', { project: 'Example_A', delivery: 'sync-pull', branch: 'main', intervalSeconds: 3600 });
     const was = fileIn(`projects/Example_A/${CODE}`);
     remoteCommit('dev', 'example-a', `printf "def hello():\\n\\treturn 'unsigned'\\n" > ${CODE} && git commit -qam unsigned`);
@@ -888,7 +896,7 @@ async function merged() {
     return pass(refused(r) && /Not merged through GitHub/.test(r.text) && left === 'no', `${r.status} ${r.text.slice(0, 160)} left=${left}`);
   });
   await check('turning the option off logs the loosening', async () => {
-    const t0 = Date.now();
+    const t0 = gwNow();
     const r = await api('POST', '/policy', OPEN_POLICY);
     const w = await until(async () => (await events()).find((e) => e.type === 'policy' && e.outcome === 'warning'
       && /not merged on GitHub/.test(e.message) && Date.parse(e.timestamp) >= t0 - 5000), 20000);
@@ -1003,7 +1011,7 @@ async function modes() {
     return pass(/Gateway-Mode: Prod/.test(cgit('.', 'log -1 --format=%B')), '');
   });
   await check('Prod: removing the override loosens the policy and logs a warning', async () => {
-    const t0 = Date.now();
+    const t0 = gwNow();
     const r = await api('POST', '/mode-reset', { type: 'policy', mode: 'Prod' });
     const w = await until(async () => (await events()).find((e) => e.type === 'policy' && e.outcome === 'warning' && Date.parse(e.timestamp) >= t0 - 5000), 20000);
     const p = (await api('GET', '/status')).json.policy;
@@ -1013,6 +1021,7 @@ async function modes() {
 
 (async () => {
   await login();
+  measureSkew();
   const want = (E.ONLY || 'sep1,comb,sep2,sep3,audit,merged,modes').split(',');
   if (!want.includes('sep1')) {
     // A re-run against a kept gateway: the credentials sep1 saved are still there.
