@@ -163,7 +163,7 @@ and [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 To build from source, copy `gradle.template.properties` to `gradle.properties`,
 fill in the keystore details, then run `./gradlew build` for the signed
-`build/GitIntegration.modl`. The version lives in `version.properties` only.
+`build/GitIntegration-<version>.modl`. The version lives in `version.properties` only.
 
 ## Licence
 
