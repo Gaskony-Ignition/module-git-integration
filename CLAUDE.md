@@ -16,7 +16,7 @@ restore). Gaskony's fork of AXONE-IO and Operametrix's module.
 rm -rf build/moduleContent && ./gradlew build   # -> build/GitIntegration-<ver>.modl
 ```
 
-Clear `build/moduleContent` first, or the `.modl` ships old jars too. Prettier violations fail webpack — run
+Clear `build/moduleContent` first, or old jars ship too. Prettier violations fail webpack: run
 `node_modules/.bin/prettier --write "src/**/*.{ts,tsx}"` in `web-ui/`.
 
 Tests: `./gradlew test` covers the pure branch, layout, Git ignore, policy and
@@ -25,15 +25,8 @@ origin logic (`gateway/src/test`); the gateway side is `test/regression/run.sh`
 
 ## Architecture
 
-Gradle multi-module, following the Ignition Module SDK pattern:
-
-```text
-common    (scope: DG)   — RPC interface + abstract delegation base
-designer  (scope: D)    — Designer UI: dockable panels, popups, status bar
-gateway   (scope: G)    — all git operations + persistence + config-as-code REST routes
-web-ui    (no scope)    — React gateway page, bundled into the gateway jar
-```
-
+`common` (DG: RPC interface), `designer` (D: panels, popups, status bar), `gateway`
+(G: git operations, persistence, REST routes), `web-ui` (React page in the gateway jar).
 No Vision client scope.
 
 ## Gotchas
@@ -79,9 +72,8 @@ No Vision client scope.
   never raw `Status`, or Pull refuses for ever.
 - **Delivery is opt-in per project, only pulls in, and is only set from the
   Projects drawer** — never add a migration that writes one. Off refuses the
-  runner; `POST /delivery` keeps runner mode and sync record exclusive. Polling,
-  not a webhook: GitHub cannot reach most gateways. See `docs/AUTOMATION.md`.
-- **Drawers render in a portal outside `.gitcfg`**: their body needs the `gitcfg` class.
+  runner; `POST /delivery` keeps runner mode and sync record exclusive. See `docs/AUTOMATION.md`.
+- **Drawers render outside `.gitcfg`**: their body needs the `gitcfg` class.
 - **A release replaces the project folder but carries `.git` and
   `global-props/data.bin` across**, or it destroys the repository and the
   gateway's project properties.
@@ -110,29 +102,24 @@ No Vision client scope.
 - **Every client-supplied name or path goes through `SafePaths`** (project names,
   repo-relative paths, 5 MB reads); in Combined a leading `/` path is accepted only for a
   file in conflict. Remote URLs go through `PolicyGate.checkHost` (`RemoteUrls`).
-- **Image snapshot walks the store tree** (`getImages` lists one level and
-  returns folders as entries with no bytes) **and import merges, never
-  deletes** — the store is gateway-scoped, so clearing it first would make
-  one project's `images/` authoritative for every other project.
+- **Image snapshot walks the store tree** (`getImages` lists one level) **and import
+  merges, never deletes**: the store is gateway-scoped, shared by every project.
 
 ## Key libraries
 
-- Eclipse JGit 7.8.1 — all git operations
-- Apache MINA sshd 2.20.1 — SSH transport
-- Lombok (designer)
+- JGit for all git operations, MINA sshd for SSH, Lombok in the Designer.
 - React 18 + RTK Query + `@inductiveautomation/ignition-web-ui` — the
   `web-ui/` gateway page, bundled via `com.github.node-gradle.node` + webpack.
   React, react-redux and the IA packages are webpack externals (the gateway's copies);
   `@reduxjs/toolkit` is bundled, because the bundled RTK Query 2 needs RTK 2's core and the
   gateway ships RTK 1.9.
-- TypeScript stays on 6.x: typescript-eslint, ts-loader and fork-ts-checker need the compiler
-  API that TypeScript 7 no longer has. ESLint is a flat config (`web-ui/eslint.config.mjs`); its
-  React version is set, not detected, as eslint-plugin-react's detection breaks on ESLint 10.
+- TypeScript stays on 6.x (typescript-eslint, ts-loader and fork-ts-checker need TypeScript 6's
+  compiler API). ESLint's React version is set, not detected: detection breaks on ESLint 10.
 
 ## Module packaging
 
 Module ID `com.operametrix.ignition.git`; version from `version.properties`
-plus a build timestamp. `requiredIgnitionVersion` is 8.3.0, apart from the SDK version. `:web-ui`'s bundle rides in the gateway jar via
+plus a build timestamp; requires Ignition 8.3.0. `:web-ui`'s bundle rides in the gateway jar via
 `modlImplementation(project(":web-ui"))`. The io.ia.sdk.modl plugin (0.5.0) bundles only
 `modlImplementation` dependencies: a plain `implementation` one silently drops out of the `.modl`.
 Signing comes from `gradle.properties` (gitignored; template in
