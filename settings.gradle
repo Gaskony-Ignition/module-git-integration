@@ -12,7 +12,7 @@ rootProject.name = "ignition-git-module"
 dependencyResolutionManagement {
     repositories {
         maven {
-            url "https://nexus.inductiveautomation.com/repository/public"
+            url = "https://nexus.inductiveautomation.com/repository/public"
         }
         mavenCentral()
 

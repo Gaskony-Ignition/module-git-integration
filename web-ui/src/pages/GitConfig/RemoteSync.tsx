@@ -93,7 +93,7 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
                 rename({ repo: "config" })
                   .unwrap()
                   .then((r) =>
-                    toasts.notifySuccess(`Local master is now ${r.branch}`)
+                    toasts.notifySuccess(`Local master is now ${r.branch}`),
                   )
                   .catch(errorToast(toasts, "Could not rename the branch"))
               }
@@ -129,8 +129,8 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
                   .unwrap()
                   .then((r) =>
                     toasts.notifySuccess(
-                      r.changed ? `Pulled: ${r.message}` : "Already up to date"
-                    )
+                      r.changed ? `Pulled: ${r.message}` : "Already up to date",
+                    ),
                   )
                   .catch(errorToast(toasts, "Pull failed"))
               }
@@ -138,8 +138,8 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
               {pulling
                 ? "Pulling…"
                 : (remote?.behind ?? 0) > 0
-                ? `Pull (${remote?.behind})`
-                : "Pull"}
+                  ? `Pull (${remote?.behind})`
+                  : "Pull"}
             </Button>
           )}
           <Button
@@ -150,7 +150,7 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
               push()
                 .unwrap()
                 .then((r) =>
-                  toasts.notifySuccess(`Pushed ${r.from} to ${r.to}`)
+                  toasts.notifySuccess(`Pushed ${r.from} to ${r.to}`),
                 )
                 .catch(errorToast(toasts, "Remote sync failed"))
             }
@@ -158,8 +158,8 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
             {pushing
               ? "Syncing…"
               : remote?.pushFrom && remote.pushTo
-              ? `Remote sync (${remote.pushFrom} → ${remote.pushTo})`
-              : "Remote sync"}
+                ? `Remote sync (${remote.pushFrom} → ${remote.pushTo})`
+                : "Remote sync"}
           </Button>
         </>
       ) : null}
@@ -242,7 +242,7 @@ const RemoteSync = ({ initialized }: { initialized: boolean }) => {
           join()
             .unwrap()
             .then((r) =>
-              toasts.notifySuccess(`Joined: ${r.commit.slice(0, 7)} on top`)
+              toasts.notifySuccess(`Joined: ${r.commit.slice(0, 7)} on top`),
             )
             .catch(errorToast(toasts, "Could not join the remote history"));
         }}

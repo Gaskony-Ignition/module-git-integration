@@ -60,7 +60,7 @@ export const OverrideTag = ({
  */
 export const useEditing = (
   open: boolean,
-  from?: string | null
+  from?: string | null,
 ): [string, (v: string) => void] => {
   const [editing, setEditing] = React.useState("core");
   React.useEffect(() => {
@@ -206,7 +206,7 @@ export const DefinitionMenu = (props: DefsProps) => {
                       disabled: !free.length,
                       onClick: () => {
                         setInto(
-                          free.find((c) => c !== "core") ?? free[0] ?? ""
+                          free.find((c) => c !== "core") ?? free[0] ?? "",
                         );
                         setAsking("move");
                       },

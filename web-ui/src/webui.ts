@@ -40,6 +40,6 @@ export const useToastNotifications = ui.useToastNotifications as () => {
   notifySuccess: (
     message: any,
     titleOnly?: boolean,
-    className?: string
+    className?: string,
   ) => void;
 };

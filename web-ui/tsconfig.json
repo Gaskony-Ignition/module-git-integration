@@ -2,7 +2,6 @@
     "compilerOptions": {
         "allowJs": false,
         "allowSyntheticDefaultImports": true,
-        "baseUrl": "./lib",
         "declaration": true,
         "declarationMap": true,
         "skipLibCheck": true,
@@ -23,7 +22,7 @@
             "es2018"
         ],
         "module": "esnext",
-        "moduleResolution": "node",
+        "moduleResolution": "bundler",
         "noEmit": false,
         "noEmitOnError": true,
         "noImplicitAny": false,
@@ -31,20 +30,13 @@
         "noImplicitThis": true,
         "noUnusedLocals": true,
         "outDir": "build/dist/",
+        "rootDir": "./src",
         "preserveConstEnums": true,
         "pretty": true,
         "sourceMap": true,
         "strictNullChecks": true,
         "target": "es6",
-        "traceResolution": false,
-        "paths": {
-            "*": [
-                "*",
-                "node_modules",
-                "../node_modules/",
-                "../../../node_modules"
-            ]
-        }
+        "traceResolution": false
     },
     "include": [
         "./src/**/*.ts",

@@ -3,22 +3,30 @@ import com.github.gradle.node.npm.task.NpmTask
 
 plugins {
     java
-    id("com.github.node-gradle.node") version("7.0.2")
+    id("com.github.node-gradle.node") version("7.1.0")
+}
+
+// No Java sources: the jar only carries the bundle. The toolchain matches the other subprojects so
+// :gateway (Java 17) can depend on it whatever JVM runs Gradle.
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(17))
+    }
 }
 
 // Path to the generated-resources folder; webpack writes the UMD bundle into mounted/ below this.
-val projectOutput: String by extra("$buildDir/generated-resources/")
+val projectOutput = layout.buildDirectory.dir("generated-resources")
 
 node {
-    version.set("24.22.2")
-    yarnVersion.set("1.22.18")
-    npmVersion.set("8.5.5")
+    version.set("24.22.3")
+    yarnVersion.set("1.22.22")
+    npmVersion.set("12.2.3")
     download.set(true)
     nodeProjectDir.set(file(project.projectDir))
 }
 
 // Install npm dependencies via yarn.
-val yarnPackages by tasks.registering(YarnTask::class) {
+val yarnPackages = tasks.register<YarnTask>("yarnPackages") {
     description = "Runs 'yarn install' at web-ui/ to install npm dependencies."
     args.set(listOf("install", "--verbose"))
 
@@ -33,7 +41,7 @@ val yarnPackages by tasks.registering(YarnTask::class) {
 }
 
 // Build the React bundle with webpack.
-val webpack by tasks.registering(NpmTask::class) {
+val webpack = tasks.register<NpmTask>("webpack") {
     group = "Ignition Module"
     description = "Runs 'npm run build-dev' (webpack) to build the Config Versioning page bundle."
     args.set(listOf("run", "build-dev"))
@@ -44,7 +52,7 @@ val webpack by tasks.registering(NpmTask::class) {
         exclude("**/node_modules/**", "**/dist/**", "**/.awcache/**", "**/yarn-error.log")
     }.toList())
 
-    outputs.files(fileTree(projectOutput))
+    outputs.dir(projectOutput)
 }
 
 tasks {
@@ -53,12 +61,9 @@ tasks {
     }
 }
 
-val deepClean by tasks.registering {
-    doLast {
-        delete(file(".gradle"))
-        delete(file("node_modules"))
-    }
-    dependsOn(project.tasks.named("clean"))
+tasks.register<Delete>("deepClean") {
+    delete(".gradle", "node_modules")
+    dependsOn(tasks.named("clean"))
 }
 
 // The gateway jar must include the built bundle, so block its processResources on webpack.

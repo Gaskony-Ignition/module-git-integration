@@ -80,7 +80,7 @@ const Projects = () => {
   const [initialKeepProps, setInitialKeepProps] = React.useState(true);
   // The drawer's two halves are tabs, so neither scrolls inside the drawer at 1366x640.
   const [drawerTab, setDrawerTab] = React.useState<"repository" | "delivery">(
-    "repository"
+    "repository",
   );
 
   // Combined: one gateway repository, so the remote, branch and pulls are the gateway's. A
@@ -97,7 +97,7 @@ const Projects = () => {
       : undefined;
   const { data: def } = useGetDefinitionQuery(
     { type: "sync", project: target?.name ?? "", collection: editing },
-    { skip: !open || !perMode || !syncRef }
+    { skip: !open || !perMode || !syncRef },
   );
   React.useEffect(() => {
     if (!open || !def || def.collection !== editing) return;
@@ -318,11 +318,11 @@ const Projects = () => {
                             .unwrap()
                             .then((r) =>
                               toasts.notifySuccess(
-                                `${p.name}: local master is now ${r.branch}`
-                              )
+                                `${p.name}: local master is now ${r.branch}`,
+                              ),
                             )
                             .catch(
-                              errorToast(toasts, "Could not rename the branch")
+                              errorToast(toasts, "Could not rename the branch"),
                             )
                         }
                       >
@@ -334,8 +334,8 @@ const Projects = () => {
                     {p.remoteUrl
                       ? p.remoteUrl
                       : p.versioned
-                      ? "Local only"
-                      : "—"}
+                        ? "Local only"
+                        : "—"}
                   </td>
                   <td>
                     {deliveryCell(p)}{" "}
@@ -383,7 +383,7 @@ const Projects = () => {
                             .then((r) =>
                               r.outcome === "ok"
                                 ? toasts.notifySuccess(`${p.name}: ${r.result}`)
-                                : toasts.notifyError(`${p.name}: ${r.result}`)
+                                : toasts.notifyError(`${p.name}: ${r.result}`),
                             )
                             .catch(errorToast(toasts, "Sync failed"))
                         }
@@ -513,14 +513,14 @@ const Projects = () => {
                               .unwrap()
                               .then(() =>
                                 toasts.notifySuccess(
-                                  `Wrote ${target.imagePrefix} into ${target.name}`
-                                )
+                                  `Wrote ${target.imagePrefix} into ${target.name}`,
+                                ),
                               )
                               .catch(
                                 errorToast(
                                   toasts,
-                                  "Could not snapshot the images"
-                                )
+                                  "Could not snapshot the images",
+                                ),
                               )
                           }
                         >
@@ -551,8 +551,8 @@ const Projects = () => {
                         label: off
                           ? `${DELIVERY_LABEL[d]} (not allowed by policy)`
                           : d === "sync-replace"
-                          ? `${DELIVERY_LABEL[d]} (overwrites local edits)`
-                          : DELIVERY_LABEL[d],
+                            ? `${DELIVERY_LABEL[d]} (overwrites local edits)`
+                            : DELIVERY_LABEL[d],
                         value: d,
                         disabled:
                           (!hasRemote && needsRemote(d) && d !== delivery) ||

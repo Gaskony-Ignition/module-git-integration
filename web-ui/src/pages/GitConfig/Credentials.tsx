@@ -68,7 +68,7 @@ const Credentials = () => {
     : undefined;
   const { data: def } = useGetDefinitionQuery(
     { ...(credRef ?? { type: "policy" }), collection },
-    { skip: !open || !credRef || !modes.length }
+    { skip: !open || !credRef || !modes.length },
   );
   const credDefs = {
     record: credRef,
@@ -161,7 +161,7 @@ const Credentials = () => {
     await add(
       editId !== null
         ? { ...body, id: editId, ...scope }
-        : { ...body, ...scope }
+        : { ...body, ...scope },
     ).unwrap();
     // Cleared the moment it is stored, so the closed drawer holds no copy of the secret.
     reset();
@@ -185,10 +185,12 @@ const Credentials = () => {
   React.useEffect(
     () =>
       setPending(
-        (data?.credentials ?? []).some((c) => c.check === null && !elsewhere(c))
+        (data?.credentials ?? []).some(
+          (c) => c.check === null && !elsewhere(c),
+        ),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, activeMode]
+    [data, activeMode],
   );
 
   return (
@@ -402,7 +404,7 @@ const Credentials = () => {
                         check({ type: c.type, id: c.id })
                           .unwrap()
                           .then(() =>
-                            toasts.notifySuccess(`Checked ${c.label}`)
+                            toasts.notifySuccess(`Checked ${c.label}`),
                           )
                           .catch(errorToast(toasts, "Could not check it"))
                           .finally(() => setCheckingId(null));
@@ -468,7 +470,7 @@ function expiry(c: CredentialOption) {
     );
   if (k.expires === "never") return "No expiry";
   const days = Math.ceil(
-    (new Date(`${k.expires}T00:00:00`).getTime() - Date.now()) / DAY
+    (new Date(`${k.expires}T00:00:00`).getTime() - Date.now()) / DAY,
   );
   const text = `${ddmmyyyy(k.expires)} (${
     days <= 0 ? "expired" : `${days} ${days === 1 ? "day" : "days"}`
@@ -524,10 +526,10 @@ function reach(c: CredentialOption) {
       {r.push
         ? "read, push"
         : r.read
-        ? "read"
-        : r.error
-        ? r.error
-        : "no access"}
+          ? "read"
+          : r.error
+            ? r.error
+            : "no access"}
     </span>
   ));
 }
@@ -546,7 +548,7 @@ export function Snippet({ text }: { text: string }) {
               ?.writeText(text)
               .then(() => toasts.notifySuccess("Copied"))
               .catch(() =>
-                toasts.notifyError("Could not copy — select the text instead")
+                toasts.notifyError("Could not copy — select the text instead"),
               );
           }}
         >

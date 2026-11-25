@@ -61,7 +61,7 @@ const HistoryList = () => {
     {
       pollingInterval: 15000,
       selectFromResult: ({ data: d }) => ({ data: d }),
-    }
+    },
   );
   const [restore, { isLoading: restoring }] = useRestoreMutation();
   const toasts = useToastNotifications();
@@ -92,7 +92,7 @@ const HistoryList = () => {
       limit: Math.max(commits.length, 1),
       offset: 0,
     }),
-    [commits]
+    [commits],
   );
 
   // Stable identities so re-renders (restore dialog, real data changes) don't reset the grid.
@@ -104,12 +104,12 @@ const HistoryList = () => {
           setConfirm({ hash: rowData.hash, shortHash: rowData.shortHash }),
       },
     ],
-    []
+    [],
   );
 
   const rowExpand = useCallback(
     (props: any) => <CommitResources hash={resolveHash(props)} />,
-    []
+    [],
   );
 
   const doRestore = () => {

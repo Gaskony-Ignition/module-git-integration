@@ -42,8 +42,7 @@ const schema = yup.object({
 const payload = (c: { [k: string]: unknown }) => ({
   uri: String(c.uri ?? "").trim(),
   mode: (c.mode === "reference" ? "reference" : "inline") as
-    | "inline"
-    | "reference",
+    "inline" | "reference",
   key: String(c.key ?? ""),
   password: String(c.password ?? ""),
   username: String(c.username ?? "").trim(),
@@ -110,7 +109,7 @@ const RemoteForm = () => {
     setFeedback(null);
     try {
       const res: any = await testRemote(
-        payload(getValues("config") ?? {})
+        payload(getValues("config") ?? {}),
       ).unwrap();
       setFeedback({
         ok: true,

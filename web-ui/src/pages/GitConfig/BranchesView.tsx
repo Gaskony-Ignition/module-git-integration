@@ -145,7 +145,7 @@ const BranchesView = ({
     byCommit.set(r.sha, [...(byCommit.get(r.sha) || []), r]);
   });
   const localNames = new Set(
-    g.refs.filter((r) => r.type === "local").map((r) => r.name)
+    g.refs.filter((r) => r.type === "local").map((r) => r.name),
   );
   const width = Math.max(1, g.lanes) * LANE + 6;
   const height = g.commits.length * ROW;
@@ -359,8 +359,8 @@ const BranchesView = ({
                         {current
                           ? "Checked out"
                           : switchRefused
-                          ? "Switch (not allowed by policy)"
-                          : "Switch to this branch"}
+                            ? "Switch (not allowed by policy)"
+                            : "Switch to this branch"}
                       </Button>
                     </td>
                   </tr>
@@ -379,8 +379,8 @@ const BranchesView = ({
           confirmationText: combined
             ? "Switches the whole gateway: config and every project. Open Designers pick it up on their next refresh."
             : config
-            ? "Switches the gateway config."
-            : `Switches ${project} for everyone editing it on this gateway. Open Designers pick it up on their next refresh.`,
+              ? "Switches the gateway config."
+              : `Switches ${project} for everyone editing it on this gateway. Open Designers pick it up on their next refresh.`,
           primaryText: "Switch",
           secondaryText: "Cancel",
           warningGeneral: true,

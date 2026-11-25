@@ -80,8 +80,8 @@ const Logs = () => {
                           e.outcome === "failure"
                             ? "gitcfg-err"
                             : e.outcome === "warning"
-                            ? "gitcfg-dirty"
-                            : "gitcfg-ok"
+                              ? "gitcfg-dirty"
+                              : "gitcfg-ok"
                         }
                       >
                         {e.type}

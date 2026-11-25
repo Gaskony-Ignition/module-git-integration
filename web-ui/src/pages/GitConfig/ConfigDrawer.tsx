@@ -84,7 +84,7 @@ const ConfigDrawer = ({
     }
     setDeliveryMode(asMode(remote.delivery?.mode || "off"));
     setDeliveryBranch(
-      remote.delivery?.branch || remote.branch || DEFAULT_BRANCH
+      remote.delivery?.branch || remote.branch || DEFAULT_BRANCH,
     );
     setDeliveryEvery(String(remote.delivery?.intervalSeconds || 300));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -111,10 +111,10 @@ const ConfigDrawer = ({
           combined ? "" : "config "
         }match the branch exactly. Local commits and uncommitted changes are discarded, and a branch moved backwards is followed.`
       : deliveryMode === "pull"
-      ? "Pull merges the branch in, and refuses while anything on the gateway is uncommitted."
-      : deliveryMode === "runner"
-      ? "A runner workflow calls the gateway to pull the branch; no timer."
-      : "Off: nothing reaches this gateway from the remote by itself.";
+        ? "Pull merges the branch in, and refuses while anything on the gateway is uncommitted."
+        : deliveryMode === "runner"
+          ? "A runner workflow calls the gateway to pull the branch; no timer."
+          : "Off: nothing reaches this gateway from the remote by itself.";
 
   const drawerBody = (
     <div className="gitcfg gitcfg-form">
@@ -175,7 +175,8 @@ const ConfigDrawer = ({
                 inputProps={{ "aria-label": "How changes reach this gateway" }}
                 value={deliveryMode}
                 values={DELIVERY_OPTIONS.filter(
-                  (o) => combined || !o.combinedOnly || o.value === deliveryMode
+                  (o) =>
+                    combined || !o.combinedOnly || o.value === deliveryMode,
                 ).map((o) => {
                   // Refused by the Git policy: listed, disabled, and saying why.
                   const off =
@@ -186,8 +187,8 @@ const ConfigDrawer = ({
                     label: off
                       ? `${o.label} (not allowed by policy)`
                       : o.value === "replace"
-                      ? `${o.label} (overwrites local edits)`
-                      : o.label,
+                        ? `${o.label} (overwrites local edits)`
+                        : o.label,
                     value: o.value,
                     disabled: (o.combinedOnly && !combined) || !!off,
                   };
@@ -239,7 +240,7 @@ const ConfigDrawer = ({
                         .then((r) =>
                           r.outcome === "ok"
                             ? toasts.notifySuccess(`Config: ${r.result}`)
-                            : toasts.notifyError(`Config: ${r.result}`)
+                            : toasts.notifyError(`Config: ${r.result}`),
                         )
                         .catch(errorToast(toasts, "Sync failed"))
                     }
@@ -292,8 +293,8 @@ const ConfigDrawer = ({
               {switching
                 ? "Switching…"
                 : combined
-                ? "Switch to Separate…"
-                : "Switch to Combined…"}
+                  ? "Switch to Separate…"
+                  : "Switch to Combined…"}
             </Button>
           </div>
         </>
@@ -380,7 +381,9 @@ const ConfigDrawer = ({
                 r.layout === "combined"
                   ? `Combined ${r.projects} project(s) into the gateway repository`
                   : `Separated ${r.projects} project(s)` +
-                      (r.restored ? `, ${r.restored} with earlier history` : "")
+                      (r.restored
+                        ? `, ${r.restored} with earlier history`
+                        : ""),
               );
               if (r.warning) toasts.notifyError(r.warning);
             })

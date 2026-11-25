@@ -241,11 +241,7 @@ export interface ProjectStatus {
   credentialId?: number;
 }
 export type Delivery =
-  | "off"
-  | "runner-release"
-  | "runner-repo"
-  | "sync-pull"
-  | "sync-replace";
+  "off" | "runner-release" | "runner-repo" | "sync-pull" | "sync-replace";
 export interface DeliveryReq {
   project: string;
   delivery: Delivery;
@@ -417,7 +413,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: ({ hash, path }) =>
         hash
           ? `${BASE}/file-diff?hash=${encodeURIComponent(
-              hash
+              hash,
             )}&path=${encodeURIComponent(path)}`
           : `${BASE}/file-diff?path=${encodeURIComponent(path)}`,
     }),
@@ -753,7 +749,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
       {
         query: (body) => ({ url: `${BASE}/audit`, method: "POST", body }),
         invalidatesTags: ["audit"],
-      }
+      },
     ),
     savePolicy: builder.mutation<unknown, PolicyFields & SaveTo>({
       query: ({ saveTo, ...body }) => ({
@@ -806,7 +802,7 @@ export const gitConfigApi = baseApi.injectEndpoints({
     >({
       query: ({ type, name, collection }) =>
         `/data/api/v1/resources/find/${type}/${encodeURIComponent(
-          name
+          name,
         )}?collection=${encodeURIComponent(collection)}`,
     }),
     copyResource: builder.mutation<
@@ -822,10 +818,10 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: (a) => ({
         url:
           `/data/api/v1/resources/copy?resourceType=${encodeURIComponent(
-            a.type
+            a.type,
           )}&signature=${a.signature}&fromName=${encodeURIComponent(a.name)}` +
           `&fromCollection=${encodeURIComponent(
-            a.from
+            a.from,
           )}&toCollection=${encodeURIComponent(a.to)}`,
         method: "POST",
       }),
@@ -844,10 +840,10 @@ export const gitConfigApi = baseApi.injectEndpoints({
       query: (a) => ({
         url:
           `/data/api/v1/resources/move?resourceType=${encodeURIComponent(
-            a.type
+            a.type,
           )}&signature=${a.signature}&fromName=${encodeURIComponent(a.name)}` +
           `&fromCollection=${encodeURIComponent(
-            a.from
+            a.from,
           )}&toCollection=${encodeURIComponent(a.to)}`,
         method: "POST",
       }),

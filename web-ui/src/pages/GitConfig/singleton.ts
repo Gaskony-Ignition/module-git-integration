@@ -16,7 +16,7 @@ type Record = "policy" | "remote" | "runner";
  */
 export const useSingletonSave = (
   type: Record,
-  send: (config: { [k: string]: unknown }, saveTo: string) => Promise<unknown>
+  send: (config: { [k: string]: unknown }, saveTo: string) => Promise<unknown>,
 ) => {
   const toasts = useToastNotifications();
   const dispatch = useDispatch();
@@ -29,7 +29,7 @@ export const useSingletonSave = (
         "runner",
         "projects",
         "definition",
-      ])
+      ]),
     );
   const after =
     (action: "create" | "move" | "remove") =>

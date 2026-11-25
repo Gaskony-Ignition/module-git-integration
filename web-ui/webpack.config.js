@@ -18,7 +18,10 @@ module.exports = (webpackConfigEnv, argv) => {
     "react-dom",
     "react-router-dom",
     "react-redux",
-    "@reduxjs/toolkit",
+    // @reduxjs/toolkit is bundled, not taken from the gateway: the page's RTK Query (always
+    // bundled, as "@reduxjs/toolkit/query/react" is not an external) must run on the RTK core it
+    // was built for. RTK Query 2 imports formatProdErrorMessage, which the gateway's RTK 1.9 lacks.
+    // The page keeps its own store, so nothing shares an RTK instance with the gateway.
     "@inductiveautomation/ignition-web-ui",
     "@inductiveautomation/ignition-icons",
     // The platform's resource pages (Resource Definitions panel); see src/gatewayLib.ts.

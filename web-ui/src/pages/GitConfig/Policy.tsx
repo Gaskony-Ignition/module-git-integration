@@ -177,7 +177,7 @@ const PolicyForm = () => {
               <p className="gitcfg-hint">{HELP.deliveries}</p>
             ) : null}
             {DELIVERIES.map(([d, t]) =>
-              check("deliveries", t, `delivery_${d}`)
+              check("deliveries", t, `delivery_${d}`),
             )}
             {check("githubMergedOnly", FLAGS[6][1])}
             {text("githubHosts", "GitHub hosts", "github.com")}
@@ -188,7 +188,7 @@ const PolicyForm = () => {
             {text(
               "allowedRemoteHosts",
               "Allowed remote hosts",
-              "github.com, *.example.com"
+              "github.com, *.example.com",
             )}
             {check("allowInsecureRemotes", FLAGS[5][1])}
           </Card>

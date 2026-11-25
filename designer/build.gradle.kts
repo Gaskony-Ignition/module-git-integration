@@ -18,6 +18,6 @@ dependencies {
     compileOnly("com.inductiveautomation.ignitionsdk:designer-api:${rootProject.extra["sdk_version"]}")
     compileOnly("com.inductiveautomation.ignitionsdk:vision-designer-api:${rootProject.extra["sdk_version"]}")
 
-    compileOnly("org.projectlombok:lombok:1.18.42")
-    annotationProcessor("org.projectlombok:lombok:1.18.42")
+    compileOnly("org.projectlombok:lombok:1.18.48")
+    annotationProcessor("org.projectlombok:lombok:1.18.48")
 }

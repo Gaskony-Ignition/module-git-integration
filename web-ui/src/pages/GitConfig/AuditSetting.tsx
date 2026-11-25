@@ -25,10 +25,10 @@ const AuditSetting = () => {
     v === OFF
       ? "Off"
       : v === GATEWAY
-      ? data.gatewayHasProfile
-        ? "The gateway's audit profile"
-        : "The gateway's audit profile (none set, so off)"
-      : v;
+        ? data.gatewayHasProfile
+          ? "The gateway's audit profile"
+          : "The gateway's audit profile (none set, so off)"
+        : v;
 
   // A row of the Policy table, though not part of the policy: it is this gateway's own setting.
   return (

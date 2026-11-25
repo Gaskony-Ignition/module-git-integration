@@ -3,6 +3,30 @@
 Gaskony builds of the OperaMetrix Git module. Versions up to 2.1.0 are
 upstream's; everything below is this fork.
 
+## [4.5.5] - 2026-11-25
+
+### Changed
+- Dependencies updated to the latest stable releases. No change to what the module does.
+- Build: Gradle wrapper 7.6 → 9.9.2, io.ia.sdk.modl plugin 0.4.1 → 0.5.0, node-gradle plugin
+  7.0.2 → 7.1.0; the web page builds with Node 24.22.3, npm 12.2.3 and Yarn 1.22.22. The
+  `.modl` bundles the same jars as 4.5.4.
+- Java: Lombok 1.18.42 → 1.18.48 and, for the tests only, slf4j-simple 2.0.17 → 2.0.20. JGit
+  7.8.1, sshd 2.20.1, commons-codec 1.23.0 and SLF4J 2.0.20 were already the latest. JUnit stays
+  on 5.14.4 (launcher 1.14.4), the latest 5.x, under the modules' JUnit 5 policy, and
+  jython-ia (compile only) stays on 2.7.3.5, the version Ignition 8.3 declares.
+- Gateway page: Redux Toolkit 1.9.7 → 2.15.0 and react-redux 8.1.3 → 9.3.1. Redux Toolkit is
+  now bundled with the page instead of taken from the gateway, so the page's RTK Query runs on
+  the core it was built for.
+- Gateway page tooling: Babel 7 → 8, ESLint 8 → 10 with a flat config, @typescript-eslint 5 →
+  typescript-eslint 8.74, TypeScript 4.9 → 6.0.3, Prettier 2 → 3 (the sources are reformatted
+  to its defaults), webpack 5.113, babel-loader 10, css-loader 7, style-loader 4, sass 1.108,
+  sass-loader 17, eslint-webpack-plugin 6, fork-ts-checker-webpack-plugin 9.2, rimraf 6,
+  @types/react 18.3.32 and @types/react-dom 18.3.7. React stays on 18.3.1 and TypeScript on 6,
+  as typescript-eslint, ts-loader and fork-ts-checker cannot use TypeScript 7.
+- `yarn audit` is clear: react-router-dom is resolved to 7.18.7 (it comes only with the
+  gateway's ignition-web-ui, is never bundled, and 6.x has two open advisories) and
+  fork-ts-checker's minimatch to 11.0.9.
+
 ## [4.5.4] - 2026-11-13
 
 ### Fixed

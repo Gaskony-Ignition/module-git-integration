@@ -121,12 +121,19 @@ No Vision client scope.
 - Apache MINA sshd 2.20.1 — SSH transport
 - Lombok (designer)
 - React 18 + RTK Query + `@inductiveautomation/ignition-web-ui` — the
-  `web-ui/` gateway page, bundled via `com.github.node-gradle.node` + webpack
+  `web-ui/` gateway page, bundled via `com.github.node-gradle.node` + webpack.
+  React, react-redux and the IA packages are webpack externals (the gateway's copies);
+  `@reduxjs/toolkit` is bundled, because the bundled RTK Query 2 needs RTK 2's core and the
+  gateway ships RTK 1.9.
+- TypeScript stays on 6.x: typescript-eslint, ts-loader and fork-ts-checker need the compiler
+  API that TypeScript 7 no longer has. ESLint is a flat config (`web-ui/eslint.config.mjs`); its
+  React version is set, not detected, as eslint-plugin-react's detection breaks on ESLint 10.
 
 ## Module packaging
 
 Module ID `com.operametrix.ignition.git`; version from `version.properties`
 plus a build timestamp. `requiredIgnitionVersion` is 8.3.0, apart from the SDK version. `:web-ui`'s bundle rides in the gateway jar via
-`modlImplementation(project(":web-ui"))`.
+`modlImplementation(project(":web-ui"))`. The io.ia.sdk.modl plugin (0.5.0) bundles only
+`modlImplementation` dependencies: a plain `implementation` one silently drops out of the `.modl`.
 Signing comes from `gradle.properties` (gitignored; template in
 `gradle.template.properties`).

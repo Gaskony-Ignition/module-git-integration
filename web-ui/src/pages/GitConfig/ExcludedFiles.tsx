@@ -113,26 +113,26 @@ const Row = ({ entry, depth, flat }: RowProps) => {
   const reason = locked
     ? "excluded with its parent"
     : entry.excluded && !entry.ownRule && entry.rule
-    ? `excluded by ${entry.rule}`
-    : entry.excluded
-    ? "excluded here"
-    : entry.directory && entry.childState === "EXCLUDED"
-    ? "everything inside is excluded"
-    : null;
+      ? `excluded by ${entry.rule}`
+      : entry.excluded
+        ? "excluded here"
+        : entry.directory && entry.childState === "EXCLUDED"
+          ? "everything inside is excluded"
+          : null;
 
   const hint = locked
     ? `Excluded with its parent folder (${entry.rule || "inherited rule"})`
     : entry.excluded && !entry.ownRule
-    ? `Excluded by ${entry.rule}`
-    : entry.excluded
-    ? "Excluded"
-    : entry.directory && entry.childState === "EXCLUDED"
-    ? "Everything inside is excluded"
-    : entry.directory && entry.childState === "UNKNOWN"
-    ? "Too large to summarise — open it to see"
-    : entry.tracked
-    ? "Versioned"
-    : "Not yet versioned";
+      ? `Excluded by ${entry.rule}`
+      : entry.excluded
+        ? "Excluded"
+        : entry.directory && entry.childState === "EXCLUDED"
+          ? "Everything inside is excluded"
+          : entry.directory && entry.childState === "UNKNOWN"
+            ? "Too large to summarise — open it to see"
+            : entry.tracked
+              ? "Versioned"
+              : "Not yet versioned";
 
   const toggleOpen = () => entry.directory && setFolder(entry.path, !isOpen);
 
@@ -208,7 +208,7 @@ const Children = ({ path, depth }: { path: string; depth: number }) => {
   React.useEffect(() => {
     if (expandGen === 0 || !data || depth >= EXPAND_DEPTH) return;
     openMany(
-      data.entries.filter((e) => e.directory && !e.excluded).map((e) => e.path)
+      data.entries.filter((e) => e.directory && !e.excluded).map((e) => e.path),
     );
   }, [expandGen, data, depth, openMany]);
 
@@ -442,7 +442,7 @@ const ExcludedFiles = () => {
   const exclude: string[] = [];
   const include: string[] = [];
   pending.forEach((versioned, path) =>
-    (versioned ? include : exclude).push(path)
+    (versioned ? include : exclude).push(path),
   );
   const dirty = source
     ? draft !== null && draft !== (ignore ? ignore.text : "")
@@ -461,7 +461,7 @@ const ExcludedFiles = () => {
             ? `Exclusions saved. ${n} file${
                 n === 1 ? "" : "s"
               } removed from version control.`
-            : "Exclusions saved."
+            : "Exclusions saved.",
         );
       })
       .catch(errorToast(toasts, "Could not save exclusions"));

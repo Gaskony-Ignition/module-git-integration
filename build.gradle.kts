@@ -2,11 +2,12 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 plugins {
-    id("io.ia.sdk.modl") version("0.4.1")
+    id("io.ia.sdk.modl") version("0.5.0")
 }
 
 // SDK jars to compile against (latest stable 8.3.x on IA Nexus).
-val sdk_version by extra("8.3.6")
+val sdk_version = "8.3.6"
+extra["sdk_version"] = sdk_version
 
 // Minimum gateway the module installs on. Decoupled from sdk_version: the migration
 // only uses APIs present since 8.3.0, so any 8.3.x gateway can load this module.

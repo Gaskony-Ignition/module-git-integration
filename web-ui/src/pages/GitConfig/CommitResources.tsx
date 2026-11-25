@@ -27,10 +27,10 @@ const CommitResources = ({ hash }: { hash: string }) => {
     () =>
       data
         ? groupByResource(
-            data.files.map((f) => ({ path: f.path, type: f.changeType }))
+            data.files.map((f) => ({ path: f.path, type: f.changeType })),
           )
         : [],
-    [data]
+    [data],
   );
 
   if (isFetching) {
